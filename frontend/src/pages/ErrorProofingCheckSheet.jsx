@@ -1,0 +1,609 @@
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate} from 'react-router-dom';
+import { useLineSet } from "../context/LineSetContext.jsx"
+
+const INITIAL_ROWS = 1;
+
+const initialFormData = {
+  formCode: "QF/07/MPD-09",
+  revision: "04",
+  revisionDate: "31.01.2025",
+  title: "ERROR PROOFING CHECK SHEET",
+  company: "SAKTHI AUTO",
+  header: {
+    line: "",
+    partName: "",
+    partNo: "",
+    date: ""
+  },
+  signatures: {
+    roles: ["Operator", "Shift Incharge"]
+  },
+  notes: [
+    "If the Error Proof verification fails, follow the reaction plan for error proof failure as per WI/07/MPD-271 during checking.",
+    "Inform the concerned department, correct the failure, and then check the first part.",
+    "Error proof verification should be conducted and recorded during setup changes, major breakdowns, and any fixture issues in the respective machines/fixtures."
+  ]
+};
+
+const emptyRow = () => ({
+  machineNo: "",
+  errorProofNo: "",
+  errorProofName: "",
+  value: ""
+});
+
+export default function ErrorProofingCheckSheet() {
+  const { shopId } = useParams();
+  const navigate = useNavigate();
+  const { lineSet, setLineSet} = useLineSet();
+  const [headerInfo, setHeaderInfo] = useState({
+    lineCode: "",
+    partName: "",
+    partNo: "",
+    machineNo: "",
+    date: ""
+  });
+  useEffect(() => {
+    if (lineSet) {
+      setHeaderInfo((prev) => ({
+        ...prev,
+        lineCode: lineSet.lineCode || "",
+        partName: lineSet.partName || "",
+        partNo: lineSet.partNo || "",
+        machineNo: lineSet.machineNo || ""
+      }));
+    }
+  }, [lineSet]);
+
+  const [machineDetails, setMachineDetails] = useState([]);
+  const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
+
+  useEffect(() => {
+    const fetchMachineDetails = async () => {
+      try {
+        if (shopId !== "3") {
+          setMachineDetails([]);
+          return;
+        }
+
+        const token = localStorage.getItem("token");
+
+        const res = await fetch(
+          "http://localhost:5000/api/machine-shop/3/pre-operation-details",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
+        if (!res.ok) {
+          throw new Error("Failed to fetch Machine Shop 3 details");
+        }
+
+        const data = await res.json();
+
+        setMachineDetails(data);
+      } catch (err) {
+        console.error("Machine details fetch error:", err);
+        alert("Failed to load Machine Shop 3 details.");
+      } finally {
+        setLoadingMachineDetails(false);
+      }
+    };
+
+    fetchMachineDetails();
+  }, [shopId]);
+
+    const lineCodes = [
+    ...new Set(
+      machineDetails
+        .map((item) => item.lineCode)
+        .filter(Boolean)
+    )
+  ];
+
+  const selectedLineDetails = machineDetails.filter(
+    (item) => item.lineCode === headerInfo.lineCode
+  );
+
+  const partOptions = [
+    ...new Map(
+      selectedLineDetails
+        .filter((item) => item.partNo)
+        .map((item) => [item.partNo, item])
+    ).values()
+  ];
+
+  const selectedPartDetails = machineDetails.filter(
+    (item) =>
+      item.lineCode === headerInfo.lineCode &&
+      item.partNo === headerInfo.partNo
+  );
+
+  const machineOptions = selectedPartDetails;
+  const [rows, setRows] = useState(
+    Array.from({ length: INITIAL_ROWS }, () => emptyRow())
+  );
+
+  const [signatures, setSignatures] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const handleHeaderChange = (field, val) => {
+    setHeaderInfo((prev) => ({
+      ...prev,
+      [field]: val
+    }));
+
+    if (field === "date") {
+      return;
+    }
+  };
+
+  const handleLineChange = (lineCode) => {
+    setHeaderInfo((prev) => ({
+      ...prev,
+      lineCode,
+      partNo: "",
+      partName: "",
+      machineNo: ""
+    }));
+
+    setLineSet({
+      machineShop: shopId,
+      lineCode,
+      partName: "",
+      partNo: "",
+      machineNo: ""
+    });
+  };
+
+  const handlePartNoChange = (partNo) => {
+    const selectedPart = machineDetails.find(
+      (item) =>
+        item.lineCode === headerInfo.lineCode &&
+        item.partNo === partNo
+    );
+
+    const partName = selectedPart?.partName || "";
+
+    setHeaderInfo((prev) => ({
+      ...prev,
+      partNo,
+      partName,
+      machineNo: ""
+    }));
+
+    setLineSet({
+      machineShop: shopId,
+      lineCode: headerInfo.lineCode,
+      partName,
+      partNo,
+      machineNo: ""
+    });
+  };
+
+  const handleMachineChange = (machineNo) => {
+    setHeaderInfo((prev) => ({
+      ...prev,
+      machineNo
+    }));
+
+    setLineSet({
+      machineShop: shopId,
+      lineCode: headerInfo.lineCode,
+      partName: headerInfo.partName,
+      partNo: headerInfo.partNo,
+      machineNo
+    });
+  };
+
+  const handleRowChange = (rowIdx, field, val) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[rowIdx] = { ...next[rowIdx], [field]: val };
+      return next;
+    });
+  };
+
+  const handleSignatureChange = (role, val) => {
+    setSignatures((prev) => ({
+      ...prev,
+      [role]: val
+    }));
+  };
+
+  // Add a new row
+  const handleAddRow = () => {
+    setRows((prev) => [...prev, emptyRow()]);
+  };
+
+  // Delete the last row if more than 1 exists
+  const handleRemoveRow = () => {
+    setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  };
+
+  const handleSave = async () => {
+
+    setIsSaving(true);
+    setSaveSuccess(false);
+
+    const payload = {
+      header: {
+        ...headerInfo,
+        machineShop: lineSet?.machineShop || shopId,
+        lineCode: headerInfo.lineCode,
+        partName: headerInfo.partName,
+        partNo: headerInfo.partNo,
+        machineNo: headerInfo.machineNo
+      },
+
+      rows,
+      signatures
+    };
+
+    try {
+
+      const token = localStorage.getItem('token');
+
+      const res = await fetch(
+        'http://localhost:5000/api/error-proofing-checksheet',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error('Save failed');
+      }
+
+      const data = await res.json();
+
+      // Update LineSetContext with the latest selection
+      setLineSet({
+        machineShop: shopId,
+        lineCode: headerInfo.lineCode,
+        partName: headerInfo.partName,
+        partNo: headerInfo.partNo,
+        machineNo: headerInfo.machineNo
+      });
+
+      // Hide "Saving..."
+      setIsSaving(false);
+
+      // Show success message
+      setSaveSuccess(true);
+
+      // Keep success message visible for 2 seconds
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Go to Form 3
+      navigate(`/operator/${shopId}/air-gap-sensor`);
+
+    } catch (err) {
+
+      console.error('Save error:', err);
+
+      setIsSaving(false);
+
+      alert(
+        'Failed to save checksheet. Check console for details.'
+      );
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+
+      {(isSaving || saveSuccess) && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+
+          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
+
+            {isSaving ? (
+              <>
+                <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
+
+                <h2 className="text-xl font-bold text-gray-800">
+                  Saving Data...
+                </h2>
+
+                <p className="text-gray-500 mt-2">
+                  Please wait
+                </p>
+              </>
+            ) : (
+              <>
+
+                <h2 className="text-xl font-bold text-green-800">
+                  Data Saved Successfully
+                </h2>
+
+                <p className="text-gray-500 mt-2">
+                  Loading next form...
+                </p>
+              </>
+            )}
+
+          </div>
+
+        </div>
+      )}
+      
+      <div className="bg-white w-full max-w-[90rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
+
+        {/* Card Header */}
+        <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
+          <div>
+            <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
+              {initialFormData.company}
+            </span>
+            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
+              {initialFormData.title}
+            </h2>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
+              <span>Form Code: {initialFormData.formCode}</span>
+              <span>|</span>
+              <span>Revision: {initialFormData.revision}</span>
+              <span>|</span>
+              <span>Revision Date: {initialFormData.revisionDate}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Header Meta Fields */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div>
+            <label htmlFor="header-line" className="font-bold text-gray-700 block mb-1 text-sm">
+              LineCode
+            </label>
+            <select
+              id="header-lineCode"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              value={headerInfo.lineCode}
+              onChange={(e) => handleLineChange(e.target.value)}
+              disabled={loadingMachineDetails}
+            >
+              <option value="">
+                {loadingMachineDetails
+                  ? "Loading..."
+                  : "Select Line Code"}
+              </option>
+
+              {lineCodes.map((lineCode) => (
+                <option
+                  key={lineCode}
+                  value={lineCode}
+                >
+                  {lineCode}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="header-partNo" className="font-bold text-gray-700 block mb-1 text-sm">
+              Part No
+            </label>
+            <select
+              id="header-partNo"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              value={headerInfo.partNo}
+              onChange={(e) => handlePartNoChange(e.target.value)}
+              disabled={!headerInfo.lineCode}
+            >
+              <option value="">
+                {headerInfo.lineCode
+                  ? "Select Part No"
+                  : "Select Line Code First"}
+              </option>
+
+              {partOptions.map((part) => (
+                <option
+                  key={part.partNo}
+                  value={part.partNo}
+                >
+                  {part.partNo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="header-partName" className="font-bold text-gray-700 block mb-1 text-sm">
+              Part Name
+            </label>
+            <input
+              id="header-partName"
+              type="text"
+              readOnly
+              className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
+              value={headerInfo.partName}
+              placeholder="Auto-filled"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="header-date" className="font-bold text-gray-700 block mb-1 text-sm">
+              Date
+            </label>
+            <input
+              id="header-date"
+              type="date"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              value={headerInfo.date}
+              onChange={(e) => handleHeaderChange('date', e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Action Toolbar with "+ Add Row" Button BEFORE the Table */}
+        <div className="flex justify-between items-center mb-2 px-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+              Checksheet Items
+            </span>
+            <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
+              {rows.length} {rows.length === 1 ? 'Row' : 'Rows'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAddRow}
+              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+            >
+              <span className="text-sm font-bold leading-none">+</span> Add Row
+            </button>
+
+            {rows.length > 1 && (
+              <button
+                type="button"
+                onClick={handleRemoveRow}
+                className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+              >
+                <span className="text-sm font-bold leading-none">−</span> Delete Row
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Main Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-800 text-sm text-center">
+            <thead className="bg-gray-100 text-gray-800 font-bold">
+              <tr>
+                <th className="border border-gray-800 p-2 w-16">Sl No</th>
+                <th className="border border-gray-800 p-2 w-40">Machine No</th>
+                <th className="border border-gray-800 p-2 w-44">Error Proof No</th>
+                <th className="border border-gray-800 p-2 text-left px-3">Error Proof Name</th>
+                <th className="border border-gray-800 p-2 w-48">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rIdx) => (
+                <tr key={`row-${rIdx}`}>
+                  <td className="border border-gray-800 p-2 font-medium text-gray-700">
+                    {rIdx + 1}
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                   <select
+                      className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
+                      aria-label={`Row ${rIdx + 1} Machine No`}
+                      value={row.machineNo}
+                      onChange={(e) =>
+                        handleRowChange(rIdx, "machineNo", e.target.value)
+                      }
+                      disabled={!headerInfo.partNo}
+                    >
+                      <option value="">
+                        {headerInfo.partNo
+                          ? "Select Machine"
+                          : "Select Part No"}
+                      </option>
+
+                      {machineOptions.map((machine) => (
+                        <option
+                          key={machine.id}
+                          value={machine.machineNo}
+                        >
+                          {machine.machineNo}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                    <input
+                      type="text"
+                      className="w-full h-full text-center outline-none bg-transparent py-2"
+                      aria-label={`Row ${rIdx + 1} Error Proof No`}
+                      value={row.errorProofNo}
+                      onChange={(e) => handleRowChange(rIdx, 'errorProofNo', e.target.value)}
+                    />
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                    <input
+                      type="text"
+                      className="w-full h-full text-left px-3 outline-none bg-transparent py-2"
+                      aria-label={`Row ${rIdx + 1} Error Proof Name`}
+                      value={row.errorProofName}
+                      onChange={(e) => handleRowChange(rIdx, 'errorProofName', e.target.value)}
+                    />
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                    <select
+                      value={row.value}
+                      aria-label={`Row ${rIdx + 1} value`}
+                      className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer font-bold"
+                      onChange={(e) => handleRowChange(rIdx, 'value', e.target.value)}
+                    >
+                      <option value=""></option>
+                      <option value="✓">✓</option>
+                      <option value="X">X</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+
+              {/* Signature Rows */}
+              {initialFormData.signatures.roles.map((role) => (
+                <tr key={`sig-${role}`}>
+                  <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                    {role} Signature
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                    <input
+                      type="text"
+                      className="w-full h-full text-center outline-none bg-transparent py-2 font-medium"
+                      aria-label={`${role} Signature`}
+                      value={signatures[role] || ''}
+                      onChange={(e) => handleSignatureChange(role, e.target.value)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Notes Section */}
+        <div className="border-2 border-gray-800 flex flex-col mt-4">
+          <div className="px-2 py-1 font-bold text-gray-800 text-sm border-b border-gray-800 bg-gray-100">
+            Note:
+          </div>
+          <ol className="list-decimal list-inside p-3 text-xs text-gray-700 space-y-1.5 leading-relaxed bg-white">
+            {initialFormData.notes.map((note, idx) => (
+              <li key={`note-${idx}`}>{note}</li>
+            ))}
+          </ol>
+        </div>
+
+        {/* Save Button */}
+        <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || saveSuccess}
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer"
+          >
+            {isSaving
+              ? "SAVING..."
+              : saveSuccess
+              ? "SAVED ✓"
+              : "SAVE & CONTINUE"
+            }
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}

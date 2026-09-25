@@ -6,19 +6,12 @@ import { Factory } from 'lucide-react';
 const MachineShopDashboard = () => {
   const navigate = useNavigate();
 
-<<<<<<< HEAD
   const user = JSON.parse(localStorage.getItem("user"));
   
   // Safely convert to lowercase and remove spaces (e.g., "Product Engineer" -> "productengineer", "HOF" -> "hof")
   const role = user?.role?.toLowerCase().replace(/\s+/g, '');
 
   const roleBasePath = {
-=======
-    const user = JSON.parse(localStorage.getItem("user"));
-    const role = user?.role;
-
-    const roleBasePath = {
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
     admin: "/admin",
     supervisor: "/supervisor",
     operator: "/operator",
@@ -26,7 +19,6 @@ const MachineShopDashboard = () => {
     hof: "/hof",
     productengineer: "/product-engineer",
     gm: "/gm",
-<<<<<<< HEAD
   };
 
   const machineShops = [
@@ -36,16 +28,6 @@ const MachineShopDashboard = () => {
     { name: "Machine Shop-4", id: "4", icon: Factory },
     { name: "Machine Shop-5", id: "5", icon: Factory }
   ];
-=======
-    };
-  const machineShops = [
-  { name: "Machine Shop-1", id: "1", icon: Factory },
-  { name: "Machine Shop-2", id: "2", icon: Factory },
-  { name: "Machine Shop-3", id: "3", icon: Factory },
-  { name: "Machine Shop-4", id: "4", icon: Factory },
-  { name: "Machine Shop-5", id: "5", icon: Factory }
-];
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
 
   return (
     <div className="min-h-screen w-full bg-[#2d2d2d] flex flex-col relative font-sans">
@@ -59,23 +41,13 @@ const MachineShopDashboard = () => {
           <div className="w-20 h-1.5 bg-gradient-to-r from-orange-600 via-[#ff9100] to-orange-600 mx-auto rounded-full"></div>
         </div>
 
-<<<<<<< HEAD
-=======
-        {/* 
-          Using responsive width calculations mimics a 1-2-3 column layout 
-          while automatically centering the bottom row of 2 cards on large screens (3 + 2 layout).
-        */}
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
         <div className="flex flex-wrap justify-center gap-6 max-w-[1200px] w-full pb-10">
           {machineShops.map((shop) => {
             const Icon = shop.icon;
             return (
               <button
                 key={shop.id}
-<<<<<<< HEAD
                 // Dynamically route to the user's specific dashboard based on safe role mapping
-=======
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
                 onClick={() => navigate(`${roleBasePath[role] || "/"}/${shop.id}`)}
                 className="
                   group relative flex flex-col items-center justify-center p-8 

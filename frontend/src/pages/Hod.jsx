@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import React from 'react';
 import { useParams } from 'react-router-dom';
 import EditPartQuantity from '../components/EditPartQuantity';
@@ -23,18 +22,3 @@ const Hod = () => {
 };
 
 export default Hod;
-=======
-import React from 'react'
-import Header from '../components/Header'
-
-const Hod = () => {
-  return (
-    <div>
-      <Header />
-      Hod
-    </div>
-  )
-}
-
-export default Hod
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50

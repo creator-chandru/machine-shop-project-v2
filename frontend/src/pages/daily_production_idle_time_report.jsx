@@ -1,9 +1,5 @@
-<<<<<<< HEAD
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-=======
-import React, { useState } from "react";
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
 
 const LOSS_REASONS = [
   { id: 1, category: "MAN", name: "Want of Man power", rowSpan: 2, isFirst: true },
@@ -21,17 +17,10 @@ const LOSS_REASONS = [
   { id: 13, category: "OTHERS", name: "Want of schedule", isFirst: false },
 ];
 
-<<<<<<< HEAD
 const createEmptyLineColumn = (lineCode = "", lineName = "", partName = "") => ({
   lineCode,
   lineName,
   partName,
-=======
-const createEmptyLineColumn = (lineCode = "", partName = "", brakeType = "") => ({
-  lineCode,
-  partName,
-  brakeType,
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
   capacity: { shift1: "", shift2: "", shift3: "" },
   actualProd: {
     lh: { shift1: "", shift2: "", shift3: "" },
@@ -45,7 +34,6 @@ const createEmptyLineColumn = (lineCode = "", partName = "", brakeType = "") => 
 });
 
 export default function DailyProductionIdleTimeReport() {
-<<<<<<< HEAD
   const { shopId } = useParams();
 
   const [isSaving, setIsSaving] = useState(false);
@@ -103,30 +91,10 @@ export default function DailyProductionIdleTimeReport() {
     return [...new Map(parts.map(item => [item.partName, item])).values()];
   };
 
-=======
-  // Report Header State
-  const [reportDate, setReportDate] = useState("");
-  const [pageInfo, setPageInfo] = useState({ current: "01", total: "02" });
-
-  // Dynamic Line Columns (Defaults to sample lines, user can add/remove columns)
-  const [lineColumns, setLineColumns] = useState([
-    createEmptyLineColumn(),
-  ]);
-
-  // Signatures State
-  const [signatures, setSignatures] = useState({
-    sectionInchargeSign: { shift1: "", shift2: "", shift3: "" },
-    shiftOfficerSign: { shift1: "", shift2: "", shift3: "" },
-    teamLeaderSign: "",
-  });
-
-  // Handle Meta Change for Line Column
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
   const handleLineMetaChange = (colIdx, field, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = { ...next[colIdx], [field]: val };
-<<<<<<< HEAD
       
       // Auto-reset dependent fields when line code changes
       if (field === "lineCode") {
@@ -149,31 +117,11 @@ export default function DailyProductionIdleTimeReport() {
         }
       }
       
-=======
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
       return next;
     });
   };
 
-<<<<<<< HEAD
   const handleCapacityChange = (colIdx, shift, val) => {
-=======
-  // Handle Capacity Change with Validation
-  const handleCapacityChange = (colIdx, shift, val) => {
-    const newCap = parseFloat(val);
-    if (val !== "" && !isNaN(newCap)) {
-      const currentLh = parseFloat(lineColumns[colIdx]?.actualProd?.lh?.[shift]);
-      const currentRh = parseFloat(lineColumns[colIdx]?.actualProd?.rh?.[shift]);
-      if ((!isNaN(currentLh) && currentLh > newCap) || (!isNaN(currentRh) && currentRh > newCap)) {
-        alert(
-          `Capacity cannot be less than the already entered Actual Production Quantity for Shift ${shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III"
-          }!`
-        );
-        return;
-      }
-    }
-
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = {
@@ -184,34 +132,7 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-<<<<<<< HEAD
   const handleActualProdChange = (colIdx, arm, shift, val) => {
-=======
-  // Handle Actual Prod Change with Constraint (Actual <= Capacity)
-  const handleActualProdChange = (colIdx, arm, shift, val) => {
-    if (val !== "") {
-      const capVal = lineColumns[colIdx]?.capacity?.[shift];
-      const capNum = parseFloat(capVal);
-      const enteredVal = parseFloat(val);
-
-      if (capVal === "" || isNaN(capNum) || capNum <= 0) {
-        alert(
-          `Please enter the Capacity for Shift ${shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III"
-          } first before entering Actual Production Quantity.`
-        );
-        return;
-      }
-
-      if (!isNaN(enteredVal) && enteredVal > capNum) {
-        alert(
-          `Actual production quantity (${enteredVal}) cannot exceed the capacity (${capNum}) for Shift ${shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III"
-          }!`
-        );
-        return;
-      }
-    }
-
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = {
@@ -225,10 +146,6 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-<<<<<<< HEAD
-=======
-  // Handle Manpower Change
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
   const handleManpowerChange = (colIdx, shift, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
@@ -240,10 +157,6 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-<<<<<<< HEAD
-=======
-  // Handle Loss Minutes Change
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
   const handleLossChange = (colIdx, lossId, shift, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
@@ -261,10 +174,6 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-<<<<<<< HEAD
-=======
-  // Handle Signatures
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
   const handleSignatureChange = (field, subField, val) => {
     setSignatures((prev) => {
       if (subField) {
@@ -277,49 +186,11 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-<<<<<<< HEAD
   const handleAddColumn = () => setLineColumns((prev) => [...prev, createEmptyLineColumn()]);
   const handleRemoveColumn = () => setLineColumns((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
 
   const sumValues = (...vals) => vals.reduce((sum, v) => sum + (parseFloat(v) || 0), 0) || "";
 
-=======
-  // Add a new Line Column
-  const handleAddColumn = () => {
-    setLineColumns((prev) => [...prev, createEmptyLineColumn()]);
-  };
-
-  // Remove the last Line Column
-  const handleRemoveColumn = () => {
-    setLineColumns((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
-  };
-
-  // Chunk size: Max 5 columns per table block
-  const CHUNK_SIZE = 5;
-
-  // Split line columns into chunks of at most 5 columns
-  const getColumnChunks = (allCols) => {
-    const chunks = [];
-    for (let i = 0; i < allCols.length; i += CHUNK_SIZE) {
-      const chunk = allCols
-        .slice(i, i + CHUNK_SIZE)
-        .map((col, localIdx) => ({
-          col,
-          globalIdx: i + localIdx,
-        }));
-      chunks.push(chunk);
-    }
-    return chunks;
-  };
-
-  const columnChunks = getColumnChunks(lineColumns);
-
-  // Calculate sum of values
-  const sumValues = (...vals) =>
-    vals.reduce((sum, v) => sum + (parseFloat(v) || 0), 0) || "";
-
-  // Calculate Total Loss per shift for a column
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
   const calcTotalLoss = (col, shift) => {
     return (
       LOSS_REASONS.reduce((acc, loss) => {
@@ -329,7 +200,6 @@ export default function DailyProductionIdleTimeReport() {
     );
   };
 
-<<<<<<< HEAD
   const handleSave = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -342,35 +212,6 @@ export default function DailyProductionIdleTimeReport() {
 
     const payload = {
       machineShop: shopId,
-=======
-  // Save to Backend with Validation
-  const handleSave = async () => {
-    // Validate constraint that Actual Prod Quantity <= Capacity
-    for (let i = 0; i < lineColumns.length; i++) {
-      const col = lineColumns[i];
-      for (const shift of ["shift1", "shift2", "shift3"]) {
-        const shiftName = shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III";
-        const cap = parseFloat(col.capacity[shift]) || 0;
-        const lh = parseFloat(col.actualProd.lh[shift]) || 0;
-        const rh = parseFloat(col.actualProd.rh[shift]) || 0;
-
-        if (lh > 0 && (!col.capacity[shift] || lh > cap)) {
-          alert(
-            `Line ${i + 1} (Shift ${shiftName}): Actual LH production (${lh}) cannot exceed capacity (${cap})!`
-          );
-          return;
-        }
-        if (rh > 0 && (!col.capacity[shift] || rh > cap)) {
-          alert(
-            `Line ${i + 1} (Shift ${shiftName}): Actual RH production (${rh}) cannot exceed capacity (${cap})!`
-          );
-          return;
-        }
-      }
-    }
-
-    const payload = {
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
       date: reportDate,
       pageInfo,
       lineColumns,
@@ -380,7 +221,6 @@ export default function DailyProductionIdleTimeReport() {
     try {
       const res = await fetch("http://localhost:5000/api/daily-production-idle-time", {
         method: "POST",
-<<<<<<< HEAD
         headers: { 
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}` 
@@ -414,25 +254,11 @@ export default function DailyProductionIdleTimeReport() {
       console.error("Save error:", err);
       setIsSaving(false);
       alert(`Failed to save report. Error: ${err.message}`);
-=======
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) throw new Error("Save failed");
-
-      const data = await res.json();
-      alert(data.message || "Daily Production & Idle Time Report saved successfully!");
-    } catch (err) {
-      console.error("Save error:", err);
-      alert("Failed to save report. Check console for details.");
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
     }
   };
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-4 sm:p-6 pb-20">
-<<<<<<< HEAD
       
       {/* Loading Overlay */}
       {(isSaving || saveSuccess) && (
@@ -453,13 +279,6 @@ export default function DailyProductionIdleTimeReport() {
       <div className="bg-white w-full max-w-[99rem] rounded-xl p-6 sm:p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
 
         {/* CARD HEADER */}
-=======
-      <div className="bg-white w-full max-w-[99rem] rounded-xl p-6 sm:p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-
-        {/* ========================================================
-            CARD HEADER - WITH PROMINENT BIGGER TITLE
-        ======================================================== */}
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b-2 border-gray-300 pb-5 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -470,28 +289,14 @@ export default function DailyProductionIdleTimeReport() {
                 OUTPUT ONLY
               </span>
             </div>
-<<<<<<< HEAD
-=======
-
-            {/* BIGGER TITLE */}
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-gray-900 tracking-tight uppercase leading-tight">
               DAILY PRODUCTION & IDLE TIME REPORT
             </h1>
           </div>
 
-<<<<<<< HEAD
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-gray-50 border-2 border-gray-800 p-2.5 rounded shadow-sm">
             <div className="flex items-center gap-2">
               <label className="text-xs font-black text-gray-800 uppercase tracking-wide">DATE :</label>
-=======
-          {/* Date & Page Box */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-gray-50 border-2 border-gray-800 p-2.5 rounded shadow-sm">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-black text-gray-800 uppercase tracking-wide">
-                DATE :
-              </label>
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
               <input
                 type="date"
                 className="bg-white border border-gray-300 rounded px-2 py-1 text-xs font-bold text-gray-800 outline-none focus:border-orange-500"
@@ -499,7 +304,6 @@ export default function DailyProductionIdleTimeReport() {
                 onChange={(e) => setReportDate(e.target.value)}
               />
             </div>
-<<<<<<< HEAD
             <div className="h-4 w-px bg-gray-300 hidden sm:block"></div>
             <div className="flex items-center gap-1.5 text-xs font-black text-gray-800">
               <span>PAGE</span>
@@ -532,41 +336,12 @@ export default function DailyProductionIdleTimeReport() {
             </button>
             {lineColumns.length > 1 && (
               <button type="button" onClick={handleRemoveColumn} className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow">
-=======
-
-            <div className="h-4 w-px bg-gray-300 hidden sm:block"></div>
-
-          </div>
-        </div>
-
-        {/* Toolbar to Add / Remove Line Columns */}
-        <div className="flex justify-between items-center px-1">
-          <div className="flex items-center gap-2">
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleAddColumn}
-              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
-            >
-              <span className="text-sm font-bold leading-none">+</span> Add Line Column
-            </button>
-
-            {lineColumns.length > 1 && (
-              <button
-                type="button"
-                onClick={handleRemoveColumn}
-                className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
-              >
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
                 <span className="text-sm font-bold leading-none">−</span> Delete Column
               </button>
             )}
           </div>
         </div>
 
-<<<<<<< HEAD
         {/* MAIN MATRIX REPORT TABLE */}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed min-w-[1200px]">
@@ -777,472 +552,18 @@ export default function DailyProductionIdleTimeReport() {
                     <input type="text" placeholder="Name" className="w-full outline-none font-medium bg-transparent border-b border-gray-300 focus:border-orange-500" value={signatures.teamLeaderName} onChange={(e) => handleSignatureChange("teamLeaderName", null, e.target.value)} />
                   </div>
                 </td>
-=======
-        {/* ========================================================
-            MAIN MATRIX REPORT TABLES (Max 5 columns per table, wraps underneath if > 5)
-        ======================================================== */}
-        <div className="space-y-8">
-          {columnChunks.map((chunk, chunkIdx) => (
-            <div key={`chunk-${chunkIdx}`} className="space-y-2">
-              {columnChunks.length > 1 && (
-                <div className="flex items-center gap-2 px-1">
-                  <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
-                    Table {chunkIdx + 1}
-                  </span>
-                  <span className="text-xs text-gray-500 font-semibold">
-                    (Production Lines {chunk[0].globalIdx + 1}
-                    {chunk.length > 1
-                      ? ` to ${chunk[chunk.length - 1].globalIdx + 1}`
-                      : ""}
-                    )
-                  </span>
-                </div>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
-                  <thead>
-                    {/* ROW 1: LINE CODE */}
-                    <tr>
-                      <th colSpan={3} className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold w-64">
-                        LINE CODE
-                      </th>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <th key={`lc-${globalIdx}`} colSpan={4} className="border border-gray-800 p-0 bg-white">
-                          <input
-                            type="text"
-                            placeholder="e.g. M3L001"
-                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50"
-                            value={col.lineCode}
-                            onChange={(e) => handleLineMetaChange(globalIdx, "lineCode", e.target.value)}
-                          />
-                        </th>
-                      ))}
-                    </tr>
-
-                    {/* ROW 2: PART NAME */}
-                    <tr>
-                      <th colSpan={3} className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold">
-                        PART NAME
-                      </th>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <th key={`pn-${globalIdx}`} colSpan={4} className="border border-gray-800 p-0 bg-white">
-                          <input
-                            type="text"
-                            placeholder="e.g. YNC ESP SK"
-                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50"
-                            value={col.partName}
-                            onChange={(e) => handleLineMetaChange(globalIdx, "partName", e.target.value)}
-                          />
-                        </th>
-                      ))}
-                    </tr>
-
-                    {/* ROW 3: ABS / NABS */}
-                    <tr>
-                      <th colSpan={3} className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold">
-                        ABS / NABS 
-                      </th>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <th key={`bt-${globalIdx}`} colSpan={4} className="border border-gray-800 p-0 bg-white">
-                          <select
-                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
-                            value={col.brakeType || ""}
-                            onChange={(e) => handleLineMetaChange(globalIdx, "brakeType", e.target.value)}
-                          >
-                            <option value=""> Select </option>
-                            <option value="ABS">ABS</option>
-                            <option value="NABS">NABS</option>
-                          </select>
-                        </th>
-                      ))}
-                    </tr>
-
-                    {/* ROW 4: SHIFT HEADERS */}
-                    <tr className="bg-gray-100 font-bold text-[11px]">
-                      <th className="border border-gray-800 p-1 w-10">S.No.</th>
-                      <th colSpan={2} className="border border-gray-800 p-1 text-left px-2">
-                        SHIFT
-                      </th>
-                      {chunk.map(({ globalIdx }) => (
-                        <React.Fragment key={`sh-hdr-${globalIdx}`}>
-                          <th className="border border-gray-800 p-1 w-14">I</th>
-                          <th className="border border-gray-800 p-1 w-14">II</th>
-                          <th className="border border-gray-800 p-1 w-14">III</th>
-                          <th className="border border-gray-800 p-1 w-16 bg-gray-200">T</th>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    {/* ROW 5: CAPACITY QTY IN SETS */}
-                    <tr className="bg-white">
-                      <td colSpan={3} className="border border-gray-800 p-1 text-left font-bold bg-gray-50 px-2">
-                        CAPACITY QTY IN SETS
-                      </td>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`cap-${globalIdx}`}>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              className="w-full h-full text-center font-semibold outline-none py-1"
-                              value={col.capacity.shift1}
-                              onChange={(e) => handleCapacityChange(globalIdx, "shift1", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              className="w-full h-full text-center font-semibold outline-none py-1"
-                              value={col.capacity.shift2}
-                              onChange={(e) => handleCapacityChange(globalIdx, "shift2", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              className="w-full h-full text-center font-semibold outline-none py-1"
-                              value={col.capacity.shift3}
-                              onChange={(e) => handleCapacityChange(globalIdx, "shift3", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
-                            {sumValues(col.capacity.shift1, col.capacity.shift2, col.capacity.shift3)}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {/* ACTUAL PROD QTY (LH) */}
-                    <tr>
-                      <td rowSpan={2} colSpan={2} className="border border-gray-800 p-1 font-bold text-left bg-gray-50 px-2 align-middle">
-                        ACTUAL PROD QTY
-                      </td>
-                      <td className="border border-gray-800 p-1 font-bold bg-gray-100 w-10">LH</td>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`lh-${globalIdx}`}>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              max={col.capacity.shift1 || undefined}
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium"
-                              value={col.actualProd.lh.shift1}
-                              onChange={(e) => handleActualProdChange(globalIdx, "lh", "shift1", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              max={col.capacity.shift2 || undefined}
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium"
-                              value={col.actualProd.lh.shift2}
-                              onChange={(e) => handleActualProdChange(globalIdx, "lh", "shift2", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              max={col.capacity.shift3 || undefined}
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium"
-                              value={col.actualProd.lh.shift3}
-                              onChange={(e) => handleActualProdChange(globalIdx, "lh", "shift3", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-100">
-                            {sumValues(col.actualProd.lh.shift1, col.actualProd.lh.shift2, col.actualProd.lh.shift3)}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    {/* ACTUAL PROD QTY (RH) */}
-                    <tr>
-                      <td className="border border-gray-800 p-1 font-bold bg-gray-100 w-10">RH</td>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`rh-${globalIdx}`}>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              max={col.capacity.shift1 || undefined}
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium"
-                              value={col.actualProd.rh.shift1}
-                              onChange={(e) => handleActualProdChange(globalIdx, "rh", "shift1", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              max={col.capacity.shift2 || undefined}
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium"
-                              value={col.actualProd.rh.shift2}
-                              onChange={(e) => handleActualProdChange(globalIdx, "rh", "shift2", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              max={col.capacity.shift3 || undefined}
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium"
-                              value={col.actualProd.rh.shift3}
-                              onChange={(e) => handleActualProdChange(globalIdx, "rh", "shift3", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-100">
-                            {sumValues(col.actualProd.rh.shift1, col.actualProd.rh.shift2, col.actualProd.rh.shift3)}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    {/* NO OF MANPOWER (UTILIZED) */}
-                    <tr className="bg-gray-50">
-                      <td colSpan={3} className="border border-gray-800 p-1 font-bold text-left px-2">
-                        NO OF MANPOWER (UTILIZED)
-                      </td>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`mp-${globalIdx}`}>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium bg-transparent"
-                              value={col.manpower.shift1}
-                              onChange={(e) => handleManpowerChange(globalIdx, "shift1", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium bg-transparent"
-                              value={col.manpower.shift2}
-                              onChange={(e) => handleManpowerChange(globalIdx, "shift2", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-0">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              className="w-full h-full text-center outline-none py-1 font-medium bg-transparent"
-                              value={col.manpower.shift3}
-                              onChange={(e) => handleManpowerChange(globalIdx, "shift3", e.target.value)}
-                            />
-                          </td>
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-200">
-                            {sumValues(col.manpower.shift1, col.manpower.shift2, col.manpower.shift3)}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    {/* ========================================================
-                        LOSS / IDLE TIME MATRIX (13 REASONS)
-                    ======================================================== */}
-                    {LOSS_REASONS.map((loss) => (
-                      <tr key={`loss-row-${loss.id}`} className="hover:bg-gray-50/50">
-                        {/* S.No */}
-                        <td className="border border-gray-800 p-1 font-bold text-gray-700">
-                          {loss.id}
-                        </td>
-
-                        {/* Category Span */}
-                        {loss.isFirst && (
-                          <td
-                            rowSpan={loss.rowSpan}
-                            className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-100 align-middle text-[11px] tracking-wider"
-                          >
-                            {loss.category}
-                          </td>
-                        )}
-
-                        {/* Reason Name */}
-                        <td className="border border-gray-800 p-1 text-left px-2 font-medium text-gray-800">
-                          {loss.name}
-                        </td>
-
-                        {/* Dynamic Shift Inputs per Line Column */}
-                        {chunk.map(({ col, globalIdx }) => (
-                          <React.Fragment key={`l-${loss.id}-${globalIdx}`}>
-                            <td className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                className="w-full h-full text-center outline-none py-1 bg-transparent"
-                                value={col.losses[`loss_${loss.id}`]?.shift1}
-                                onChange={(e) => handleLossChange(globalIdx, loss.id, "shift1", e.target.value)}
-                              />
-                            </td>
-                            <td className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                className="w-full h-full text-center outline-none py-1 bg-transparent"
-                                value={col.losses[`loss_${loss.id}`]?.shift2}
-                                onChange={(e) => handleLossChange(globalIdx, loss.id, "shift2", e.target.value)}
-                              />
-                            </td>
-                            <td className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                className="w-full h-full text-center outline-none py-1 bg-transparent"
-                                value={col.losses[`loss_${loss.id}`]?.shift3}
-                                onChange={(e) => handleLossChange(globalIdx, loss.id, "shift3", e.target.value)}
-                              />
-                            </td>
-                            <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
-                              {sumValues(
-                                col.losses[`loss_${loss.id}`]?.shift1,
-                                col.losses[`loss_${loss.id}`]?.shift2,
-                                col.losses[`loss_${loss.id}`]?.shift3
-                              )}
-                            </td>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    ))}
-
-                    {/* TOTAL LOSS ROW */}
-                    <tr className="bg-gray-200 font-extrabold text-gray-900">
-                      <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2">
-                        Total Loss (mins)
-                      </td>
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`tot-loss-${globalIdx}`}>
-                          <td className="border border-gray-800 p-1">{calcTotalLoss(col, "shift1")}</td>
-                          <td className="border border-gray-800 p-1">{calcTotalLoss(col, "shift2")}</td>
-                          <td className="border border-gray-800 p-1">{calcTotalLoss(col, "shift3")}</td>
-                          <td className="border border-gray-800 p-1 bg-gray-300">
-                            {sumValues(
-                              calcTotalLoss(col, "shift1"),
-                              calcTotalLoss(col, "shift2"),
-                              calcTotalLoss(col, "shift3")
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* ========================================================
-            SIGNATURES & APPROVAL SECTION
-        ======================================================== */}
-        <div className="overflow-x-auto pt-2">
-          <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
-            <tbody>
-              {/* SECTION INCHARGE SIGN */}
-              <tr>
-                <td className="border border-gray-800 p-1.5 font-bold bg-gray-100 text-left w-48">
-                  SECTION INCHARGE SIGN
-                </td>
-                {["shift1", "shift2", "shift3"].map((s, idx) => (
-                  <td key={`sis-${s}`} className="border border-gray-800 p-0">
-                    <div className="flex items-center px-2 py-1">
-                      <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
-                        SHIFT-{["I", "II", "III"][idx]}:
-                      </span>
-                      <input
-                        type="text"
-                        placeholder="Signature"
-                        className="w-full outline-none font-medium bg-transparent text-center"
-                        value={signatures.sectionInchargeSign[s]}
-                        onChange={(e) => handleSignatureChange("sectionInchargeSign", s, e.target.value)}
-                      />
-                    </div>
-                  </td>
-                ))}
-                <td className="border border-gray-800 p-0 w-80 text-left align-middle" rowSpan={2}>
-                  <div className="flex items-center px-3 py-2 gap-2">
-                    <span className="font-bold text-gray-800 whitespace-nowrap">
-                      TEAM LEADER SIGN :
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Signature"
-                      className="w-full outline-none font-medium bg-transparent border-b border-gray-300 focus:border-orange-500 py-1"
-                      value={signatures.teamLeaderSign}
-                      onChange={(e) => handleSignatureChange("teamLeaderSign", null, e.target.value)}
-                    />
-                  </div>
-                </td>
-              </tr>
-
-              {/* SHIFT OFFICER SIGN */}
-              <tr>
-                <td className="border border-gray-800 p-1.5 font-bold bg-gray-100 text-left">
-                  SHIFT OFFICER SIGN
-                </td>
-                {["shift1", "shift2", "shift3"].map((s, idx) => (
-                  <td key={`sos-${s}`} className="border border-gray-800 p-0">
-                    <div className="flex items-center px-2 py-1">
-                      <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
-                        SHIFT-{["I", "II", "III"][idx]}:
-                      </span>
-                      <input
-                        type="text"
-                        placeholder="Signature"
-                        className="w-full outline-none font-medium bg-transparent text-center"
-                        value={signatures.shiftOfficerSign[s]}
-                        onChange={(e) => handleSignatureChange("shiftOfficerSign", s, e.target.value)}
-                      />
-                    </div>
-                  </td>
-                ))}
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
               </tr>
             </tbody>
           </table>
         </div>
 
-<<<<<<< HEAD
-=======
-        {/* Note Box */}
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
         <div className="border border-gray-800 p-2 bg-yellow-50 text-[11px] font-bold text-gray-800 flex items-center justify-center">
           NOTE : TOOL CHANGE LOSSES TIME ABOVE 20 MINS ONLY MENTION THE LOSS
         </div>
 
-<<<<<<< HEAD
         <div className="flex justify-end gap-4 pt-4 border-t border-gray-300">
           <button type="button" onClick={handleSave} disabled={isSaving || saveSuccess} className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer text-sm tracking-wider uppercase">
             {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE REPORT"}
-=======
-        {/* Save Button & Actions */}
-        <div className="flex justify-end gap-4 pt-4 border-t border-gray-300">
-          <button
-            type="button"
-            onClick={handleSave}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer text-sm tracking-wider uppercase"
-          >
-            Save Report
->>>>>>> 00054a1db1bee717831f2aadc65f623953930f50
           </button>
         </div>
 

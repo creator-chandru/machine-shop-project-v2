@@ -11,6 +11,14 @@ const formMeta = {
   company: "SAKTHI AUTO",
 };
 
+const getTodayISODate = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const createEmptyRow = () => ({
   machineNo: "",
   machineName: "",
@@ -43,14 +51,13 @@ export default function DailyProductionReport() {
   const [machineDetails, setMachineDetails] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
-  // 1. Header Information
+  // 1. Header Information (date defaults to today's date)
   const [header, setHeader] = useState({
-    date: "",
+    date: getTodayISODate(),
     shift: "I",
-    sheetNo: "1",
-    sheetTotal: "1",
     shiftInchargeName: "",
     lineCode: "",
+    partTraceabilityMachining: "",
   });
 
   // 2. Production Rows (Dynamic)
@@ -100,12 +107,61 @@ export default function DailyProductionReport() {
     ])
   ).values()];
 
+  // Fetch Part Traceability from backend
+  const fetchPartTraceability = async (lineCode, date, shift) => {
+    if (!lineCode || !date || !shift) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(
+        `http://localhost:5000/api/daily-production-report/traceability?lineCode=${encodeURIComponent(
+          lineCode
+        )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch Part Traceability");
+      }
+
+      const data = await response.json();
+
+      if (data.partTraceability) {
+        setHeader((prev) => ({
+          ...prev,
+          partTraceabilityMachining: data.partTraceability,
+        }));
+      }
+    } catch (err) {
+      console.error("Part Traceability fetch error:", err);
+    }
+  };
+
   // Handlers
   const handleHeaderChange = (field, val) => {
     setHeader((prev) => ({ ...prev, [field]: val }));
+
     // Reset rows if line code changes to prevent mismatched data
     if (field === 'lineCode') {
       setRows([createEmptyRow()]);
+    }
+
+    // Trigger dynamic Part Traceability generation
+    if (field === 'lineCode' || field === 'date' || field === 'shift') {
+      const targetLineCode = field === 'lineCode' ? val : header.lineCode;
+      const targetDate = field === 'date' ? val : header.date;
+      const targetShift = field === 'shift' ? val : header.shift;
+
+      if (targetLineCode && targetDate && targetShift) {
+        fetchPartTraceability(targetLineCode, targetDate, targetShift);
+      }
     }
   };
 
@@ -149,13 +205,12 @@ export default function DailyProductionReport() {
   const handleAddRow = () => setRows((prev) => [...prev, createEmptyRow()]);
   const handleRemoveRow = () => setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
 
-const handleSave = async () => {
+  const handleSave = async () => {
     if (!header.lineCode) {
       alert("Please select a Line Code in the header before saving.");
       return;
     }
 
-    // Explicit Token Validation before hitting the protected route
     const token = localStorage.getItem('token');
     if (!token) {
       alert("Authentication token missing or session expired. Please log in again.");
@@ -182,7 +237,6 @@ const handleSave = async () => {
       });
 
       if (!res.ok) {
-        // Log the actual server response text for easier debugging
         const errorText = await res.text();
         throw new Error(`Server returned ${res.status}: ${errorText}`);
       }
@@ -190,22 +244,17 @@ const handleSave = async () => {
       setIsSaving(false);
       setSaveSuccess(true);
       
-      // Wait for 2 seconds to show the "Data Saved Successfully" message
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Hide the success message to stay on the page
       setSaveSuccess(false); 
       
-      // ==========================================
-      // RESET ALL FORM FIELDS HERE
-      // ==========================================
+      // Reset Form Fields
       setHeader({
-        date: "",
+        date: getTodayISODate(),
         shift: "I",
-        sheetNo: "1",
-        sheetTotal: "1",
         shiftInchargeName: "",
         lineCode: "",
+        partTraceabilityMachining: "",
       });
       
       setRows(Array.from({ length: INITIAL_ROWS }, () => createEmptyRow()));
@@ -263,32 +312,34 @@ const handleSave = async () => {
             </div>
           </div>
 
+          {/* Date and Shift Header Block */}
           <div className="flex flex-col gap-1.5 border border-gray-300 rounded p-3 bg-gray-50 text-xs w-full md:w-auto">
             <div className="flex items-center justify-between gap-4">
               <label className="font-bold text-gray-800">Date :</label>
-              <input type="date" className="bg-transparent font-semibold border-b border-gray-300 focus:border-orange-500 outline-none px-1" value={header.date} onChange={(e) => handleHeaderChange("date", e.target.value)} />
+              <input 
+                type="date" 
+                className="bg-transparent font-semibold border-b border-gray-300 focus:border-orange-500 outline-none px-1" 
+                value={header.date} 
+                onChange={(e) => handleHeaderChange("date", e.target.value)} 
+              />
             </div>
             <div className="flex items-center justify-between gap-4">
               <label className="font-bold text-gray-800">Shift :</label>
-              <select className="bg-transparent font-semibold border-b border-gray-300 focus:border-orange-500 outline-none px-1 cursor-pointer w-[120px]" value={header.shift} onChange={(e) => handleHeaderChange("shift", e.target.value)}>
+              <select 
+                className="bg-transparent font-semibold border-b border-gray-300 focus:border-orange-500 outline-none px-1 cursor-pointer w-[120px]" 
+                value={header.shift} 
+                onChange={(e) => handleHeaderChange("shift", e.target.value)}
+              >
                 <option value="I">I</option>
                 <option value="II">II</option>
                 <option value="III">III</option>
               </select>
             </div>
-            <div className="flex items-center justify-between gap-4">
-              <label className="font-bold text-gray-800">Sheet No. :</label>
-              <div className="flex items-center gap-1 font-semibold">
-                <input type="text" className="w-8 text-center bg-transparent border-b border-gray-300 focus:border-orange-500 outline-none" value={header.sheetNo} onChange={(e) => handleHeaderChange("sheetNo", e.target.value)} />
-                <span>of</span>
-                <input type="text" className="w-8 text-center bg-transparent border-b border-gray-300 focus:border-orange-500 outline-none" value={header.sheetTotal} onChange={(e) => handleHeaderChange("sheetTotal", e.target.value)} />
-              </div>
-            </div>
           </div>
         </div>
 
-        {/* SHIFT INCHARGE & LINE NO SUB-HEADER */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-orange-50 border border-orange-200 p-4 rounded-lg">
+        {/* LINE NO, PART TRACEABILITY - MACHINING & SHIFT INCHARGE SUB-HEADER */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-orange-50 border border-orange-200 p-4 rounded-lg">
           <div>
             <label className="font-bold text-gray-700 block mb-1 text-sm">Line Code</label>
             <select
@@ -303,6 +354,18 @@ const handleSave = async () => {
               ))}
             </select>
           </div>
+
+          <div>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Part Traceability - Machining</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              value={header.partTraceabilityMachining}
+              onChange={(e) => handleHeaderChange("partTraceabilityMachining", e.target.value)}
+              placeholder="Auto-generated / Enter Traceability"
+            />
+          </div>
+
           <div>
             <label className="font-bold text-gray-700 block mb-1 text-sm">Shift Incharge Name</label>
             <input
@@ -323,11 +386,11 @@ const handleSave = async () => {
               <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">{rows.length} Rows</span>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={handleAddRow} className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold px-4 py-2 rounded transition-colors shadow">
+              <button type="button" onClick={handleAddRow} className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold px-4 py-2 rounded transition-colors shadow hover:cursor-pointer">
                 + Add Row
               </button>
               {rows.length > 1 && (
-                <button type="button" onClick={handleRemoveRow} className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded transition-colors shadow">
+                <button type="button" onClick={handleRemoveRow} className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded transition-colors shadow hover:cursor-pointer">
                   − Delete Row
                 </button>
               )}
@@ -460,7 +523,7 @@ const handleSave = async () => {
           <div className="text-xs text-gray-600 font-semibold">
             {formMeta.formCode}, Rev.No: {formMeta.revision} dt {formMeta.revisionDate}
           </div>
-          <button type="button" onClick={handleSave} disabled={isSaving || saveSuccess} className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg">
+          <button type="button" onClick={handleSave} disabled={isSaving || saveSuccess} className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer">
             {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & CONTINUE"}
           </button>
         </div>

@@ -3,14 +3,13 @@ const router = express.Router();
 
 const {
   getMachineShopDetails,
-  saveDailyProductionReport
+  saveDailyProductionReport,
+  getPartTraceability
 } = require('../controllers/dailyProductionReportController.js');
 
 // ============================================================
 // MACHINE SHOP MASTER DATA (DYNAMIC)
 // ============================================================
-
-// Get all Machine Shop data based on dynamic shopId
 router.get(
   '/machine-shop/:shopId/details',
   getMachineShopDetails
@@ -19,11 +18,15 @@ router.get(
 // ============================================================
 // DAILY PRODUCTION REPORT
 // ============================================================
-
-// Save daily production report
 router.post(
   '/daily-production-report',
   saveDailyProductionReport
+);
+
+// Get Part Traceability
+router.get(
+  '/daily-production-report/traceability',
+  getPartTraceability
 );
 
 module.exports = router;

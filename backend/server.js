@@ -11,7 +11,7 @@ const airGapSensorCheckSheetRoutes = require("./routes/airGapSensorCheckSheet.js
 const fourMChangeMonitoringCheckSheetRoutes = require("./routes/fourMChangeMonitoringCheckSheet.js");
 const ToolsChangeRecord=require("./routes/ToolsChangeRecord.js");
 const RecordofSignifcantEvent=require("./routes/RecordOfSignificantEvent.js");
-const dailyProductionRoutes = require("./routes/dailyProductionRoutes.js");
+const dailyProductionRoutes = require("./routes/dailyProductionReport.js");
 const dailyProductionIdleTimeRoutes = require("./routes/dailyProductionIdleTimeRoutes.js"); 
 const partQtyRoutes = require("./routes/partQtyRoutes.js");
 

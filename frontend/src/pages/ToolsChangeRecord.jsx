@@ -26,6 +26,7 @@ const getTodayISODate = () => {
 };
 
 const createEmptySection = (defaultMachineNo = "", defaultDate = "", numRows = INITIAL_ROWS) => ({
+  partTraceability: "",
   toolDescription: "",
   mcNo: defaultMachineNo,
   opNo: "",
@@ -71,9 +72,51 @@ export default function ToolChangeRecord() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Fetch Part Traceability from backend
+  const fetchPartTraceability = async (lineCode, date, shift, secIdx) => {
+    if (!lineCode || !date || !shift) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(
+        `http://localhost:5000/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
+          lineCode
+        )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch Part Traceability");
+      }
+
+      const data = await response.json();
+
+      setSections((prev) =>
+        prev.map((sec, idx) =>
+          idx === secIdx
+            ? {
+                ...sec,
+                partTraceability: data.partTraceability || "",
+              }
+            : sec
+        )
+      );
+    } catch (err) {
+      console.error("Part Traceability fetch error:", err);
+    }
+  };
+
   // Sync with LineSetContext whenever it changes
   useEffect(() => {
     if (lineSet) {
+      const newLineCode = lineSet.lineCode || headerInfo.lineCode;
       setHeaderInfo((prev) => ({
         ...prev,
         lineCode: lineSet.lineCode || prev.lineCode,
@@ -90,6 +133,17 @@ export default function ToolChangeRecord() {
             return next;
           }
           return prev;
+        });
+      }
+
+      if (newLineCode) {
+        sections.forEach((sec, idx) => {
+          fetchPartTraceability(
+            newLineCode,
+            sec.date || headerInfo.date,
+            sec.shift,
+            idx
+          );
         });
       }
     }
@@ -162,6 +216,33 @@ export default function ToolChangeRecord() {
     }));
   };
 
+  // Header date change handler: updates header and all column dates + traceability
+  const handleDateChange = (newDate) => {
+    setHeaderInfo((prev) => ({
+      ...prev,
+      date: newDate,
+    }));
+
+    setSections((prev) =>
+      prev.map((sec) => ({
+        ...sec,
+        date: newDate,
+      }))
+    );
+
+    if (headerInfo.lineCode) {
+      sections.forEach((sec, idx) => {
+        fetchPartTraceability(
+          headerInfo.lineCode,
+          newDate,
+          sec.shift,
+          idx
+        );
+      });
+    }
+  };
+
+  // Line Code change handler: updates lineCode and recalculates traceability across all columns
   const handleLineChange = (lineCode) => {
     setHeaderInfo((prev) => ({
       ...prev,
@@ -177,6 +258,15 @@ export default function ToolChangeRecord() {
       partName: "",
       partNo: "",
       machineNo: "",
+    });
+
+    sections.forEach((sec, idx) => {
+      fetchPartTraceability(
+        lineCode,
+        sec.date || headerInfo.date,
+        sec.shift,
+        idx
+      );
     });
   };
 
@@ -231,10 +321,23 @@ export default function ToolChangeRecord() {
   // Add a new section / column
   const handleAddColumn = () => {
     const currentNumRows = sections[0]?.rows?.length || INITIAL_ROWS;
+    const defaultDate = headerInfo.date || getTodayISODate();
+    const defaultShift = "I";
+    const newIdx = sections.length;
+
     setSections((prev) => [
       ...prev,
-      createEmptySection(headerInfo.machineNo, headerInfo.date, currentNumRows),
+      createEmptySection(headerInfo.machineNo, defaultDate, currentNumRows),
     ]);
+
+    if (headerInfo.lineCode) {
+      fetchPartTraceability(
+        headerInfo.lineCode,
+        defaultDate,
+        defaultShift,
+        newIdx
+      );
+    }
   };
 
   // Delete the last section / column if more than 1 exists
@@ -243,14 +346,29 @@ export default function ToolChangeRecord() {
   };
 
   const handleSectionMetaChange = (secIdx, field, val) => {
-    setSections((prev) => {
-      const next = [...prev];
-      next[secIdx] = {
-        ...next[secIdx],
-        [field]: val,
-      };
-      return next;
-    });
+    setSections((prev) =>
+      prev.map((sec, idx) =>
+        idx === secIdx
+          ? {
+              ...sec,
+              [field]: val,
+            }
+          : sec
+      )
+    );
+
+    if (field === "date" || field === "shift") {
+      const currentSection = sections[secIdx];
+      const date = field === "date" ? val : (currentSection?.date || headerInfo.date);
+      const shift = field === "shift" ? val : (currentSection?.shift || "I");
+
+      fetchPartTraceability(
+        headerInfo.lineCode,
+        date,
+        shift,
+        secIdx
+      );
+    }
   };
 
   const handleCellChange = (secIdx, rowIdx, field, val) => {
@@ -547,7 +665,7 @@ export default function ToolChangeRecord() {
               type="date"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.date}
-              onChange={(e) => handleHeaderChange("date", e.target.value)}
+              onChange={(e) => handleDateChange(e.target.value)}
             />
           </div>
         </div>
@@ -617,9 +735,7 @@ export default function ToolChangeRecord() {
           </div>
         </div>
 
-        {/* ========================================================
-            TOOL CHANGE BLOCKS (Max 3 columns per block, wraps underneath if > 3)
-        ======================================================== */}
+        {/* TOOL CHANGE BLOCKS */}
         <div className="space-y-8">
           {sectionChunks.map((chunk, chunkIdx) => (
             <div key={`chunk-${chunkIdx}`} className="space-y-2">
@@ -642,6 +758,35 @@ export default function ToolChangeRecord() {
                 <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed bg-white">
                   <tbody>
                     {/* TOOL DESCRIPTION */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <td
+                          key={`hdr-traceability-${globalIdx}`}
+                          colSpan={3}
+                          className="border border-gray-800 p-1.5 text-left font-normal bg-white"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span className="font-bold text-gray-800 whitespace-nowrap">
+                              PART TRACEABILITY :
+                            </span>
+
+                            <input
+                              type="text"
+                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
+                              value={sec.partTraceability}
+                              placeholder="Enter / Generate Traceability"
+                              onChange={(e) =>
+                                handleSectionMetaChange(
+                                  globalIdx,
+                                  "partTraceability",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
                     <tr>
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
@@ -947,7 +1092,7 @@ export default function ToolChangeRecord() {
                       </tr>
                     ))}
 
-                    {/* TOOL CHANGED BY - SIGNATURE  */}
+                    {/* TOOL CHANGED BY - SIGNATURE */}
                     <tr>
                       {chunk.map(({ sec, globalIdx }) => (
                         <React.Fragment key={`tc-sig-${globalIdx}`}>
@@ -962,7 +1107,6 @@ export default function ToolChangeRecord() {
                             className="border border-gray-800 p-0 text-left w-[14%]"
                           >
                             <div className="flex items-center px-2 py-1 gap-1">
-
                               <input
                                 type="text"
                                 className="w-full outline-none font-medium bg-transparent"
@@ -998,7 +1142,6 @@ export default function ToolChangeRecord() {
                             className="border border-gray-800 p-0 text-left w-[14%]"
                           >
                             <div className="flex items-center px-2 py-1 gap-1">
-                              
                               <input
                                 type="text"
                                 className="w-full outline-none font-medium bg-transparent"

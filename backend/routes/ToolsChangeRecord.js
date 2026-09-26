@@ -3,7 +3,8 @@ const router = express.Router();
 
 const {
     saveToolChangeRecord,
-    getToolChangeRecords
+    getToolChangeRecords,
+    getPartTraceability
 } = require('../controllers/toolChangeRecordController.js');
 
 
@@ -20,5 +21,8 @@ router.get(
     getToolChangeRecords
 );
 
-
+router.get(
+    '/tool-change-record/traceability',
+    getPartTraceability
+);
 module.exports = router;

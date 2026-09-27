@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
 import { ArrowLeft } from "lucide-react";
+import Header from '../components/Header';
 
 const CHUNK_SIZE = 3;
 const INITIAL_SECTIONS = 1;
@@ -500,37 +501,42 @@ export default function ToolChangeRecord() {
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+      <Header />
       {/* Saving and Success Modals */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200">
+
+          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
+
             {isSaving ? (
               <>
-                <div className="w-12 h-12 border-4 border-gray-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-4"></div>
+                <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
+
                 <h2 className="text-xl font-bold text-gray-800">
                   Saving Data...
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Saving Tool Change Record to database
+
+                <p className="text-gray-500 mt-2">
+                  Please wait
                 </p>
               </>
             ) : (
               <>
-                <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
-                  ✓
-                </div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  Saved Successfully!
+
+                <h2 className="text-xl font-bold text-green-800">
+                  Data Saved Successfully
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Redirecting to next report...
+
+                <p className="text-gray-500 mt-2">
+                  Loading next form...
                 </p>
               </>
             )}
+
           </div>
+
         </div>
       )}
-
       <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
         {/* Top Navigation & Card Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">

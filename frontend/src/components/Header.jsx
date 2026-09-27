@@ -45,17 +45,41 @@ const Header = () => {
   const handleBack = () => {
     const path = location.pathname;
 
-    // If we're anywhere under /operator/:shopId/... (or any role/:shopId/...), 
-    // go back to machine shop selection
-    const roleShopPattern = /^\/(operator|supervisor|hod|hof|product-engineer|gm|admin)\/[^/]+/;
+    // FORM → OPERATOR DASHBOARD
+    // /operator/1/form
+    // /operator/2/form
+    // /operator/3/form
+    // etc.
+    const operatorFormPattern = /^\/operator\/[^/]+\/.+/;
 
-    if (roleShopPattern.test(path)) {
-      navigate("/machine-shops");
-    } else {
-      // fallback to old behavior (e.g. from /machine-shops itself, go back to login)
-      const backPath = user.role ? `/${user.role.toLowerCase()}` : '/operator';
-      navigate(backPath);
+    if (operatorFormPattern.test(path)) {
+      const parts = path.split("/");
+      const shopId = parts[2];
+
+      navigate(`/operator/${shopId}`);
+      return;
     }
+
+    // OPERATOR DASHBOARD → MACHINE SHOP DASHBOARD
+    // /operator/1
+    // /operator/2
+    // /operator/3
+    // etc.
+    const operatorDashboardPattern = /^\/operator\/[^/]+$/;
+
+    if (operatorDashboardPattern.test(path)) {
+      navigate("/machine-shops");
+      return;
+    }
+
+    // MACHINE SHOP DASHBOARD → LOGIN
+    if (path === "/machine-shops") {
+      navigate("/operator");
+      return;
+    }
+
+    // Fallback
+    navigate("/operator");
   };
 
   const userInitial = user.username ? user.username.charAt(0).toUpperCase() : "U";

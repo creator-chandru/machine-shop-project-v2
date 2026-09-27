@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
+import Header from '../components/Header';
 
 const LOSS_REASONS = [
   { id: 1, category: "MAN", name: "Want of Man power", rowSpan: 2, isFirst: true },
@@ -17,6 +18,14 @@ const LOSS_REASONS = [
   { id: 12, category: "OTHERS", name: "Want of Power", isFirst: false },
   { id: 13, category: "OTHERS", name: "Want of schedule", isFirst: false },
 ];
+
+const getTodayISODate = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 const createEmptyLineColumn = (
   lineCode = "",
@@ -65,39 +74,20 @@ const createEmptyLineColumn = (
 
 export default function DailyProductionIdleTimeReport() {
   const { shopId } = useParams();
-  const { lineSet } = useLineSet();
+  const navigate = useNavigate();
+  const { lineSet, setLineSet } = useLineSet();
+
   const [machineShopDetails, setMachineShopDetails] = useState([]);
-  useEffect(() => {
-    const fetchMachineShopDetails = async () => {
-      try {
-        const response = await fetch(
-          `http://localhost:5000/api/machine-shop/${shopId}/pre-operation-details`
-        );
+  const [reportDate, setReportDate] = useState(getTodayISODate());
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch machine shop details");
-        }
-
-        const data = await response.json();
-
-        setMachineShopDetails(data);
-      } catch (error) {
-        console.error(
-          "Error fetching machine shop details:",
-          error
-        );
-      }
-    };
-
-    if (shopId) {
-      fetchMachineShopDetails();
-    }
-  }, [shopId]);
-
-  const [reportDate, setReportDate] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [lineColumns, setLineColumns] = useState([
-    createEmptyLineColumn(),
+    createEmptyLineColumn(
+      lineSet?.lineCode || "",
+      lineSet?.partName || ""
+    ),
   ]);
 
   const [signatures, setSignatures] = useState({
@@ -116,6 +106,54 @@ export default function DailyProductionIdleTimeReport() {
     teamLeaderSign: "",
   });
 
+  // Fetch machine shop details
+  useEffect(() => {
+    const fetchMachineShopDetails = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const response = await fetch(
+          `http://localhost:5000/api/machine-shop/${shopId}/details`,
+          {
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch machine shop details");
+        }
+
+        const data = await response.json();
+        setMachineShopDetails(data);
+      } catch (error) {
+        console.error("Error fetching machine shop details:", error);
+      }
+    };
+
+    if (shopId) {
+      fetchMachineShopDetails();
+    }
+  }, [shopId]);
+
+  // Sync with LineSetContext whenever it changes
+  useEffect(() => {
+    if (lineSet?.lineCode) {
+      setLineColumns((prev) => {
+        if (prev.length > 0) {
+          const next = [...prev];
+          next[0] = {
+            ...next[0],
+            lineCode: lineSet.lineCode || next[0].lineCode,
+            partName: lineSet.partName || next[0].partName,
+          };
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [lineSet]);
+
   const handleLineMetaChange = (colIdx, field, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
@@ -125,8 +163,29 @@ export default function DailyProductionIdleTimeReport() {
         [field]: val,
       };
 
+      if (field === "lineCode") {
+        next[colIdx].partName = "";
+      }
+
       return next;
     });
+
+    // Sync lineCode and partName changes from first column to LineSetContext
+    if (colIdx === 0 && setLineSet) {
+      if (field === "lineCode") {
+        setLineSet((prev) => ({
+          ...prev,
+          machineShop: shopId || lineSet?.machineShop || "3",
+          lineCode: val,
+          partName: "",
+        }));
+      } else if (field === "partName") {
+        setLineSet((prev) => ({
+          ...prev,
+          partName: val,
+        }));
+      }
+    }
   };
 
   const handleCapacityChange = (colIdx, shift, val) => {
@@ -395,23 +454,26 @@ export default function DailyProductionIdleTimeReport() {
       }
     }
 
+    setIsSaving(true);
+    setSaveSuccess(false);
+
     const payload = {
-      machineShop: lineSet?.machineShop || shopId,
+      machineShop: shopId || lineSet?.machineShop || 3,
       date: reportDate,
       lineColumns,
       signatures,
     };
 
     try {
+      const token = localStorage.getItem("token");
       const res = await fetch(
         "http://localhost:5000/api/daily-production-idle-time",
         {
           method: "POST",
-
           headers: {
             "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-
           body: JSON.stringify(payload),
         }
       );
@@ -420,31 +482,58 @@ export default function DailyProductionIdleTimeReport() {
         throw new Error("Save failed");
       }
 
-      const data = await res.json();
+      // Update LineSetContext
+      if (setLineSet && lineColumns[0]?.lineCode) {
+        setLineSet((prev) => ({
+          ...prev,
+          machineShop: shopId || lineSet?.machineShop || "3",
+          lineCode: lineColumns[0].lineCode,
+          partName: lineColumns[0].partName || prev?.partName || "",
+        }));
+      }
 
-      alert(
-        data.message ||
-          "Daily Production & Idle Time Report saved successfully!"
-      );
+      setIsSaving(false);
+      setSaveSuccess(true);
+
+      // Keep success message visible for 2 seconds
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Navigate to Operator home
+      navigate(`/operator/${shopId || 3}`);
     } catch (err) {
       console.error("Save error:", err);
-
-      alert(
-        "Failed to save report. Check console for details."
-      );
+      setIsSaving(false);
+      alert("Failed to save report. Check console for details.");
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-4 sm:p-6 pb-20">
+    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-4 pt-0 sm:p-6 pb-20">
+      <Header />
+      {/* Saving and Success Modals */}
+      {(isSaving || saveSuccess) && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
+            {isSaving ? (
+              <>
+                <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
+                <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
+                <p className="text-gray-500 mt-2">Please wait</p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
+                <p className="text-gray-500 mt-2">Returning to Operator Menu...</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white w-full max-w-[99rem] rounded-xl p-6 sm:p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b-2 border-gray-300 pb-5 gap-4">
-
           <div>
             <div className="flex items-center gap-3 mb-1">
-
               <span className="text-sm font-extrabold text-orange-600 tracking-widest uppercase bg-orange-50 px-2.5 py-0.5 rounded border border-orange-200">
                 SAKTHI AUTO
               </span>
@@ -452,7 +541,6 @@ export default function DailyProductionIdleTimeReport() {
               <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
                 OUTPUT ONLY
               </span>
-
             </div>
 
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-gray-900 tracking-tight uppercase leading-tight">
@@ -461,9 +549,7 @@ export default function DailyProductionIdleTimeReport() {
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-gray-50 border-2 border-gray-800 p-2.5 rounded shadow-sm">
-
             <div className="flex items-center gap-2">
-
               <label className="text-xs font-black text-gray-800 uppercase tracking-wide">
                 DATE :
               </label>
@@ -472,30 +558,22 @@ export default function DailyProductionIdleTimeReport() {
                 type="date"
                 className="bg-white border border-gray-300 rounded px-2 py-1 text-xs font-bold text-gray-800 outline-none focus:border-orange-500"
                 value={reportDate}
-                onChange={(e) =>
-                  setReportDate(e.target.value)
-                }
+                onChange={(e) => setReportDate(e.target.value)}
               />
-
             </div>
-
           </div>
         </div>
 
         <div className="flex justify-between items-center px-1">
-
           <div className="flex items-center gap-2"></div>
 
           <div className="flex items-center gap-2">
-
             <button
               type="button"
               onClick={handleAddColumn}
               className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
             >
-              <span className="text-sm font-bold leading-none">
-                +
-              </span>
+              <span className="text-sm font-bold leading-none">+</span>
               Add Line Column
             </button>
 
@@ -505,57 +583,36 @@ export default function DailyProductionIdleTimeReport() {
                 onClick={handleRemoveColumn}
                 className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
               >
-                <span className="text-sm font-bold leading-none">
-                  −
-                </span>
+                <span className="text-sm font-bold leading-none">−</span>
                 Delete Column
               </button>
             )}
-
           </div>
         </div>
 
         <div className="space-y-8">
-
           {columnChunks.map((chunk, chunkIdx) => (
-
-            <div
-              key={`chunk-${chunkIdx}`}
-              className="space-y-2"
-            >
-
+            <div key={`chunk-${chunkIdx}`} className="space-y-2">
               {columnChunks.length > 1 && (
                 <div className="flex items-center gap-2 px-1">
-
                   <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
                     Table {chunkIdx + 1}
                   </span>
 
                   <span className="text-xs text-gray-500 font-semibold">
-                    (Production Lines{" "}
-                    {chunk[0].globalIdx + 1}
-
+                    (Production Lines {chunk[0].globalIdx + 1}
                     {chunk.length > 1
-                      ? ` to ${
-                          chunk[
-                            chunk.length - 1
-                          ].globalIdx + 1
-                        }`
+                      ? ` to ${chunk[chunk.length - 1].globalIdx + 1}`
                       : ""}
                     )
                   </span>
-
                 </div>
               )}
 
               <div className="overflow-x-auto">
-
                 <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
-
                   <thead>
-
                     <tr>
-
                       <th
                         colSpan={3}
                         className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold w-64"
@@ -563,15 +620,13 @@ export default function DailyProductionIdleTimeReport() {
                         LINE CODE
                       </th>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <th
-                            key={`lc-${globalIdx}`}
-                            colSpan={4}
-                            className="border border-gray-800 p-0 bg-white"
-                          >
-
-                            <select
+                      {chunk.map(({ col, globalIdx }) => (
+                        <th
+                          key={`lc-${globalIdx}`}
+                          colSpan={4}
+                          className="border border-gray-800 p-0 bg-white"
+                        >
+                          <select
                             className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
                             value={col.lineCode || ""}
                             onChange={(e) => {
@@ -580,40 +635,27 @@ export default function DailyProductionIdleTimeReport() {
                                 "lineCode",
                                 e.target.value
                               );
-
-                              handleLineMetaChange(
-                                globalIdx,
-                                "partName",
-                                ""
-                              );
                             }}
                           >
                             <option value="">Select Line Code</option>
 
                             {[
                               ...new Set(
-                                machineShopDetails.map(
-                                  (item) => item.lineCode
-                                )
+                                machineShopDetails
+                                  .map((item) => item.lineCode)
+                                  .filter(Boolean)
                               ),
                             ].map((lineCode) => (
-                              <option
-                                key={lineCode}
-                                value={lineCode}
-                              >
+                              <option key={lineCode} value={lineCode}>
                                 {lineCode}
                               </option>
                             ))}
                           </select>
-
-                          </th>
-                        )
-                      )}
-
+                        </th>
+                      ))}
                     </tr>
 
                     <tr>
-
                       <th
                         colSpan={3}
                         className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold"
@@ -621,15 +663,13 @@ export default function DailyProductionIdleTimeReport() {
                         PART NAME
                       </th>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <th
-                            key={`pn-${globalIdx}`}
-                            colSpan={4}
-                            className="border border-gray-800 p-0 bg-white"
-                          >
-
-                            <select
+                      {chunk.map(({ col, globalIdx }) => (
+                        <th
+                          key={`pn-${globalIdx}`}
+                          colSpan={4}
+                          className="border border-gray-800 p-0 bg-white"
+                        >
+                          <select
                             className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
                             value={col.partName || ""}
                             onChange={(e) =>
@@ -646,32 +686,21 @@ export default function DailyProductionIdleTimeReport() {
                             {[
                               ...new Set(
                                 machineShopDetails
-                                  .filter(
-                                    (item) =>
-                                      item.lineCode === col.lineCode
-                                  )
-                                  .map(
-                                    (item) => item.partName
-                                  )
+                                  .filter((item) => item.lineCode === col.lineCode)
+                                  .map((item) => item.partName)
+                                  .filter(Boolean)
                               ),
                             ].map((partName) => (
-                              <option
-                                key={partName}
-                                value={partName}
-                              >
+                              <option key={partName} value={partName}>
                                 {partName}
                               </option>
                             ))}
                           </select>
-
-                          </th>
-                        )
-                      )}
-
+                        </th>
+                      ))}
                     </tr>
 
                     <tr>
-
                       <th
                         colSpan={3}
                         className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold"
@@ -679,49 +708,33 @@ export default function DailyProductionIdleTimeReport() {
                         ABS / NABS
                       </th>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <th
-                            key={`bt-${globalIdx}`}
-                            colSpan={4}
-                            className="border border-gray-800 p-0 bg-white"
+                      {chunk.map(({ col, globalIdx }) => (
+                        <th
+                          key={`bt-${globalIdx}`}
+                          colSpan={4}
+                          className="border border-gray-800 p-0 bg-white"
+                        >
+                          <select
+                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
+                            value={col.brakeType || ""}
+                            onChange={(e) =>
+                              handleLineMetaChange(
+                                globalIdx,
+                                "brakeType",
+                                e.target.value
+                              )
+                            }
                           >
-
-                            <select
-                              className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
-                              value={col.brakeType || ""}
-                              onChange={(e) =>
-                                handleLineMetaChange(
-                                  globalIdx,
-                                  "brakeType",
-                                  e.target.value
-                                )
-                              }
-                            >
-                              <option value="">
-                                Select
-                              </option>
-
-                              <option value="ABS">
-                                ABS
-                              </option>
-
-                              <option value="NABS">
-                                NABS
-                              </option>
-                            </select>
-
-                          </th>
-                        )
-                      )}
-
+                            <option value="">Select</option>
+                            <option value="ABS">ABS</option>
+                            <option value="NABS">NABS</option>
+                          </select>
+                        </th>
+                      ))}
                     </tr>
 
                     <tr className="bg-gray-100 font-bold text-[11px]">
-
-                      <th className="border border-gray-800 p-1 w-10">
-                        S.No.
-                      </th>
+                      <th className="border border-gray-800 p-1 w-10">S.No.</th>
 
                       <th
                         colSpan={2}
@@ -731,31 +744,18 @@ export default function DailyProductionIdleTimeReport() {
                       </th>
 
                       {chunk.map(({ globalIdx }) => (
-                        <React.Fragment
-                          key={`sh-hdr-${globalIdx}`}
-                        >
-                          <th className="border border-gray-800 p-1 w-14">
-                            I
-                          </th>
-
-                          <th className="border border-gray-800 p-1 w-14">
-                            II
-                          </th>
-
-                          <th className="border border-gray-800 p-1 w-14">
-                            III
-                          </th>
-
+                        <React.Fragment key={`sh-hdr-${globalIdx}`}>
+                          <th className="border border-gray-800 p-1 w-14">I</th>
+                          <th className="border border-gray-800 p-1 w-14">II</th>
+                          <th className="border border-gray-800 p-1 w-14">III</th>
                           <th className="border border-gray-800 p-1 w-16 bg-gray-200">
                             T
                           </th>
                         </React.Fragment>
                       ))}
-
                     </tr>
 
                     <tr className="bg-white">
-
                       <td
                         colSpan={3}
                         className="border border-gray-800 p-1 text-left font-bold bg-gray-50 px-2"
@@ -763,58 +763,41 @@ export default function DailyProductionIdleTimeReport() {
                         CAPACITY QTY IN SETS
                       </td>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <React.Fragment
-                            key={`cap-${globalIdx}`}
-                          >
-
-                            {["shift1", "shift2", "shift3"].map(
-                              (shift) => (
-                                <td
-                                  key={shift}
-                                  className="border border-gray-800 p-0"
-                                >
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    placeholder="0"
-                                    className="w-full h-full text-center font-semibold outline-none py-1"
-                                    value={
-                                      col.capacity[shift]
-                                    }
-                                    onChange={(e) =>
-                                      handleCapacityChange(
-                                        globalIdx,
-                                        shift,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </td>
-                              )
-                            )}
-
-                            <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
-                              {sumValues(
-                                col.capacity.shift1,
-                                col.capacity.shift2,
-                                col.capacity.shift3
-                              )}
+                      {chunk.map(({ col, globalIdx }) => (
+                        <React.Fragment key={`cap-${globalIdx}`}>
+                          {["shift1", "shift2", "shift3"].map((shift) => (
+                            <td key={shift} className="border border-gray-800 p-0">
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="0"
+                                className="w-full h-full text-center font-semibold outline-none py-1"
+                                value={col.capacity[shift]}
+                                onChange={(e) =>
+                                  handleCapacityChange(
+                                    globalIdx,
+                                    shift,
+                                    e.target.value
+                                  )
+                                }
+                              />
                             </td>
+                          ))}
 
-                          </React.Fragment>
-                        )
-                      )}
-
+                          <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
+                            {sumValues(
+                              col.capacity.shift1,
+                              col.capacity.shift2,
+                              col.capacity.shift3
+                            )}
+                          </td>
+                        </React.Fragment>
+                      ))}
                     </tr>
-
                   </thead>
 
                   <tbody>
-
                     <tr>
-
                       <td
                         rowSpan={2}
                         colSpan={2}
@@ -827,122 +810,80 @@ export default function DailyProductionIdleTimeReport() {
                         LH
                       </td>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <React.Fragment
-                            key={`lh-${globalIdx}`}
-                          >
-
-                            {["shift1", "shift2", "shift3"].map(
-                              (shift) => (
-                                <td
-                                  key={shift}
-                                  className="border border-gray-800 p-0"
-                                >
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={
-                                      col.capacity[
-                                        shift
-                                      ] || undefined
-                                    }
-                                    placeholder="0"
-                                    className="w-full h-full text-center outline-none py-1 font-medium"
-                                    value={
-                                      col.actualProd.lh[
-                                        shift
-                                      ]
-                                    }
-                                    onChange={(e) =>
-                                      handleActualProdChange(
-                                        globalIdx,
-                                        "lh",
-                                        shift,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </td>
-                              )
-                            )}
-
-                            <td className="border border-gray-800 p-1 font-bold bg-gray-100">
-                              {sumValues(
-                                col.actualProd.lh.shift1,
-                                col.actualProd.lh.shift2,
-                                col.actualProd.lh.shift3
-                              )}
+                      {chunk.map(({ col, globalIdx }) => (
+                        <React.Fragment key={`lh-${globalIdx}`}>
+                          {["shift1", "shift2", "shift3"].map((shift) => (
+                            <td key={shift} className="border border-gray-800 p-0">
+                              <input
+                                type="number"
+                                min="0"
+                                max={col.capacity[shift] || undefined}
+                                placeholder="0"
+                                className="w-full h-full text-center outline-none py-1 font-medium"
+                                value={col.actualProd.lh[shift]}
+                                onChange={(e) =>
+                                  handleActualProdChange(
+                                    globalIdx,
+                                    "lh",
+                                    shift,
+                                    e.target.value
+                                  )
+                                }
+                              />
                             </td>
+                          ))}
 
-                          </React.Fragment>
-                        )
-                      )}
-
+                          <td className="border border-gray-800 p-1 font-bold bg-gray-100">
+                            {sumValues(
+                              col.actualProd.lh.shift1,
+                              col.actualProd.lh.shift2,
+                              col.actualProd.lh.shift3
+                            )}
+                          </td>
+                        </React.Fragment>
+                      ))}
                     </tr>
 
                     <tr>
-
                       <td className="border border-gray-800 p-1 font-bold bg-gray-100 w-10">
                         RH
                       </td>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <React.Fragment
-                            key={`rh-${globalIdx}`}
-                          >
-
-                            {["shift1", "shift2", "shift3"].map(
-                              (shift) => (
-                                <td
-                                  key={shift}
-                                  className="border border-gray-800 p-0"
-                                >
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={
-                                      col.capacity[
-                                        shift
-                                      ] || undefined
-                                    }
-                                    placeholder="0"
-                                    className="w-full h-full text-center outline-none py-1 font-medium"
-                                    value={
-                                      col.actualProd.rh[
-                                        shift
-                                      ]
-                                    }
-                                    onChange={(e) =>
-                                      handleActualProdChange(
-                                        globalIdx,
-                                        "rh",
-                                        shift,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </td>
-                              )
-                            )}
-
-                            <td className="border border-gray-800 p-1 font-bold bg-gray-100">
-                              {sumValues(
-                                col.actualProd.rh.shift1,
-                                col.actualProd.rh.shift2,
-                                col.actualProd.rh.shift3
-                              )}
+                      {chunk.map(({ col, globalIdx }) => (
+                        <React.Fragment key={`rh-${globalIdx}`}>
+                          {["shift1", "shift2", "shift3"].map((shift) => (
+                            <td key={shift} className="border border-gray-800 p-0">
+                              <input
+                                type="number"
+                                min="0"
+                                max={col.capacity[shift] || undefined}
+                                placeholder="0"
+                                className="w-full h-full text-center outline-none py-1 font-medium"
+                                value={col.actualProd.rh[shift]}
+                                onChange={(e) =>
+                                  handleActualProdChange(
+                                    globalIdx,
+                                    "rh",
+                                    shift,
+                                    e.target.value
+                                  )
+                                }
+                              />
                             </td>
+                          ))}
 
-                          </React.Fragment>
-                        )
-                      )}
-
+                          <td className="border border-gray-800 p-1 font-bold bg-gray-100">
+                            {sumValues(
+                              col.actualProd.rh.shift1,
+                              col.actualProd.rh.shift2,
+                              col.actualProd.rh.shift3
+                            )}
+                          </td>
+                        </React.Fragment>
+                      ))}
                     </tr>
 
                     <tr className="bg-gray-50">
-
                       <td
                         colSpan={3}
                         className="border border-gray-800 p-1 font-bold text-left px-2"
@@ -950,50 +891,36 @@ export default function DailyProductionIdleTimeReport() {
                         NO OF MANPOWER (UTILIZED)
                       </td>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <React.Fragment
-                            key={`mp-${globalIdx}`}
-                          >
-
-                            {["shift1", "shift2", "shift3"].map(
-                              (shift) => (
-                                <td
-                                  key={shift}
-                                  className="border border-gray-800 p-0"
-                                >
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    placeholder="0"
-                                    className="w-full h-full text-center outline-none py-1 font-medium bg-transparent"
-                                    value={
-                                      col.manpower[shift]
-                                    }
-                                    onChange={(e) =>
-                                      handleManpowerChange(
-                                        globalIdx,
-                                        shift,
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </td>
-                              )
-                            )}
-
-                            <td className="border border-gray-800 p-1 font-bold bg-gray-200">
-                              {sumValues(
-                                col.manpower.shift1,
-                                col.manpower.shift2,
-                                col.manpower.shift3
-                              )}
+                      {chunk.map(({ col, globalIdx }) => (
+                        <React.Fragment key={`mp-${globalIdx}`}>
+                          {["shift1", "shift2", "shift3"].map((shift) => (
+                            <td key={shift} className="border border-gray-800 p-0">
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="0"
+                                className="w-full h-full text-center outline-none py-1 font-medium bg-transparent"
+                                value={col.manpower[shift]}
+                                onChange={(e) =>
+                                  handleManpowerChange(
+                                    globalIdx,
+                                    shift,
+                                    e.target.value
+                                  )
+                                }
+                              />
                             </td>
+                          ))}
 
-                          </React.Fragment>
-                        )
-                      )}
-
+                          <td className="border border-gray-800 p-1 font-bold bg-gray-200">
+                            {sumValues(
+                              col.manpower.shift1,
+                              col.manpower.shift2,
+                              col.manpower.shift3
+                            )}
+                          </td>
+                        </React.Fragment>
+                      ))}
                     </tr>
 
                     {LOSS_REASONS.map((loss) => (
@@ -1001,7 +928,6 @@ export default function DailyProductionIdleTimeReport() {
                         key={`loss-row-${loss.id}`}
                         className="hover:bg-gray-50/50"
                       >
-
                         <td className="border border-gray-800 p-1 font-bold text-gray-700">
                           {loss.id}
                         </td>
@@ -1019,63 +945,40 @@ export default function DailyProductionIdleTimeReport() {
                           {loss.name}
                         </td>
 
-                        {chunk.map(
-                          ({ col, globalIdx }) => (
-                            <React.Fragment
-                              key={`l-${loss.id}-${globalIdx}`}
-                            >
-
-                              {["shift1", "shift2", "shift3"].map(
-                                (shift) => (
-                                  <td
-                                    key={shift}
-                                    className="border border-gray-800 p-0"
-                                  >
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      className="w-full h-full text-center outline-none py-1 bg-transparent"
-                                      value={
-                                        col.losses[
-                                          `loss_${loss.id}`
-                                        ]?.[shift]
-                                      }
-                                      onChange={(e) =>
-                                        handleLossChange(
-                                          globalIdx,
-                                          loss.id,
-                                          shift,
-                                          e.target.value
-                                        )
-                                      }
-                                    />
-                                  </td>
-                                )
-                              )}
-
-                              <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
-                                {sumValues(
-                                  col.losses[
-                                    `loss_${loss.id}`
-                                  ]?.shift1,
-                                  col.losses[
-                                    `loss_${loss.id}`
-                                  ]?.shift2,
-                                  col.losses[
-                                    `loss_${loss.id}`
-                                  ]?.shift3
-                                )}
+                        {chunk.map(({ col, globalIdx }) => (
+                          <React.Fragment key={`l-${loss.id}-${globalIdx}`}>
+                            {["shift1", "shift2", "shift3"].map((shift) => (
+                              <td key={shift} className="border border-gray-800 p-0">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  className="w-full h-full text-center outline-none py-1 bg-transparent"
+                                  value={col.losses[`loss_${loss.id}`]?.[shift]}
+                                  onChange={(e) =>
+                                    handleLossChange(
+                                      globalIdx,
+                                      loss.id,
+                                      shift,
+                                      e.target.value
+                                    )
+                                  }
+                                />
                               </td>
+                            ))}
 
-                            </React.Fragment>
-                          )
-                        )}
-
+                            <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
+                              {sumValues(
+                                col.losses[`loss_${loss.id}`]?.shift1,
+                                col.losses[`loss_${loss.id}`]?.shift2,
+                                col.losses[`loss_${loss.id}`]?.shift3
+                              )}
+                            </td>
+                          </React.Fragment>
+                        ))}
                       </tr>
                     ))}
 
                     <tr className="bg-gray-200 font-extrabold text-gray-900">
-
                       <td
                         colSpan={3}
                         className="border border-gray-800 p-1.5 text-left px-2"
@@ -1083,120 +986,74 @@ export default function DailyProductionIdleTimeReport() {
                         Total Loss (mins)
                       </td>
 
-                      {chunk.map(
-                        ({ col, globalIdx }) => (
-                          <React.Fragment
-                            key={`tot-loss-${globalIdx}`}
-                          >
+                      {chunk.map(({ col, globalIdx }) => (
+                        <React.Fragment key={`tot-loss-${globalIdx}`}>
+                          <td className="border border-gray-800 p-1">
+                            {calcTotalLoss(col, "shift1")}
+                          </td>
 
-                            <td className="border border-gray-800 p-1">
-                              {calcTotalLoss(
-                                col,
-                                "shift1"
-                              )}
-                            </td>
+                          <td className="border border-gray-800 p-1">
+                            {calcTotalLoss(col, "shift2")}
+                          </td>
 
-                            <td className="border border-gray-800 p-1">
-                              {calcTotalLoss(
-                                col,
-                                "shift2"
-                              )}
-                            </td>
+                          <td className="border border-gray-800 p-1">
+                            {calcTotalLoss(col, "shift3")}
+                          </td>
 
-                            <td className="border border-gray-800 p-1">
-                              {calcTotalLoss(
-                                col,
-                                "shift3"
-                              )}
-                            </td>
-
-                            <td className="border border-gray-800 p-1 bg-gray-300">
-                              {sumValues(
-                                calcTotalLoss(
-                                  col,
-                                  "shift1"
-                                ),
-                                calcTotalLoss(
-                                  col,
-                                  "shift2"
-                                ),
-                                calcTotalLoss(
-                                  col,
-                                  "shift3"
-                                )
-                              )}
-                            </td>
-
-                          </React.Fragment>
-                        )
-                      )}
-
+                          <td className="border border-gray-800 p-1 bg-gray-300">
+                            {sumValues(
+                              calcTotalLoss(col, "shift1"),
+                              calcTotalLoss(col, "shift2"),
+                              calcTotalLoss(col, "shift3")
+                            )}
+                          </td>
+                        </React.Fragment>
+                      ))}
                     </tr>
-
                   </tbody>
-
                 </table>
-
               </div>
             </div>
           ))}
         </div>
 
         <div className="overflow-x-auto pt-2">
-
           <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
-
             <tbody>
-
               <tr>
-
                 <td className="border border-gray-800 p-1.5 font-bold bg-gray-100 text-left w-48">
                   SECTION INCHARGE SIGN
                 </td>
 
-                {["shift1", "shift2", "shift3"].map(
-                  (s, idx) => (
-                    <td
-                      key={`sis-${s}`}
-                      className="border border-gray-800 p-0"
-                    >
+                {["shift1", "shift2", "shift3"].map((s, idx) => (
+                  <td key={`sis-${s}`} className="border border-gray-800 p-0">
+                    <div className="flex items-center px-2 py-1">
+                      <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
+                        SHIFT-{["I", "II", "III"][idx]}:
+                      </span>
 
-                      <div className="flex items-center px-2 py-1">
-
-                        <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
-                          SHIFT-
-                          {["I", "II", "III"][idx]}:
-                        </span>
-
-                        <input
-                          type="text"
-                          placeholder="Signature"
-                          className="w-full outline-none font-medium bg-transparent text-center"
-                          value={
-                            signatures
-                              .sectionInchargeSign[s]
-                          }
-                          onChange={(e) =>
-                            handleSignatureChange(
-                              "sectionInchargeSign",
-                              s,
-                              e.target.value
-                            )
-                          }
-                        />
-
-                      </div>
-                    </td>
-                  )
-                )}
+                      <input
+                        type="text"
+                        placeholder="Signature"
+                        className="w-full outline-none font-medium bg-transparent text-center"
+                        value={signatures.sectionInchargeSign[s]}
+                        onChange={(e) =>
+                          handleSignatureChange(
+                            "sectionInchargeSign",
+                            s,
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                  </td>
+                ))}
 
                 <td
                   className="border border-gray-800 p-0 w-80 text-left align-middle"
                   rowSpan={2}
                 >
-
                   <div className="flex items-center px-3 py-2 gap-2">
-
                     <span className="font-bold text-gray-800 whitespace-nowrap">
                       TEAM LEADER SIGN :
                     </span>
@@ -1205,9 +1062,7 @@ export default function DailyProductionIdleTimeReport() {
                       type="text"
                       placeholder="Signature"
                       className="w-full outline-none font-medium bg-transparent border-b border-gray-300 focus:border-orange-500 py-1"
-                      value={
-                        signatures.teamLeaderSign
-                      }
+                      value={signatures.teamLeaderSign}
                       onChange={(e) =>
                         handleSignatureChange(
                           "teamLeaderSign",
@@ -1216,62 +1071,41 @@ export default function DailyProductionIdleTimeReport() {
                         )
                       }
                     />
-
                   </div>
-
                 </td>
-
               </tr>
 
               <tr>
-
                 <td className="border border-gray-800 p-1.5 font-bold bg-gray-100 text-left">
                   SHIFT OFFICER SIGN
                 </td>
 
-                {["shift1", "shift2", "shift3"].map(
-                  (s, idx) => (
-                    <td
-                      key={`sos-${s}`}
-                      className="border border-gray-800 p-0"
-                    >
+                {["shift1", "shift2", "shift3"].map((s, idx) => (
+                  <td key={`sos-${s}`} className="border border-gray-800 p-0">
+                    <div className="flex items-center px-2 py-1">
+                      <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
+                        SHIFT-{["I", "II", "III"][idx]}:
+                      </span>
 
-                      <div className="flex items-center px-2 py-1">
-
-                        <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
-                          SHIFT-
-                          {["I", "II", "III"][idx]}:
-                        </span>
-
-                        <input
-                          type="text"
-                          placeholder="Signature"
-                          className="w-full outline-none font-medium bg-transparent text-center"
-                          value={
-                            signatures
-                              .shiftOfficerSign[s]
-                          }
-                          onChange={(e) =>
-                            handleSignatureChange(
-                              "shiftOfficerSign",
-                              s,
-                              e.target.value
-                            )
-                          }
-                        />
-
-                      </div>
-
-                    </td>
-                  )
-                )}
-
+                      <input
+                        type="text"
+                        placeholder="Signature"
+                        className="w-full outline-none font-medium bg-transparent text-center"
+                        value={signatures.shiftOfficerSign[s]}
+                        onChange={(e) =>
+                          handleSignatureChange(
+                            "shiftOfficerSign",
+                            s,
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                  </td>
+                ))}
               </tr>
-
             </tbody>
-
           </table>
-
         </div>
 
         <div className="border border-gray-800 p-2 bg-yellow-50 text-[11px] font-bold text-gray-800 flex items-center justify-center">
@@ -1279,17 +1113,15 @@ export default function DailyProductionIdleTimeReport() {
         </div>
 
         <div className="flex justify-end gap-4 pt-4 border-t border-gray-300">
-
           <button
             type="button"
             onClick={handleSave}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer text-sm tracking-wider uppercase"
+            disabled={isSaving || saveSuccess}
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer text-sm tracking-wider uppercase"
           >
-            Save Report
+            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE REPORT"}
           </button>
-
         </div>
-
       </div>
     </div>
   );

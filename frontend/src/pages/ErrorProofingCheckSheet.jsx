@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate} from 'react-router-dom';
 import { useLineSet } from "../context/LineSetContext.jsx"
-
+import Header from '../components/Header';
 const INITIAL_ROWS = 1;
 
 const initialFormData = {
@@ -301,6 +301,7 @@ export default function ErrorProofingCheckSheet() {
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+      <Header />
 
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

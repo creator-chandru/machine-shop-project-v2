@@ -78,6 +78,7 @@ export default function DailyProductionIdleTimeReport() {
   const { lineSet, setLineSet } = useLineSet();
 
   const [machineShopDetails, setMachineShopDetails] = useState([]);
+  const [partQuantities, setPartQuantities] = useState([]);
   const [reportDate, setReportDate] = useState(getTodayISODate());
 
   const [isSaving, setIsSaving] = useState(false);
@@ -154,6 +155,52 @@ export default function DailyProductionIdleTimeReport() {
     }
   }, [lineSet]);
 
+  useEffect(() => {
+    const fetchPartQuantities = async () => {
+      try {
+        const token = localStorage.getItem("token");
+
+        const response = await fetch(
+          `http://localhost:5000/api/machine-shop/${shopId}/part-quantities`,
+          {
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch part quantities");
+        }
+
+        setPartQuantities(await response.json());
+      } catch (error) {
+        console.error("Error fetching part quantities:", error);
+        setPartQuantities([]);
+      }
+    };
+
+    if (shopId) {
+      fetchPartQuantities();
+    }
+  }, [shopId]);
+
+  const getPartCapacity = (partName) => {
+    const selectedPart = partQuantities.find(
+      (part) =>
+        part.partName?.trim().toLowerCase() ===
+        partName?.trim().toLowerCase()
+    );
+
+    if (!selectedPart) return null;
+
+    return {
+      shift1: selectedPart.shift1Quantity ?? 0,
+      shift2: selectedPart.shift2Quantity ?? 0,
+      shift3: selectedPart.shift3Quantity ?? 0,
+    };
+  };
+
   const handleLineMetaChange = (colIdx, field, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
@@ -165,12 +212,26 @@ export default function DailyProductionIdleTimeReport() {
 
       if (field === "lineCode") {
         next[colIdx].partName = "";
+        next[colIdx].capacity = {
+          shift1: "",
+          shift2: "",
+          shift3: "",
+        };
+      }
+
+      if (field === "partName") {
+        const capacity = getPartCapacity(val);
+
+        next[colIdx].capacity = capacity || {
+          shift1: "",
+          shift2: "",
+          shift3: "",
+        };
       }
 
       return next;
     });
 
-    // Sync lineCode and partName changes from first column to LineSetContext
     if (colIdx === 0 && setLineSet) {
       if (field === "lineCode") {
         setLineSet((prev) => ({
@@ -773,13 +834,7 @@ export default function DailyProductionIdleTimeReport() {
                                 placeholder="0"
                                 className="w-full h-full text-center font-semibold outline-none py-1"
                                 value={col.capacity[shift]}
-                                onChange={(e) =>
-                                  handleCapacityChange(
-                                    globalIdx,
-                                    shift,
-                                    e.target.value
-                                  )
-                                }
+                                readOnly
                               />
                             </td>
                           ))}

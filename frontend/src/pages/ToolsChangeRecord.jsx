@@ -81,6 +81,8 @@ export default function ToolChangeRecord() {
   });
 
   const [machineDetails, setMachineDetails] = useState([]);
+  const [loadingMachineDetails, setLoadingMachineDetails] =
+  useState(true);
   
 
   const [sections, setSections] = useState(
@@ -112,7 +114,7 @@ export default function ToolChangeRecord() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `${process.env.REACT_APP_API_URL}/tool-change-record/traceability?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL}/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
           lineCode
         )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         {
@@ -190,7 +192,7 @@ export default function ToolChangeRecord() {
 
         const token = localStorage.getItem("token");
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -477,7 +479,7 @@ export default function ToolChangeRecord() {
 
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/tool-change-record`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/tool-change-record`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

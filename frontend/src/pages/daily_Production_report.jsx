@@ -115,7 +115,7 @@ export default function DailyProductionReport() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `${process.env.REACT_APP_API_URL}/daily-production-report/traceability?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL}/api/daily-production-report/traceability?lineCode=${encodeURIComponent(
           lineCode
         )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         {
@@ -167,7 +167,7 @@ export default function DailyProductionReport() {
       try {
         if (!shopId) return;
         const token = localStorage.getItem("token");
-        const res = await fetch(`${process.env.REACT_APP_API_URL}/machine-shop/${shopId}/details`, {
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/details`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -289,7 +289,7 @@ export default function DailyProductionReport() {
     };
 
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/daily-production-report`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/daily-production-report`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

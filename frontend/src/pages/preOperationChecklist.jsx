@@ -218,7 +218,7 @@ export default function PreOperationChecklist() {
 
         const token = localStorage.getItem('token');
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -437,7 +437,7 @@ export default function PreOperationChecklist() {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/pre-operation-checklist`,
+        `${process.env.REACT_APP_API_URL}/api/pre-operation-checklist`,
         {
           method: 'POST',
           headers: {

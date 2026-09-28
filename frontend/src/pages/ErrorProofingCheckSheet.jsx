@@ -101,7 +101,7 @@ export default function ErrorProofingCheckSheet() {
         const token = localStorage.getItem("token");
 
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -277,7 +277,7 @@ export default function ErrorProofingCheckSheet() {
       const token = localStorage.getItem('token');
 
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/error-proofing-checksheet`,
+        `${process.env.REACT_APP_API_URL}/api/error-proofing-checksheet`,
         {
           method: 'POST',
           headers: {

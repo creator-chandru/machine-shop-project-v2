@@ -13,7 +13,7 @@ const EditPartQuantity = ({ shopId }) => {
       // Get the token directly from local storage
       const token = localStorage.getItem("token");
 
-      fetch(`http://localhost:5000/api/parts/${shopId}`, {
+      fetch(`${process.env.REACT_APP_API_URL}/api/parts/${shopId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -65,7 +65,7 @@ const handleSubmit = async (e) => {
       // Get the token directly from local storage for the PUT request
       const token = localStorage.getItem("token");
 
-      const response = await fetch(`http://localhost:5000/api/parts/${shopId}/${selectedPartId}`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/parts/${shopId}/${selectedPartId}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',

@@ -149,7 +149,7 @@ export default function AirGapSensorCheckSheet() {
         const token = localStorage.getItem("token");
 
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -271,7 +271,7 @@ export default function AirGapSensorCheckSheet() {
         });
 
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/air-gap-sensor?${params.toString()}`,
+          `${process.env.REACT_APP_API_URL}/api/air-gap-sensor?${params.toString()}`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -503,7 +503,7 @@ export default function AirGapSensorCheckSheet() {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/air-gap-sensor`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/air-gap-sensor`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

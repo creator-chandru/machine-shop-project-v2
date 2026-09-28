@@ -142,7 +142,7 @@ export default function DailyProductionIdleTimeReport() {
       try {
         const token = localStorage.getItem("token");
         const response = await fetch(
-          `${process.env.REACT_APP_API_URL}/machine-shop/${shopId}/details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/details`,
           {
             headers: {
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -190,7 +190,7 @@ export default function DailyProductionIdleTimeReport() {
         const token = localStorage.getItem("token");
 
         const response = await fetch(
-          `${process.env.REACT_APP_API_URL}/machine-shop/${shopId}/part-quantities`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/part-quantities`,
           {
             headers: {
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -562,7 +562,7 @@ export default function DailyProductionIdleTimeReport() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/daily-production-idle-time`,
+        `${process.env.REACT_APP_API_URL}/api/daily-production-idle-time`,
         {
           method: "POST",
           headers: {

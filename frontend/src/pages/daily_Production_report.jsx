@@ -43,6 +43,25 @@ const createEmptyRow = () => ({
   },
 });
 
+// Toast notification component
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+
+  const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
+      <span className="text-sm font-semibold">{message}</span>
+      <button 
+        onClick={onClose}
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
 export default function DailyProductionReport() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -53,6 +72,16 @@ export default function DailyProductionReport() {
 
   const [machineDetails, setMachineDetails] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
+
+  // Toast state
+  const [toast, setToast] = useState({ message: '', type: '' });
+
+  const triggerToast = (message, type = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast({ message: '', type: '' });
+    }, 4000);
+  };
 
   // 1. Header Information (date defaults to today's date)
   const [header, setHeader] = useState({
@@ -86,7 +115,7 @@ export default function DailyProductionReport() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `http://localhost:5000/api/daily-production-report/traceability?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL}/daily-production-report/traceability?lineCode=${encodeURIComponent(
           lineCode
         )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         {
@@ -138,7 +167,7 @@ export default function DailyProductionReport() {
       try {
         if (!shopId) return;
         const token = localStorage.getItem("token");
-        const res = await fetch(`http://localhost:5000/api/machine-shop/${shopId}/details`, {
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/machine-shop/${shopId}/details`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -240,13 +269,13 @@ export default function DailyProductionReport() {
 
   const handleSave = async () => {
     if (!header.lineCode) {
-      alert("Please select a Line Code in the header before saving.");
+      triggerToast("Please select a Line Code in the header before saving.", "error");
       return;
     }
 
     const token = localStorage.getItem("token");
     if (!token) {
-      alert("Authentication token missing or session expired. Please log in again.");
+      triggerToast("Authentication token missing or session expired. Please log in again.", "error");
       return;
     }
 
@@ -260,7 +289,7 @@ export default function DailyProductionReport() {
     };
 
     try {
-      const res = await fetch("http://localhost:5000/api/daily-production-report", {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/daily-production-report`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -294,13 +323,21 @@ export default function DailyProductionReport() {
     } catch (err) {
       console.error("Save error:", err);
       setIsSaving(false);
-      alert(`Failed to save report. Error: ${err.message}`);
+      triggerToast(`Failed to save report. Error: ${err.message}`, "error");
     }
   };
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
+
+      {/* Toast Notification */}
+      <Toast 
+        message={toast.message} 
+        type={toast.type} 
+        onClose={() => setToast({ message: '', type: '' })} 
+      />
+
       {/* Saving and Success Modals */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate} from 'react-router-dom';
-import { useLineSet } from "../context/LineSetContext.jsx"
+import { useParams, useNavigate } from 'react-router-dom';
+import { useLineSet } from "../context/LineSetContext.jsx";
 import Header from '../components/Header';
+
 const INITIAL_ROWS = 1;
 
 const initialFormData = {
@@ -33,10 +34,29 @@ const emptyRow = () => ({
   value: ""
 });
 
+// Toast notification component
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+
+  const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
+      <span className="text-sm font-semibold">{message}</span>
+      <button 
+        onClick={onClose}
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
 export default function ErrorProofingCheckSheet() {
   const { shopId } = useParams();
   const navigate = useNavigate();
-  const { lineSet, setLineSet} = useLineSet();
+  const { lineSet, setLineSet } = useLineSet();
   const [headerInfo, setHeaderInfo] = useState({
     lineCode: "",
     partName: "",
@@ -44,6 +64,17 @@ export default function ErrorProofingCheckSheet() {
     machineNo: "",
     date: ""
   });
+
+  // Toast state
+  const [toast, setToast] = useState({ message: '', type: '' });
+
+  const triggerToast = (message, type = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast({ message: '', type: '' });
+    }, 4000);
+  };
+
   useEffect(() => {
     if (lineSet) {
       setHeaderInfo((prev) => ({
@@ -70,7 +101,7 @@ export default function ErrorProofingCheckSheet() {
         const token = localStorage.getItem("token");
 
         const res = await fetch(
-          "http://localhost:5000/api/machine-shop/3/pre-operation-details",
+          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -87,7 +118,7 @@ export default function ErrorProofingCheckSheet() {
         setMachineDetails(data);
       } catch (err) {
         console.error("Machine details fetch error:", err);
-        alert("Failed to load Machine Shop 3 details.");
+        triggerToast("Failed to load Machine Shop 3 details.", "error");
       } finally {
         setLoadingMachineDetails(false);
       }
@@ -96,7 +127,7 @@ export default function ErrorProofingCheckSheet() {
     fetchMachineDetails();
   }, [shopId]);
 
-    const lineCodes = [
+  const lineCodes = [
     ...new Set(
       machineDetails
         .map((item) => item.lineCode)
@@ -226,7 +257,6 @@ export default function ErrorProofingCheckSheet() {
   };
 
   const handleSave = async () => {
-
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -239,17 +269,15 @@ export default function ErrorProofingCheckSheet() {
         partNo: headerInfo.partNo,
         machineNo: headerInfo.machineNo
       },
-
       rows,
       signatures
     };
 
     try {
-
       const token = localStorage.getItem('token');
 
       const res = await fetch(
-        'http://localhost:5000/api/error-proofing-checksheet',
+        `${process.env.REACT_APP_API_URL}/error-proofing-checksheet`,
         {
           method: 'POST',
           headers: {
@@ -288,14 +316,9 @@ export default function ErrorProofingCheckSheet() {
       navigate(`/operator/${shopId}/air-gap-sensor`);
 
     } catch (err) {
-
       console.error('Save error:', err);
-
       setIsSaving(false);
-
-      alert(
-        'Failed to save checksheet. Check console for details.'
-      );
+      triggerToast(err.message || 'Failed to save checksheet. Check console for details.', 'error');
     }
   };
 
@@ -303,38 +326,37 @@ export default function ErrorProofingCheckSheet() {
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
 
+      {/* Toast Notification */}
+      <Toast 
+        message={toast.message} 
+        type={toast.type} 
+        onClose={() => setToast({ message: '', type: '' })} 
+      />
+
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
-
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-
                 <h2 className="text-xl font-bold text-gray-800">
                   Saving Data...
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Please wait
                 </p>
               </>
             ) : (
               <>
-
                 <h2 className="text-xl font-bold text-green-800">
                   Data Saved Successfully
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Loading next form...
                 </p>
               </>
             )}
-
           </div>
-
         </div>
       )}
       
@@ -362,7 +384,7 @@ export default function ErrorProofingCheckSheet() {
         {/* Header Meta Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div>
-            <label htmlFor="header-line" className="font-bold text-gray-700 block mb-1 text-sm">
+            <label htmlFor="header-lineCode" className="font-bold text-gray-700 block mb-1 text-sm">
               LineCode
             </label>
             <select
@@ -496,7 +518,7 @@ export default function ErrorProofingCheckSheet() {
                     {rIdx + 1}
                   </td>
                   <td className="border border-gray-800 p-0">
-                   <select
+                    <select
                       className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
                       aria-label={`Row ${rIdx + 1} Machine No`}
                       value={row.machineNo}

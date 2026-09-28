@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLineSet } from '../context/LineSetContext';
 import Header from '../components/Header';
+
 const initialFormData = {
   formCode: "QF/07/MPD-13",
   revision: "12",
@@ -153,9 +154,26 @@ const initialFormData = {
   ]
 };
 
+// Toast notification component
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+
+  const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
+      <span className="text-sm font-semibold">{message}</span>
+      <button 
+        onClick={onClose}
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+};
 
 export default function PreOperationChecklist() {
-
   const { shopId } = useParams();
   const navigate = useNavigate();
   const {
@@ -164,50 +182,43 @@ export default function PreOperationChecklist() {
     clearLineSet,
     isLineSetComplete
   } = useLineSet();
-  const [headerInfo, setHeaderInfo] =
-    useState({ ...initialFormData.header});
+  const [headerInfo, setHeaderInfo] = useState({ ...initialFormData.header });
+  const [values, setValues] = useState({});
+  const [signatures, setSignatures] = useState({});
+  const [specifications, setSpecifications] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const [values, setValues] =
-    useState({});
+  // Toast state
+  const [toast, setToast] = useState({ message: '', type: '' });
 
-  const [signatures, setSignatures] =
-    useState({});
-
-  const [specifications, setSpecifications] =
-    useState({});
-
-    const [isSaving, setIsSaving] = useState(false);
-    const [saveSuccess, setSaveSuccess] = useState(false);
-
+  const triggerToast = (message, type = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast({ message: '', type: '' });
+    }, 4000);
+  };
 
   // ==========================================================
   // MACHINE SHOP 3 DATA
   // ==========================================================
-
-  const [machineDetails, setMachineDetails] =
-    useState([]);
-
-  const [loadingMachineDetails, setLoadingMachineDetails] =
-    useState(true);
-
+  const [machineDetails, setMachineDetails] = useState([]);
+  const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
   // ==========================================================
   // FETCH MACHINE SHOP 3 DATA
   // ==========================================================
-
   useEffect(() => {
-
     const fetchMachineDetails = async () => {
-
       try {
-        if(shopId !=="3"){
+        if (shopId !== "3") {
           setMachineDetails([]);
           return;
         }
 
         const token = localStorage.getItem('token');
         const res = await fetch(
-          'http://localhost:5000/api/machine-shop/3/pre-operation-details',
+          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -215,50 +226,37 @@ export default function PreOperationChecklist() {
           }
         );
         if (!res.ok) {
-          throw new Error(
-            'Failed to fetch Machine Shop 3 details'
-          );
+          throw new Error('Failed to fetch Machine Shop 3 details');
         }
 
         const data = await res.json();
-
         setMachineDetails(data);
-
       } catch (err) {
-        console.error(
-          'Machine details fetch error:',
-          err
-        );
-        alert(
-          'Failed to load Machine Shop 3 details.'
-        );
+        console.error('Machine details fetch error:', err);
+        triggerToast('Failed to load Machine Shop 3 details.', 'error');
       } finally {
-
         setLoadingMachineDetails(false);
       }
     };
     fetchMachineDetails();
   }, [shopId]);
-// ==========================================================
-// SYNC SHARED LINE SET
-// ==========================================================
 
-useEffect(() => {
-  setHeaderInfo((prev) => ({
-    ...prev,
-
-    lineCode: lineSet?.lineCode || "",
-    partName: lineSet?.partName || "",
-    partNo: lineSet?.partNo || "",
-    machineNo: lineSet?.machineNo || ""
-  }));
-
-}, [lineSet]);
+  // ==========================================================
+  // SYNC SHARED LINE SET
+  // ==========================================================
+  useEffect(() => {
+    setHeaderInfo((prev) => ({
+      ...prev,
+      lineCode: lineSet?.lineCode || "",
+      partName: lineSet?.partName || "",
+      partNo: lineSet?.partNo || "",
+      machineNo: lineSet?.machineNo || ""
+    }));
+  }, [lineSet]);
 
   // ==========================================================
   // LINE CODE OPTIONS
   // ==========================================================
-
   const lineCodes = [
     ...new Set(
       machineDetails
@@ -267,22 +265,16 @@ useEffect(() => {
     )
   ];
 
-
   // ==========================================================
   // SELECTED LINE DETAILS
   // ==========================================================
-
-  const selectedLineDetails =
-    machineDetails.filter(
-      (item) =>
-        item.lineCode === headerInfo.lineCode
-    );
-
+  const selectedLineDetails = machineDetails.filter(
+    (item) => item.lineCode === headerInfo.lineCode
+  );
 
   // ==========================================================
   // PART OPTIONS
   // ==========================================================
-
   const partOptions = [
     ...new Map(
       selectedLineDetails
@@ -297,196 +289,123 @@ useEffect(() => {
     ).values()
   ];
 
-
   // ==========================================================
   // SELECTED PART DETAILS
   // ==========================================================
-
-  const selectedPartDetails =
-    machineDetails.filter(
-      (item) =>
-        item.lineCode === headerInfo.lineCode &&
-        (item.partNo || '') === headerInfo.partNo
-    );
+  const selectedPartDetails = machineDetails.filter(
+    (item) =>
+      item.lineCode === headerInfo.lineCode &&
+      (item.partNo || '') === headerInfo.partNo
+  );
   const selectedPartMaster = selectedPartDetails[0] || null;
-
 
   // ==========================================================
   // MACHINE OPTIONS
   // ==========================================================
-
-  const machineOptions =
-    selectedPartDetails;
-
+  const machineOptions = selectedPartDetails;
 
   // ==========================================================
   // HEADER CHANGE
   // ==========================================================
-
   const handleHeaderChange = (field, val) => {
-
     setHeaderInfo((prev) => ({
-
       ...prev,
-
       [field]: val
-
     }));
   };
 
-// ==========================================================
-// LINE SET HANDLERS
-// ==========================================================
+  // ==========================================================
+  // LINE SET HANDLERS
+  // ==========================================================
+  const handleLineChange = (lineCode) => {
+    setLineSet({
+      machineShop: shopId,
+      lineCode,
+      partName: "",
+      partNo: "",
+      machineNo: ""
+    });
+  };
 
-const handleLineChange = (lineCode) => {
-
-  setLineSet({
-    machineShop: shopId,
-    lineCode,
-    partName: "",
-    partNo: "",
-    machineNo: ""
-  });
-
-};
-
-const handlePartNoChange = (partNo) => {
-  const selectedPart =
-    machineDetails.find(
+  const handlePartNoChange = (partNo) => {
+    const selectedPart = machineDetails.find(
       (item) =>
         item.lineCode === headerInfo.lineCode &&
         (item.partNo || "") === partNo
     );
 
-  setLineSet({
+    setLineSet({
+      machineShop: shopId,
+      lineCode: headerInfo.lineCode,
+      partName: selectedPart?.partName || "",
+      partNo,
+      machineNo: ""
+    });
+  };
 
-    machineShop: shopId,
+  const handleMachineChange = (machineNo) => {
+    setLineSet({
+      machineShop: shopId,
+      lineCode: headerInfo.lineCode,
+      partName: selectedPartMaster?.partName || "",
+      partNo: headerInfo.partNo,
+      machineNo
+    });
+  };
 
-    lineCode:
-      headerInfo.lineCode,
-
-    partName:
-      selectedPart?.partName || "",
-
-    partNo,
-
-    machineNo: ""
-  });
-};
-
-const handleMachineChange = (machineNo) => {
-  setLineSet({
-
-    machineShop: shopId,
-
-    lineCode:
-      headerInfo.lineCode,
-
-    partName:
-      selectedPartMaster?.partName || "",
-
-    partNo:
-      headerInfo.partNo,
-
-    machineNo
-  });
-
-};
-
-
-const handleChangeLine = () => {
-  clearLineSet();
-};
-
+  const handleChangeLine = () => {
+    clearLineSet();
+  };
 
   // ==========================================================
   // SPECIFICATION CHANGE
   // ==========================================================
-
-  const handleSpecificationChange = (
-    slNo,
-    val
-  ) => {
-
+  const handleSpecificationChange = (slNo, val) => {
     setSpecifications((prev) => ({
       ...prev,
       [slNo]: val
     }));
   };
 
-
   // ==========================================================
   // VALUE CHANGE
   // ==========================================================
-
-  const handleValueChange = (
-    slNo,
-    subRow,
-    val
-  ) => {
-
+  const handleValueChange = (slNo, subRow, val) => {
     setValues((prev) => {
-
       if (subRow) {
-
-        const paramValues =
-          prev[slNo] || {};
-
-
+        const paramValues = prev[slNo] || {};
         return {
-
           ...prev,
-
           [slNo]: {
-
             ...paramValues,
-
             [subRow]: val
-
           }
-
         };
       }
 
-
       return {
-
         ...prev,
-
         [slNo]: val
-
       };
     });
   };
 
-
   // ==========================================================
   // SIGNATURE CHANGE
   // ==========================================================
-
-  const handleSignatureChange = (
-    role,
-    val
-  ) => {
-
+  const handleSignatureChange = (role, val) => {
     setSignatures((prev) => ({
-
       ...prev,
-
       [role]: val
-
     }));
   };
-
 
   // ==========================================================
   // SAVE
   // ==========================================================
-
   const handleSave = async () => {
-
     if (!isLineSetComplete) {
-      alert("Please select Line code, Part No and Machine No before saving.");
+      triggerToast("Please select Line code, Part No and Machine No before saving.", "error");
       return;
     }
 
@@ -502,7 +421,6 @@ const handleChangeLine = () => {
         partNo: lineSet.partNo,
         machineNo: lineSet.machineNo
       },
-
       lineSet: {
         machineShop: lineSet.machineShop,
         lineCode: lineSet.lineCode,
@@ -510,7 +428,6 @@ const handleChangeLine = () => {
         partNo: lineSet.partNo,
         machineNo: lineSet.machineNo
       },
-
       values,
       signatures,
       specifications,
@@ -518,15 +435,14 @@ const handleChangeLine = () => {
     };
 
     try {
-
       const token = localStorage.getItem('token');
       const res = await fetch(
-        'http://localhost:5000/api/pre-operation-checklist',
+        `${process.env.REACT_APP_API_URL}/pre-operation-checklist`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization' : `Bearer ${token}`
+            'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify(payload)
         }
@@ -553,973 +469,477 @@ const handleChangeLine = () => {
       // Show success message
       setSaveSuccess(true);
 
-      // Keep success message visible for 3 seconds
+      // Keep success message visible for 2 seconds
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Go to Form 2
       navigate(`/operator/${shopId}/error-proofing-checksheet`);
 
     } catch (err) {
-
       console.error('Save error:', err);
-
       setIsSaving(false);
-
-      alert(
-        'Failed to save checklist. Check console for details.'
-      );
+      triggerToast(err.message || 'Failed to save checklist. Check console for details.', 'error');
     }
   };
 
-
   return (
-
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
+
+      {/* Toast Notification */}
+      <Toast 
+        message={toast.message} 
+        type={toast.type} 
+        onClose={() => setToast({ message: '', type: '' })} 
+      />
+
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
-
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-
                 <h2 className="text-xl font-bold text-gray-800">
                   Saving Data...
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Please wait
                 </p>
               </>
             ) : (
               <>
-
                 <h2 className="text-xl font-bold text-green-800">
                   Data Saved Successfully
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Loading next form...
                 </p>
               </>
             )}
-
           </div>
-
         </div>
       )}
-      <div className="bg-white w-full max-w-[90rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
 
+      <div className="bg-white w-full max-w-[90rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
 
         {/* =====================================================
             CARD HEADER
         ====================================================== */}
-
         <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
-
           <div>
-
             <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
-
               {initialFormData.company}
-
             </span>
-
-
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
-
               {initialFormData.title}
-
             </h2>
-
-
             <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-
-              <span>
-                Form Code:
-                {' '}
-                {initialFormData.formCode}
-              </span>
-
+              <span>Form Code: {initialFormData.formCode}</span>
               <span>|</span>
-
-              <span>
-                Revision:
-                {' '}
-                {initialFormData.revision}
-              </span>
-
+              <span>Revision: {initialFormData.revision}</span>
               <span>|</span>
-
-              <span>
-                Revision Date:
-                {' '}
-                {initialFormData.revisionDate}
-              </span>
-
+              <span>Revision Date: {initialFormData.revisionDate}</span>
             </div>
-
           </div>
-
         </div>
-
 
         {/* =====================================================
             HEADER META FIELDS
         ====================================================== */}
-
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
-
-
-          {/* ===================================================
-              LINE CODE
-          ==================================================== */}
-
+          {/* LINE CODE */}
           <div>
-
             <label
               htmlFor="header-lineCode"
               className="font-bold text-gray-700 block mb-1 text-sm"
             >
               Line Code
             </label>
-
-
             <select
-
               id="header-lineCode"
-
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-
-              value={
-                headerInfo.lineCode
-              }
-
-
+              value={headerInfo.lineCode}
               onChange={(e) => handleLineChange(e.target.value)}
-
               disabled={loadingMachineDetails}
-
             >
-
               <option value="">
-
-                {
-                  loadingMachineDetails
-                    ? "Loading..."
-                    : "Select Line Code"
-                }
-
+                {loadingMachineDetails ? "Loading..." : "Select Line Code"}
               </option>
-
-
-              {lineCodes.map(
-                (lineCode) => (
-
-                  <option
-                    key={lineCode}
-                    value={lineCode}
-                  >
-                    {lineCode}
-                  </option>
-
-                )
-              )}
-
+              {lineCodes.map((lineCode) => (
+                <option key={lineCode} value={lineCode}>
+                  {lineCode}
+                </option>
+              ))}
             </select>
-
           </div>
 
-          {/* ===================================================
-              PART NO
-          ==================================================== */}
-
+          {/* PART NO */}
           <div>
-
             <label
               htmlFor="header-partNo"
               className="font-bold text-gray-700 block mb-1 text-sm"
             >
               Part No
             </label>
-
-
             <select
               id="header-partNo"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-              value={
-                headerInfo.partNo
-              }
-
-              onChange={(e) =>
-                handlePartNoChange(e.target.value)
-              }
-
-
+              value={headerInfo.partNo}
+              onChange={(e) => handlePartNoChange(e.target.value)}
               disabled={!headerInfo.lineCode}
-
             >
-
-              <option value="">
-                Select Part No
-              </option>
-              {partOptions
-                .map(
-                  (part) => (
-
-                    <option
-
-                      key={part.partNo}
-                      value={part.partNo}
-                    >
-                      {part.partNo}
-                    </option>
-                  )
-                )}
-
+              <option value="">Select Part No</option>
+              {partOptions.map((part) => (
+                <option key={part.partNo} value={part.partNo}>
+                  {part.partNo}
+                </option>
+              ))}
             </select>
-
           </div>
 
-          {/* ===================================================
-              PART NAME
-          ==================================================== */}
-
+          {/* PART NAME */}
           <div>
-
             <label
               htmlFor="header-partName"
               className="font-bold text-gray-700 block mb-1 text-sm"
             >
               Part Name
             </label>
-
             <input 
-              id = "header-partName"
-              type= "text"
+              id="header-partName"
+              type="text"
               readOnly
-              className = "w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
-              value = {headerInfo.partName || ""}
-              placeholder = "Auto-filled"
-              />
-
+              className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
+              value={headerInfo.partName || ""}
+              placeholder="Auto-filled"
+            />
           </div>
 
-          {/* ===================================================
-              MACHINE NO
-          ==================================================== */}
-
+          {/* MACHINE NO */}
           <div>
-
             <label
               htmlFor="header-machineNo"
               className="font-bold text-gray-700 block mb-1 text-sm"
             >
               Machine No
             </label>
-
-
             <select
               id="header-machineNo"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-              value={
-                headerInfo.machineNo
-              }
-
+              value={headerInfo.machineNo}
               onChange={(e) => {
                 handleMachineChange(e.target.value);
               }}
-
-
-              disabled={
-                !headerInfo.lineCode ||
-                !headerInfo.partNo
-              }
-
+              disabled={!headerInfo.lineCode || !headerInfo.partNo}
             >
-
-              <option value="">
-                Select Machine
-              </option>
-
-
-              {machineOptions.map(
-                (machine) => (
-
-                  <option
-
-                    key={
-                      machine.id
-                    }
-
-                    value={
-                      machine.machineNo
-                    }
-
-                  >
-
-                    {machine.machineNo}
-
-                    {
-                      machine.machineType
-                        ? ` - ${machine.machineType}`
-                        : ""
-                    }
-
-                  </option>
-
-                )
-              )}
-
+              <option value="">Select Machine</option>
+              {machineOptions.map((machine) => (
+                <option key={machine.id} value={machine.machineNo}>
+                  {machine.machineNo}
+                  {machine.machineType ? ` - ${machine.machineType}` : ""}
+                </option>
+              ))}
             </select>
-
           </div>
 
-
-          {/* ===================================================
-              OP NO
-          ==================================================== */}
-
+          {/* OP NO */}
           <div>
-
             <label
               htmlFor="header-opNo"
               className="font-bold text-gray-700 block mb-1 text-sm"
             >
               OP No
             </label>
-
-
             <input
-
               id="header-opNo"
-
               type="text"
-
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-
-              value={
-                headerInfo.opNo
-              }
-
-              onChange={(e) =>
-                handleHeaderChange(
-                  'opNo',
-                  e.target.value
-                )
-              }
-
+              value={headerInfo.opNo}
+              onChange={(e) => handleHeaderChange('opNo', e.target.value)}
             />
-
           </div>
 
-
-          {/* ===================================================
-              DATE
-          ==================================================== */}
-
+          {/* DATE */}
           <div>
-
             <label
               htmlFor="header-date"
               className="font-bold text-gray-700 block mb-1 text-sm"
             >
               Date
             </label>
-
-
             <input
-
               id="header-date"
-
               type="date"
-
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-
-              value={
-                headerInfo.date
-              }
-
-              onChange={(e) =>
-                handleHeaderChange(
-                  'date',
-                  e.target.value
-                )
-              }
-
+              value={headerInfo.date}
+              onChange={(e) => handleHeaderChange('date', e.target.value)}
             />
-
           </div>
         </div>
 
         {/* =====================================================
             LINE SET STATUS
         ====================================================== */}
-
-        <div className="
-          flex flex-wrap items-center justify-between
-          gap-3 mb-6 p-3 rounded-lg
-          bg-orange-50 border border-orange-200
-        ">
-
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6 p-3 rounded-lg bg-orange-50 border border-orange-200">
           <div className="text-sm text-gray-700">
-
-            <span className="font-bold">
-              Selected Line Set:
-            </span>
-
-            {" "}
-
+            <span className="font-bold">Selected Line Set:</span>{" "}
             {headerInfo.lineCode || "Not selected"}
-
-            {headerInfo.partNo
-              ? ` / ${headerInfo.partNo}`
-              : ""}
-
-            {headerInfo.machineNo
-              ? ` / ${headerInfo.machineNo}`
-              : ""}
-
+            {headerInfo.partNo ? ` / ${headerInfo.partNo}` : ""}
+            {headerInfo.machineNo ? ` / ${headerInfo.machineNo}` : ""}
           </div>
 
-
           {isLineSetComplete && (
-
             <button
               type="button"
               onClick={handleChangeLine}
-              className="
-                bg-gray-800 hover:bg-gray-700
-                text-white px-4 py-2 rounded
-                font-bold text-sm
-                transition-colors
-              "
+              className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded font-bold text-sm transition-colors cursor-pointer"
             >
               Change Line
             </button>
-
           )}
-
         </div>
-
 
         {/* =====================================================
             MAIN TABLE
         ====================================================== */}
-
         <div className="overflow-x-auto">
-
           <table className="w-full border-collapse border border-gray-800 text-sm text-center">
-
             <thead className="bg-gray-100 text-gray-800 font-bold">
-
               <tr>
-
-                <th className="border border-gray-800 p-2 w-16">
-                  Sl No
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3">
-                  Parameters
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3">
-                  Specification
-                </th>
-
-                <th className="border border-gray-800 p-2 w-28">
-                  Unit
-                </th>
-
-                <th className="border border-gray-800 p-2 w-36">
-                  Check Method
-                </th>
-
-                <th className="border border-gray-800 p-2 w-24">
-                  Condition
-                </th>
-
-                <th className="border border-gray-800 p-2 w-48">
-                  Value
-                </th>
-
+                <th className="border border-gray-800 p-2 w-16">Sl No</th>
+                <th className="border border-gray-800 p-2 text-left px-3">Parameters</th>
+                <th className="border border-gray-800 p-2 text-left px-3">Specification</th>
+                <th className="border border-gray-800 p-2 w-28">Unit</th>
+                <th className="border border-gray-800 p-2 w-36">Check Method</th>
+                <th className="border border-gray-800 p-2 w-24">Condition</th>
+                <th className="border border-gray-800 p-2 w-48">Value</th>
               </tr>
-
             </thead>
             <tbody>
-
-              {initialFormData.parameters.map(
-                (param) => {
-
-                  if (param.hasSubRows) {
-
-                    return (
-
-                      <React.Fragment
-                        key={`param-${param.slNo}`}
-                      >
-
-                        {param.subRows.map(
-                          (
-                            subRow,
-                            subIdx
-                          ) => {
-
-                            const cellValue =
-                              values[param.slNo]?.[
-                                subRow
-                              ] || '';
-
-
-                            return (
-
-                              <tr
-                                key={
-                                  `param-${param.slNo}-${subRow}`
-                                }
-                              >
-
-                                {subIdx === 0 && (
-
-                                  <>
-
-                                    <td
-                                      rowSpan={
-                                        param.subRows.length
-                                      }
-                                      className="border border-gray-800 p-2 font-medium"
-                                    >
-                                      {param.slNo}
-                                    </td>
-
-
-                                    <td
-                                      rowSpan={
-                                        param.subRows.length
-                                      }
-                                      className="border border-gray-800 p-2 text-left px-3"
-                                    >
-
-                                      <span className="font-medium">
-                                        {param.label}
-                                      </span>
-
-
-                                      {param.note && (
-
-                                        <span className="text-xs text-gray-500 block mt-0.5">
-                                          {param.note}
-                                        </span>
-
-                                      )}
-
-                                    </td>
-
-
-                                    <td
-                                      rowSpan={
-                                        param.subRows.length
-                                      }
-                                      className="border border-gray-800 p-2 text-left px-3 text-gray-700"
-                                    >
-
-                                      {param.specEditable ? (
-
-                                        <input
-
-                                          type="text"
-
-                                          className="w-full h-full text-center outline-none bg-transparent py-1"
-
-                                          value={
-                                            specifications[
-                                              param.slNo
-                                            ] || ''
-                                          }
-
-                                          onChange={(e) =>
-                                            handleSpecificationChange(
-                                              param.slNo,
-                                              e.target.value
-                                            )
-                                          }
-
-                                          placeholder="Enter spec"
-
-                                        />
-
-                                      ) : (
-
-                                        param.specification ||
-                                        '-'
-
-                                      )}
-
-                                    </td>
-
-
-                                    <td
-                                      rowSpan={
-                                        param.subRows.length
-                                      }
-                                      className="border border-gray-800 p-2 text-gray-700"
-                                    >
-                                      {param.unit || '-'}
-                                    </td>
-
-
-                                    <td
-                                      rowSpan={
-                                        param.subRows.length
-                                      }
-                                      className="border border-gray-800 p-2 text-gray-700"
-                                    >
-                                      {param.checkMethod}
-                                    </td>
-
-                                  </>
-
-                                )}
-
-
-                                <td className="border border-gray-800 p-2 bg-gray-50 font-semibold text-gray-600">
-                                  {subRow}
-                                </td>
-
-
-                                <td className="border border-gray-800 p-0">
-
-                                  {[5, 6, 7].includes(param.slNo) ? (
-
-                                    <select
-
-                                      className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
-
-                                      aria-label={
-                                        `${param.label} ${subRow} Value`
-                                      }
-
-                                      value={
-                                        cellValue
-                                      }
-
-                                      onChange={(e) =>
-                                        handleValueChange(
-                                          param.slNo,
-                                          subRow,
-                                          e.target.value
-                                        )
-                                      }
-
-                                    >
-
-                                      <option value=""></option>
-
-                                      <option value="MIN">MIN</option>
-
-                                      <option value="MID">MID</option>
-
-                                      <option value="MAX">MAX</option>
-
-                                    </select>
-
-                                  ) : (
-
-                                    <input
-
-                                      type="text"
-
-                                      className="w-full h-full text-center outline-none bg-transparent py-2"
-
-                                      aria-label={
-                                        `${param.label} ${subRow} Value`
-                                      }
-
-                                      value={
-                                        cellValue
-                                      }
-
-                                      onChange={(e) =>
-                                        handleValueChange(
-                                          param.slNo,
-                                          subRow,
-                                          e.target.value
-                                        )
-                                      }
-
-                                    />
-
-                                  )}
-
-                                </td>
-
-                              </tr>
-
-                            );
-                          }
-                        )}
-
-                      </React.Fragment>
-
-                    );
-                  }
-
-
-                  const cellValue =
-                    values[param.slNo] || '';
-
-
+              {initialFormData.parameters.map((param) => {
+                if (param.hasSubRows) {
                   return (
+                    <React.Fragment key={`param-${param.slNo}`}>
+                      {param.subRows.map((subRow, subIdx) => {
+                        const cellValue = values[param.slNo]?.[subRow] || '';
 
-                    <tr
-                      key={`param-${param.slNo}`}
-                    >
+                        return (
+                          <tr key={`param-${param.slNo}-${subRow}`}>
+                            {subIdx === 0 && (
+                              <>
+                                <td
+                                  rowSpan={param.subRows.length}
+                                  className="border border-gray-800 p-2 font-medium"
+                                >
+                                  {param.slNo}
+                                </td>
 
-                      <td className="border border-gray-800 p-2 font-medium">
-                        {param.slNo}
-                      </td>
+                                <td
+                                  rowSpan={param.subRows.length}
+                                  className="border border-gray-800 p-2 text-left px-3"
+                                >
+                                  <span className="font-medium">{param.label}</span>
+                                  {param.note && (
+                                    <span className="text-xs text-gray-500 block mt-0.5">
+                                      {param.note}
+                                    </span>
+                                  )}
+                                </td>
 
+                                <td
+                                  rowSpan={param.subRows.length}
+                                  className="border border-gray-800 p-2 text-left px-3 text-gray-700"
+                                >
+                                  {param.specEditable ? (
+                                    <input
+                                      type="text"
+                                      className="w-full h-full text-center outline-none bg-transparent py-1"
+                                      value={specifications[param.slNo] || ''}
+                                      onChange={(e) =>
+                                        handleSpecificationChange(param.slNo, e.target.value)
+                                      }
+                                      placeholder="Enter spec"
+                                    />
+                                  ) : (
+                                    param.specification || '-'
+                                  )}
+                                </td>
 
-                      <td className="border border-gray-800 p-2 text-left px-3">
+                                <td
+                                  rowSpan={param.subRows.length}
+                                  className="border border-gray-800 p-2 text-gray-700"
+                                >
+                                  {param.unit || '-'}
+                                </td>
 
-                        <span className="font-medium">
-                          {param.label}
-                        </span>
+                                <td
+                                  rowSpan={param.subRows.length}
+                                  className="border border-gray-800 p-2 text-gray-700"
+                                >
+                                  {param.checkMethod}
+                                </td>
+                              </>
+                            )}
 
+                            <td className="border border-gray-800 p-2 bg-gray-50 font-semibold text-gray-600">
+                              {subRow}
+                            </td>
 
-                        {param.note && (
-
-                          <span className="text-xs text-gray-500 block mt-0.5">
-                            {param.note}
-                          </span>
-
-                        )}
-
-                      </td>
-
-
-                      <td className="border border-gray-800 p-2 text-left px-3 text-gray-700">
-
-                        {param.specEditable ? (
-
-                          <input
-
-                            type="text"
-
-                            className="w-full h-full text-center outline-none bg-transparent py-1"
-
-                            value={
-                              specifications[
-                                param.slNo
-                              ] || ''
-                            }
-
-                            onChange={(e) =>
-                              handleSpecificationChange(
-                                param.slNo,
-                                e.target.value
-                              )
-                            }
-
-                            placeholder="Enter spec"
-
-                          />
-
-                        ) : (
-
-                          param.specification ||
-                          '-'
-
-                        )}
-
-                      </td>
-
-
-                      <td className="border border-gray-800 p-2 text-gray-700">
-                        {param.unit || '-'}
-                      </td>
-
-
-                      <td className="border border-gray-800 p-2 text-gray-700">
-                        {param.checkMethod}
-                      </td>
-
-
-                      <td className="border border-gray-800 p-2 text-gray-400">
-                        -
-                      </td>
-
-
-                      <td className="border border-gray-800 p-0">
-
-                        {[4, 10, 11, 12].includes(param.slNo) ? (
-
-                          <select
-
-                            className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
-
-                            aria-label={
-                              `${param.label} Value`
-                            }
-
-                            value={
-                              cellValue
-                            }
-
-                            onChange={(e) =>
-                              handleValueChange(
-                                param.slNo,
-                                null,
-                                e.target.value
-                              )
-                            }
-
-                          >
-
-                            <option value=""></option>
-
-                            <option value="OK">OK</option>
-
-                            <option value="NOT OK">NOT OK</option>
-
-                          </select>
-
-                        ) : (
-
-                          <input
-
-                            type="text"
-
-                            className="w-full h-full text-center outline-none bg-transparent py-2"
-
-                            aria-label={
-                              `${param.label} Value`
-                            }
-
-                            value={
-                              cellValue
-                            }
-
-                            onChange={(e) =>
-                              handleValueChange(
-                                param.slNo,
-                                null,
-                                e.target.value
-                              )
-                            }
-
-                          />
-
-                        )}
-
-                      </td>
-
-                    </tr>
-
+                            <td className="border border-gray-800 p-0">
+                              {[5, 6, 7].includes(param.slNo) ? (
+                                <select
+                                  className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
+                                  aria-label={`${param.label} ${subRow} Value`}
+                                  value={cellValue}
+                                  onChange={(e) =>
+                                    handleValueChange(param.slNo, subRow, e.target.value)
+                                  }
+                                >
+                                  <option value=""></option>
+                                  <option value="MIN">MIN</option>
+                                  <option value="MID">MID</option>
+                                  <option value="MAX">MAX</option>
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  className="w-full h-full text-center outline-none bg-transparent py-2"
+                                  aria-label={`${param.label} ${subRow} Value`}
+                                  value={cellValue}
+                                  onChange={(e) =>
+                                    handleValueChange(param.slNo, subRow, e.target.value)
+                                  }
+                                />
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
-
                 }
 
-              )}
+                const cellValue = values[param.slNo] || '';
 
+                return (
+                  <tr key={`param-${param.slNo}`}>
+                    <td className="border border-gray-800 p-2 font-medium">
+                      {param.slNo}
+                    </td>
+
+                    <td className="border border-gray-800 p-2 text-left px-3">
+                      <span className="font-medium">{param.label}</span>
+                      {param.note && (
+                        <span className="text-xs text-gray-500 block mt-0.5">
+                          {param.note}
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="border border-gray-800 p-2 text-left px-3 text-gray-700">
+                      {param.specEditable ? (
+                        <input
+                          type="text"
+                          className="w-full h-full text-center outline-none bg-transparent py-1"
+                          value={specifications[param.slNo] || ''}
+                          onChange={(e) =>
+                            handleSpecificationChange(param.slNo, e.target.value)
+                          }
+                          placeholder="Enter spec"
+                        />
+                      ) : (
+                        param.specification || '-'
+                      )}
+                    </td>
+
+                    <td className="border border-gray-800 p-2 text-gray-700">
+                      {param.unit || '-'}
+                    </td>
+
+                    <td className="border border-gray-800 p-2 text-gray-700">
+                      {param.checkMethod}
+                    </td>
+
+                    <td className="border border-gray-800 p-2 text-gray-400">
+                      -
+                    </td>
+
+                    <td className="border border-gray-800 p-0">
+                      {[4, 10, 11, 12].includes(param.slNo) ? (
+                        <select
+                          className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
+                          aria-label={`${param.label} Value`}
+                          value={cellValue}
+                          onChange={(e) =>
+                            handleValueChange(param.slNo, null, e.target.value)
+                          }
+                        >
+                          <option value=""></option>
+                          <option value="OK">OK</option>
+                          <option value="NOT OK">NOT OK</option>
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          className="w-full h-full text-center outline-none bg-transparent py-2"
+                          aria-label={`${param.label} Value`}
+                          value={cellValue}
+                          onChange={(e) =>
+                            handleValueChange(param.slNo, null, e.target.value)
+                          }
+                        />
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
 
               {/* =================================================
                   SIGNATURE ROWS
               ================================================== */}
-
-              {initialFormData.signatures.roles.map(
-                (role) => (
-
-                  <tr
-                    key={`sig-${role}`}
+              {initialFormData.signatures.roles.map((role) => (
+                <tr key={`sig-${role}`}>
+                  <td
+                    colSpan={6}
+                    className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700"
                   >
+                    {role} Signature
+                  </td>
 
-                    <td
-                      colSpan={6}
-                      className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700"
-                    >
-                      {role} Signature
-                    </td>
-
-
-                    <td className="border border-gray-800 p-0">
-
-                      <input
-
-                        type="text"
-
-                        className="w-full h-full text-center outline-none bg-transparent py-2 font-medium"
-
-                        aria-label={
-                          `${role} Signature`
-                        }
-
-                        value={
-                          signatures[role] ||
-                          ''
-                        }
-
-                        onChange={(e) =>
-                          handleSignatureChange(
-                            role,
-                            e.target.value
-                          )
-                        }
-
-                      />
-
-                    </td>
-
-                  </tr>
-
-                )
-              )}
-
+                  <td className="border border-gray-800 p-0">
+                    <input
+                      type="text"
+                      className="w-full h-full text-center outline-none bg-transparent py-2 font-medium"
+                      aria-label={`${role} Signature`}
+                      value={signatures[role] || ''}
+                      onChange={(e) => handleSignatureChange(role, e.target.value)}
+                    />
+                  </td>
+                </tr>
+              ))}
             </tbody>
-
           </table>
-
         </div>
-
 
         {/* =====================================================
             NOTES
         ====================================================== */}
-
         <div className="border-2 border-gray-800 flex flex-col mt-4">
-
           <div className="px-2 py-1 font-bold text-gray-800 text-sm border-b border-gray-800 bg-gray-100">
             Notes / Instructions:
           </div>
 
-
           <ol className="list-decimal list-inside p-3 text-xs text-gray-700 space-y-1.5 leading-relaxed bg-white">
-
-            {initialFormData.notes.map(
-              (note, idx) => (
-
-                <li
-                  key={`note-${idx}`}
-                >
-                  {note}
-                </li>
-
-              )
-            )}
-
+            {initialFormData.notes.map((note, idx) => (
+              <li key={`note-${idx}`}>{note}</li>
+            ))}
           </ol>
-
         </div>
-
 
         {/* =====================================================
             SAVE BUTTON
         ====================================================== */}
-
         <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
-
           <button
             type="button"
             onClick={handleSave}
@@ -1533,11 +953,9 @@ const handleChangeLine = () => {
               : "SAVE & CONTINUE"
             }
           </button>
-
         </div>
 
       </div>
-
     </div>
   );
 }

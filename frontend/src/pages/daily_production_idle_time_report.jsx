@@ -72,6 +72,25 @@ const createEmptyLineColumn = (
   }, {}),
 });
 
+// Toast notification component
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+
+  const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
+      <span className="text-sm font-semibold">{message}</span>
+      <button 
+        onClick={onClose}
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
 export default function DailyProductionIdleTimeReport() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -83,6 +102,16 @@ export default function DailyProductionIdleTimeReport() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Toast state
+  const [toast, setToast] = useState({ message: '', type: '' });
+
+  const triggerToast = (message, type = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast({ message: '', type: '' });
+    }, 4000);
+  };
 
   const [lineColumns, setLineColumns] = useState([
     createEmptyLineColumn(
@@ -113,7 +142,7 @@ export default function DailyProductionIdleTimeReport() {
       try {
         const token = localStorage.getItem("token");
         const response = await fetch(
-          `http://localhost:5000/api/machine-shop/${shopId}/details`,
+          `${process.env.REACT_APP_API_URL}/machine-shop/${shopId}/details`,
           {
             headers: {
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -161,7 +190,7 @@ export default function DailyProductionIdleTimeReport() {
         const token = localStorage.getItem("token");
 
         const response = await fetch(
-          `http://localhost:5000/api/machine-shop/${shopId}/part-quantities`,
+          `${process.env.REACT_APP_API_URL}/machine-shop/${shopId}/part-quantities`,
           {
             headers: {
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -265,14 +294,15 @@ export default function DailyProductionIdleTimeReport() {
         (!isNaN(currentLh) && currentLh > newCap) ||
         (!isNaN(currentRh) && currentRh > newCap)
       ) {
-        alert(
+        triggerToast(
           `Capacity cannot be less than the already entered Actual Production Quantity for Shift ${
             shift === "shift1"
               ? "I"
               : shift === "shift2"
               ? "II"
               : "III"
-          }!`
+          }!`,
+          "error"
         );
 
         return;
@@ -303,28 +333,30 @@ export default function DailyProductionIdleTimeReport() {
       const enteredVal = parseFloat(val);
 
       if (capVal === "" || isNaN(capNum) || capNum <= 0) {
-        alert(
+        triggerToast(
           `Please enter the Capacity for Shift ${
             shift === "shift1"
               ? "I"
               : shift === "shift2"
               ? "II"
               : "III"
-          } first before entering Actual Production Quantity.`
+          } first before entering Actual Production Quantity.`,
+          "error"
         );
 
         return;
       }
 
       if (!isNaN(enteredVal) && enteredVal > capNum) {
-        alert(
+        triggerToast(
           `Actual production quantity (${enteredVal}) cannot exceed the capacity (${capNum}) for Shift ${
             shift === "shift1"
               ? "I"
               : shift === "shift2"
               ? "II"
               : "III"
-          }!`
+          }!`,
+          "error"
         );
 
         return;
@@ -495,8 +527,9 @@ export default function DailyProductionIdleTimeReport() {
           lh > 0 &&
           (!col.capacity[shift] || lh > cap)
         ) {
-          alert(
-            `Line ${i + 1} (Shift ${shiftName}): Actual LH production (${lh}) cannot exceed capacity (${cap})!`
+          triggerToast(
+            `Line ${i + 1} (Shift ${shiftName}): Actual LH production (${lh}) cannot exceed capacity (${cap})!`,
+            "error"
           );
 
           return;
@@ -506,8 +539,9 @@ export default function DailyProductionIdleTimeReport() {
           rh > 0 &&
           (!col.capacity[shift] || rh > cap)
         ) {
-          alert(
-            `Line ${i + 1} (Shift ${shiftName}): Actual RH production (${rh}) cannot exceed capacity (${cap})!`
+          triggerToast(
+            `Line ${i + 1} (Shift ${shiftName}): Actual RH production (${rh}) cannot exceed capacity (${cap})!`,
+            "error"
           );
 
           return;
@@ -528,7 +562,7 @@ export default function DailyProductionIdleTimeReport() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        "http://localhost:5000/api/daily-production-idle-time",
+        `${process.env.REACT_APP_API_URL}/daily-production-idle-time`,
         {
           method: "POST",
           headers: {
@@ -564,13 +598,21 @@ export default function DailyProductionIdleTimeReport() {
     } catch (err) {
       console.error("Save error:", err);
       setIsSaving(false);
-      alert("Failed to save report. Check console for details.");
+      triggerToast("Failed to save report. Check console for details.", "error");
     }
   };
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-4 pt-0 sm:p-6 pb-20">
       <Header />
+
+      {/* Toast Notification */}
+      <Toast 
+        message={toast.message} 
+        type={toast.type} 
+        onClose={() => setToast({ message: '', type: '' })} 
+      />
+
       {/* Saving and Success Modals */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

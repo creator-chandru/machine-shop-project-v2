@@ -48,6 +48,25 @@ const createEmptySection = (defaultMachineNo = "", defaultDate = "", numRows = I
   },
 });
 
+// Toast notification component
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+
+  const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
+      <span className="text-sm font-semibold">{message}</span>
+      <button 
+        onClick={onClose}
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
 export default function ToolChangeRecord() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -73,6 +92,16 @@ export default function ToolChangeRecord() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Toast state
+  const [toast, setToast] = useState({ message: '', type: '' });
+
+  const triggerToast = (message, type = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast({ message: '', type: '' });
+    }, 4000);
+  };
+
   // Fetch Part Traceability from backend
   const fetchPartTraceability = async (lineCode, date, shift, secIdx) => {
     if (!lineCode || !date || !shift) {
@@ -83,7 +112,7 @@ export default function ToolChangeRecord() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `http://localhost:5000/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL}/tool-change-record/traceability?lineCode=${encodeURIComponent(
           lineCode
         )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         {
@@ -161,7 +190,7 @@ export default function ToolChangeRecord() {
 
         const token = localStorage.getItem("token");
         const res = await fetch(
-          "http://localhost:5000/api/machine-shop/3/pre-operation-details",
+          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -428,7 +457,7 @@ export default function ToolChangeRecord() {
 
   const handleSave = async () => {
     if (!headerInfo.lineCode) {
-      alert("Please select or enter a Line Code.");
+      triggerToast("Please select or enter a Line Code.", "error");
       return;
     }
 
@@ -448,7 +477,7 @@ export default function ToolChangeRecord() {
 
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch("http://localhost:5000/api/tool-change-record", {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/tool-change-record`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -478,7 +507,7 @@ export default function ToolChangeRecord() {
     } catch (err) {
       console.error("Save error:", err);
       setIsSaving(false);
-      alert(err.message || "Failed to save tool change record.");
+      triggerToast(err.message || "Failed to save tool change record.", "error");
     }
   };
 
@@ -502,41 +531,42 @@ export default function ToolChangeRecord() {
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
+
+      {/* Toast Notification */}
+      <Toast 
+        message={toast.message} 
+        type={toast.type} 
+        onClose={() => setToast({ message: '', type: '' })} 
+      />
+
       {/* Saving and Success Modals */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
-
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-
                 <h2 className="text-xl font-bold text-gray-800">
                   Saving Data...
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Please wait
                 </p>
               </>
             ) : (
               <>
-
                 <h2 className="text-xl font-bold text-green-800">
                   Data Saved Successfully
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Loading next form...
                 </p>
               </>
             )}
-
           </div>
-
         </div>
       )}
+
       <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
         {/* Top Navigation & Card Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">

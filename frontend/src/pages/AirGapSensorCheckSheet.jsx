@@ -58,6 +58,25 @@ const createEmptyBlock = (defaultMachineNo = "") => ({
   lineInchargeSignatures: {}
 });
 
+// Toast notification component
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+
+  const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
+      <span className="text-sm font-semibold">{message}</span>
+      <button 
+        onClick={onClose}
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+      >
+        ×
+      </button>
+    </div>
+  );
+};
+
 export default function AirGapSensorCheckSheet() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -82,6 +101,16 @@ export default function AirGapSensorCheckSheet() {
   const [lockedShifts, setLockedShifts] = useState({ I: false, II: false, III: false });
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Toast state
+  const [toast, setToast] = useState({ message: '', type: '' });
+
+  const triggerToast = (message, type = 'error') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast({ message: '', type: '' });
+    }, 4000);
+  };
 
   // Sync with LineSetContext whenever it changes
   useEffect(() => {
@@ -120,7 +149,7 @@ export default function AirGapSensorCheckSheet() {
         const token = localStorage.getItem("token");
 
         const res = await fetch(
-          "http://localhost:5000/api/machine-shop/3/pre-operation-details",
+          `${process.env.REACT_APP_API_URL}/machine-shop/3/pre-operation-details`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -135,11 +164,11 @@ export default function AirGapSensorCheckSheet() {
         const data = await res.json();
         setMachineDetails(data);
       } catch (err) {
-        console.error("Machine details fetch error:", err);
-        alert("Failed to load Machine Shop 3 details.");
-      } finally {
-        setLoadingMachineDetails(false);
-      }
+  console.error("Machine details fetch error:", err);
+  triggerToast("Failed to load Machine Shop 3 details.", "error");
+} finally {
+  setLoadingMachineDetails(false);
+}
     };
 
     fetchMachineDetails();
@@ -242,7 +271,7 @@ export default function AirGapSensorCheckSheet() {
         });
 
         const res = await fetch(
-          `http://localhost:5000/api/air-gap-sensor?${params.toString()}`,
+          `${process.env.REACT_APP_API_URL}/air-gap-sensor?${params.toString()}`,
           {
             headers: {
               Authorization: `Bearer ${token}`
@@ -419,7 +448,7 @@ export default function AirGapSensorCheckSheet() {
 
   const handleSave = async () => {
     if (!headerInfo.lineCode || !headerInfo.partNo || !headerInfo.partName) {
-      alert("Please select Line Code, Part No, and Part Name before proceeding.");
+      triggerToast("Please select Line Code, Part No, and Part Name before proceeding.", "error");
       return;
     }
 
@@ -449,8 +478,9 @@ export default function AirGapSensorCheckSheet() {
     });
 
     if (completeShifts.length === 0) {
-      alert(
-        "Please complete at least one unrecorded shift (all parameter statuses and signatures) before saving."
+      triggerToast(
+        "Please complete at least one unrecorded shift (all parameter statuses and signatures) before saving.",
+        "error"
       );
       return;
     }
@@ -473,7 +503,7 @@ export default function AirGapSensorCheckSheet() {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:5000/api/air-gap-sensor', {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/air-gap-sensor`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -518,13 +548,21 @@ export default function AirGapSensorCheckSheet() {
     } catch (err) {
       console.error('Save error:', err);
       setIsSaving(false);
-      alert(err.message || 'Failed to save checksheet. Check console for details.');
+      triggerToast(err.message || 'Failed to save checksheet. Check console for details.', 'error');
     }
   };
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
+
+      {/* Toast Notification */}
+      <Toast 
+        message={toast.message} 
+        type={toast.type} 
+        onClose={() => setToast({ message: '', type: '' })} 
+      />
+
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
 

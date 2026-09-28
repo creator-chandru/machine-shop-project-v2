@@ -23,11 +23,11 @@ const formMap = {
 
   "air-gap-sensor": <AirGapSensorCheckSheet />,
 
-  // "four-m-change-monitoring": <FourMChangeMonitoringCheckSheet />,
+  "four-m-change-monitoring": <FourMChangeMonitoringCheckSheet />,
 
   "tool-change-record": <ToolChangeRecord />,
 
-  // "significant-event-record": <RecordOfSignificantEvent />,
+  "significant-event-record": <RecordOfSignificantEvent />,
 
   "daily-production-report": <DailyProductionReport />,
 
@@ -35,9 +35,9 @@ const formMap = {
     <DailyProductionIdleTimeReport />
   ),
 
-  // "breakdown-intimation-service-report": (
-  //   <BreakdownIntimationServiceReport />
-  // ),
+  "breakdown-intimation-service-report": (
+     <BreakdownIntimationServiceReport />
+   ),
 
   // Future forms:
   // "some-form": <SomeForm />,

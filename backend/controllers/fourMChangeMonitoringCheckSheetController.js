@@ -1,51 +1,436 @@
-const express = require("express");
-const router = express.Router();
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const sql = require("../db"); // Adjust path based on your folder structure
+const sql = require("../db");
 
-router.post("/login", async (req, res) => {
-    const { employeeId, password } = req.body;
 
-    if (!employeeId || !password) {
-        return res.status(400).json({ error: "Employee ID and password are required." });
-    }
+// ============================================================
+// GET MACHINE SHOP DETAILS
+// ============================================================
+const getFourMChangeMonitoringDetails = async (req, res) => {
+
+    const { shopId } = req.params;
 
     try {
-        const result = await sql.query`SELECT * FROM MachineShopUsers WHERE employeeId = ${employeeId}`;
-        const user = result.recordset[0];
 
-        if (!user) {
-            return res.status(401).json({ error: "Invalid credentials" });
+        // Validate machine shop
+        if (!shopId || ![1, 2, 3, 4, 5].includes(Number(shopId))) {
+            return res.status(400).json({
+                message: "Invalid machine shop"
+            });
         }
 
-        // 🔥 THE FIX: Trim invisible spaces added by SQL Server
-        const dbPasswordHash = user.password.trim();
+        const tableName = `MachineShop${shopId}Details`;
 
-        // Compare the typed password with the cleaned-up hash
-        const isMatch = await bcrypt.compare(password, dbPasswordHash);
+        const result = await sql.query(`
+            SELECT
+                id,
+                lineCode,
+                partName,
+                partNo,
+                machineNo,
+                machineType
+            FROM ${tableName}
+            ORDER BY lineCode, partName, partNo, machineNo
+        `);
 
-        if (!isMatch) {
-            return res.status(401).json({ error: "Invalid credentials" });
-        }
-
-        const token = jwt.sign(
-            { id: user.id, username: user.username, role: user.role, employeeId: user.employeeId },
-            process.env.JWT_SECRET || "super_secret_jwt_key_2026",
-            { expiresIn: "1d" }
-        );
-
-        res.status(200).json({
-            id: user.id,
-            username: user.username,
-            employeeId: user.employeeId,
-            role: user.role,
-            token: token
-        });
+        res.status(200).json(result.recordset);
 
     } catch (error) {
-        console.error("Login Error:", error);
-        res.status(500).json({ error: "Internal server error" });
+
+        console.error(
+            "Error fetching Four M Change Monitoring machine shop details:",
+            error
+        );
+
+        res.status(500).json({
+            message: "Failed to fetch machine shop details",
+            error: error.message
+        });
     }
-});
-module.exports = router;
+};
+
+
+// ============================================================
+// GET DETAILS FOR SELECTED LINE CODE
+// ============================================================
+const getFourMChangeMonitoringLineDetails = async (req, res) => {
+
+    const { shopId } = req.params;
+    const { lineCode } = req.query;
+
+    try {
+
+        // Validate machine shop
+        if (!shopId || ![1, 2, 3, 4, 5].includes(Number(shopId))) {
+            return res.status(400).json({
+                message: "Invalid machine shop"
+            });
+        }
+
+        // Validate line code
+        if (!lineCode) {
+            return res.status(400).json({
+                message: "lineCode is required"
+            });
+        }
+
+        const tableName = `MachineShop${shopId}Details`;
+
+        const request = new sql.Request();
+
+        request.input(
+            "lineCode",
+            sql.NVarChar(100),
+            lineCode
+        );
+
+        const result = await request.query(`
+            SELECT
+                id,
+                lineCode,
+                partName,
+                partNo,
+                machineNo,
+                machineType
+            FROM ${tableName}
+            WHERE lineCode = @lineCode
+            ORDER BY partName, partNo, machineNo
+        `);
+
+        res.status(200).json(result.recordset);
+
+    } catch (error) {
+
+        console.error(
+            "Error fetching Four M Change Monitoring line details:",
+            error
+        );
+
+        res.status(500).json({
+            message: "Failed to fetch line details",
+            error: error.message
+        });
+    }
+};
+
+
+// ============================================================
+// SAVE FOUR M CHANGE MONITORING
+// ============================================================
+const saveFourMChangeMonitoring = async (req, res) => {
+
+    const {
+        headerInfo,
+        rows,
+        hodSign
+    } = req.body;
+
+
+    // --------------------------------------------------------
+    // Validate header
+    // --------------------------------------------------------
+
+    if (!headerInfo) {
+        return res.status(400).json({
+            message: "Header information is required"
+        });
+    }
+
+
+    const {
+        machineShop,
+        lineCode,
+        partName
+    } = headerInfo;
+
+
+    if (!machineShop) {
+        return res.status(400).json({
+            message: "Machine shop is required"
+        });
+    }
+
+
+    if (!lineCode) {
+        return res.status(400).json({
+            message: "Line code is required"
+        });
+    }
+
+
+    if (!partName) {
+        return res.status(400).json({
+            message: "Part name is required"
+        });
+    }
+
+
+    // --------------------------------------------------------
+    // Validate machine shop
+    // --------------------------------------------------------
+
+    if (![1, 2, 3, 4, 5].includes(Number(machineShop))) {
+        return res.status(400).json({
+            message: "Invalid machine shop"
+        });
+    }
+
+
+    // --------------------------------------------------------
+    // Validate rows
+    // --------------------------------------------------------
+
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({
+            message: "At least one row is required"
+        });
+    }
+
+
+    const transaction = new sql.Transaction();
+
+
+    try {
+
+        await transaction.begin();
+
+
+        // ----------------------------------------------------
+        // Insert every row
+        // ----------------------------------------------------
+
+        for (let index = 0; index < rows.length; index++) {
+
+            const row = rows[index];
+
+            const request = new sql.Request(transaction);
+
+
+            // ------------------------------------------------
+            // Header fields
+            // ------------------------------------------------
+
+            request.input(
+                "machineShop",
+                sql.Int,
+                Number(machineShop)
+            );
+
+            request.input(
+                "lineCode",
+                sql.NVarChar(100),
+                lineCode
+            );
+
+            request.input(
+                "partName",
+                sql.NVarChar(255),
+                partName
+            );
+
+
+            // ------------------------------------------------
+            // Row fields
+            // ------------------------------------------------
+
+            request.input(
+                "slNo",
+                sql.Int,
+                row.slNo
+                    ? Number(row.slNo)
+                    : index + 1
+            );
+
+
+            const dateShift =
+                row.dateShift ||
+                `${row.date || ""} ${row.shift || ""}`.trim();
+
+
+            request.input(
+                "dateShift",
+                sql.NVarChar(100),
+                dateShift || null
+            );
+
+
+            request.input(
+                "mcNo",
+                sql.NVarChar(100),
+                row.mcNo || null
+            );
+
+
+            request.input(
+                "typeOf4M",
+                sql.NVarChar(255),
+                row.typeOf4M || null
+            );
+
+
+            request.input(
+                "description",
+                sql.NVarChar(sql.MAX),
+                row.description || null
+            );
+
+
+            request.input(
+                "firstPart",
+                sql.NVarChar(100),
+                row.firstPart || null
+            );
+
+
+            request.input(
+                "lastPart",
+                sql.NVarChar(100),
+                row.lastPart || null
+            );
+
+
+            request.input(
+                "inspectionFrequency",
+                sql.NVarChar(255),
+                row.inspectionFrequency || null
+            );
+
+
+            request.input(
+                "retroChecking",
+                sql.NVarChar(255),
+                row.retroChecking || null
+            );
+
+
+            request.input(
+                "quarantine",
+                sql.NVarChar(255),
+                row.quarantine || null
+            );
+
+
+            request.input(
+                "partIdentification",
+                sql.NVarChar(255),
+                row.partIdentification || null
+            );
+
+
+            request.input(
+                "internalCommunication",
+                sql.NVarChar(255),
+                row.internalCommunication || null
+            );
+
+
+            request.input(
+                "inchargeSign",
+                sql.NVarChar(255),
+                row.inchargeSign || null
+            );
+
+
+            request.input(
+                "hodSign",
+                sql.NVarChar(255),
+                hodSign || null
+            );
+
+
+            // ------------------------------------------------
+            // INSERT
+            // ------------------------------------------------
+
+            await request.query(`
+                INSERT INTO FourMChangeMonitoring (
+                    machineShop,
+                    lineCode,
+                    partName,
+                    slNo,
+                    dateShift,
+                    mcNo,
+                    typeOf4M,
+                    description,
+                    firstPart,
+                    lastPart,
+                    inspectionFrequency,
+                    retroChecking,
+                    quarantine,
+                    partIdentification,
+                    internalCommunication,
+                    inchargeSign,
+                    hodSign
+                )
+                VALUES (
+                    @machineShop,
+                    @lineCode,
+                    @partName,
+                    @slNo,
+                    @dateShift,
+                    @mcNo,
+                    @typeOf4M,
+                    @description,
+                    @firstPart,
+                    @lastPart,
+                    @inspectionFrequency,
+                    @retroChecking,
+                    @quarantine,
+                    @partIdentification,
+                    @internalCommunication,
+                    @inchargeSign,
+                    @hodSign
+                )
+            `);
+        }
+
+
+        // ----------------------------------------------------
+        // COMMIT
+        // ----------------------------------------------------
+
+        await transaction.commit();
+
+
+        return res.status(201).json({
+            message: "4M Change Monitoring data saved successfully"
+        });
+
+
+    } catch (error) {
+
+        // ----------------------------------------------------
+        // ROLLBACK
+        // ----------------------------------------------------
+
+        try {
+            await transaction.rollback();
+        } catch (rollbackError) {
+            console.error(
+                "Rollback error:",
+                rollbackError
+            );
+        }
+
+
+        console.error(
+            "Error saving Four M Change Monitoring:",
+            error
+        );
+
+
+        return res.status(500).json({
+            message: "Failed to save 4M Change Monitoring data",
+            error: error.message
+        });
+    }
+};
+
+
+// ============================================================
+// EXPORTS
+// ============================================================
+
+module.exports = {
+    getFourMChangeMonitoringDetails,
+    getFourMChangeMonitoringLineDetails,
+    saveFourMChangeMonitoring
+};

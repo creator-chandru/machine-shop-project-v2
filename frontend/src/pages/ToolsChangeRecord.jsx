@@ -81,7 +81,7 @@ export default function ToolChangeRecord() {
   });
 
   const [machineDetails, setMachineDetails] = useState([]);
-  const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
+  
 
   const [sections, setSections] = useState(
     Array.from({ length: INITIAL_SECTIONS }, () =>

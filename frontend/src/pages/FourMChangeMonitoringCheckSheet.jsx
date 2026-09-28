@@ -70,7 +70,7 @@ export default function FourMChangeMonitoringCheckSheet() {
     };
 
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/four-m-change-monitoring`, {
+      const res = await fetch('http://localhost:5000/api/four-m-change-monitoring', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

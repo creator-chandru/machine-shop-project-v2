@@ -1,112 +1,51 @@
-const sql = require('../db.js');
+const express = require("express");
+const router = express.Router();
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const sql = require("../db"); // Adjust path based on your folder structure
 
-const saveFourMChangeMonitoring = async (req, res) => {
+router.post("/login", async (req, res) => {
+    const { employeeId, password } = req.body;
 
-    const { headerInfo, rows, hodSign } = req.body;
+    if (!employeeId || !password) {
+        return res.status(400).json({ error: "Employee ID and password are required." });
+    }
 
     try {
+        const result = await sql.query`SELECT * FROM MachineShopUsers WHERE employeeId = ${employeeId}`;
+        const user = result.recordset[0];
 
-        const transaction = new sql.Transaction();
-        await transaction.begin();
-
-        // Insert each row
-        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
-
-            const row = rows[rowIdx];
-
-            await transaction.request()
-                .input('line', sql.NVarChar, headerInfo.line)
-                .input('partName', sql.NVarChar, headerInfo.partName)
-                .input('dateShift', sql.NVarChar, row.dateShift)
-                .input('mcNo', sql.NVarChar, row.mcNo)
-                .input('typeOf4M', sql.NVarChar, row.typeOf4M)
-                .input('description', sql.NVarChar, row.description)
-                .input('firstPart', sql.NVarChar, row.firstPart)
-                .input('lastPart', sql.NVarChar, row.lastPart)
-                .input('inspectionFrequency', sql.NVarChar, row.inspectionFrequency)
-                .input('retroChecking', sql.NVarChar, row.retroChecking)
-                .input('quarantine', sql.NVarChar, row.quarantine)
-                .input('partIdentification', sql.NVarChar, row.partIdentification)
-                .input('internalCommunication', sql.NVarChar, row.internalCommunication)
-                .input('inchargeSign', sql.NVarChar, row.inchargeSign)
-                .input('slNo', sql.Int, rowIdx + 1)
-
-                .query(`
-                    INSERT INTO FourMChangeMonitoring
-                    (
-                        line,
-                        partName,
-                        dateShift,
-                        mcNo,
-                        typeOf4M,
-                        description,
-                        firstPart,
-                        lastPart,
-                        inspectionFrequency,
-                        retroChecking,
-                        quarantine,
-                        partIdentification,
-                        internalCommunication,
-                        inchargeSign,
-                        slNo
-                    )
-                    VALUES
-                    (
-                        @line,
-                        @partName,
-                        @dateShift,
-                        @mcNo,
-                        @typeOf4M,
-                        @description,
-                        @firstPart,
-                        @lastPart,
-                        @inspectionFrequency,
-                        @retroChecking,
-                        @quarantine,
-                        @partIdentification,
-                        @internalCommunication,
-                        @inchargeSign,
-                        @slNo
-                    )
-                `);
+        if (!user) {
+            return res.status(401).json({ error: "Invalid credentials" });
         }
 
-        // Insert HOD signature
-        await transaction.request()
-            .input('line', sql.NVarChar, headerInfo.line)
-            .input('partName', sql.NVarChar, headerInfo.partName)
-            .input('signatureValue', sql.NVarChar, hodSign)
-            .query(`
-                INSERT INTO FourMChangeMonitoringSignatures
-                (
-                    line,
-                    partName,
-                    signatureValue
-                )
-                VALUES
-                (
-                    @line,
-                    @partName,
-                    @signatureValue
-                )
-            `);
+        // 🔥 THE FIX: Trim invisible spaces added by SQL Server
+        const dbPasswordHash = user.password.trim();
 
-        await transaction.commit();
+        // Compare the typed password with the cleaned-up hash
+        const isMatch = await bcrypt.compare(password, dbPasswordHash);
 
-        res.status(201).json({
-            message: 'CheckSheet saved Successfully!'
+        if (!isMatch) {
+            return res.status(401).json({ error: "Invalid credentials" });
+        }
+
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role, employeeId: user.employeeId },
+            process.env.JWT_SECRET || "super_secret_jwt_key_2026",
+            { expiresIn: "1d" }
+        );
+
+        res.status(200).json({
+            id: user.id,
+            username: user.username,
+            employeeId: user.employeeId,
+            role: user.role,
+            token: token
         });
 
-    } catch (err) {
-
-        console.error(err);
-
-        res.status(500).json({
-            error: 'Failed to save checkSheet'
-        });
+    } catch (error) {
+        console.error("Login Error:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
-};
-
-module.exports = {
-    saveFourMChangeMonitoring
-};
+});
+module.exports = router;

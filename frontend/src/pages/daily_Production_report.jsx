@@ -522,18 +522,23 @@ export default function DailyProductionReport() {
                   <tr key={`prod-row-${rIdx}`} className="h-10 hover:bg-gray-50">
                     <td className="border border-gray-800 p-0">
                       <select
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px]"
-                        value={row.machineNo}
-                        onChange={(e) => handleRowChange(rIdx, "machineNo", null, e.target.value)}
-                        disabled={!header.lineCode}
-                      >
-                        <option value="">Select</option>
-                        {machineOptions.map((m) => (
-                          <option key={`${m.id}-${m.machineNo}`} value={m.machineNo}>
-                            {m.machineNo}
-                          </option>
-                        ))}
-                      </select>
+                          className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px]"
+                          value={row.machineNo}
+                          onChange={(e) =>
+                            handleRowChange(rIdx, "machineNo", null, e.target.value)
+                          }
+                          disabled={!header.lineCode}
+                        >
+                          <option value="">Select</option>
+
+                          {[...new Set(machineOptions.map((m) => m.machineNo))]
+                            .filter(Boolean)
+                            .map((machineNo) => (
+                              <option key={machineNo} value={machineNo}>
+                                {machineNo}
+                              </option>
+                            ))}
+                        </select>
                     </td>
                     <td className="border border-gray-800 p-0 bg-gray-50">
                       <input
@@ -717,10 +722,7 @@ export default function DailyProductionReport() {
           </table>
         </div>
 
-        <div className="flex justify-between items-end mt-6 pt-4 border-t border-gray-300">
-          <div className="text-xs text-gray-600 font-semibold">
-            {formMeta.formCode}, Rev.No: {formMeta.revision} dt {formMeta.revisionDate}
-          </div>
+        <div className="flex justify-end items-end mt-6 pt-4 border-t border-gray-300">
           <button
             type="button"
             onClick={handleSave}

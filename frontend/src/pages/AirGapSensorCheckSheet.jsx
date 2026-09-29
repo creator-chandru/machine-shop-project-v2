@@ -893,10 +893,7 @@ export default function AirGapSensorCheckSheet() {
         </div>
 
         {/* Footer Meta Code & Save Button */}
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 pt-4 border-t border-gray-300">
-          <div className="text-xs text-gray-600 font-semibold">
-            {initialFormData.formCode}, Rev.No: {initialFormData.revision} dt {initialFormData.revisionDate}
-          </div>
+        <div className="flex justify-end flex-col sm:flex-row justify-end items-center gap-4 mt-6 pt-4 border-t border-gray-300">
 
           <button
             type="button"

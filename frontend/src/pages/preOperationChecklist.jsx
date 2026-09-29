@@ -650,13 +650,23 @@ export default function PreOperationChecklist() {
             >
               OP No
             </label>
-            <input
+            <select
               id="header-opNo"
-              type="text"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.opNo}
-              onChange={(e) => handleHeaderChange('opNo', e.target.value)}
-            />
+              onChange={(e) => {
+                handleHeaderChange('opNo', e.target.value);
+              }}
+            >
+              <option value="">Select OP No</option>
+
+              <option value="20">20</option>
+              <option value="30">30</option>
+              <option value="40">40</option>
+              <option value="50">50</option>
+              <option value="60">60</option>
+              <option value="70">70</option>
+            </select>
           </div>
 
           {/* DATE */}
@@ -675,28 +685,6 @@ export default function PreOperationChecklist() {
               onChange={(e) => handleHeaderChange('date', e.target.value)}
             />
           </div>
-        </div>
-
-        {/* =====================================================
-            LINE SET STATUS
-        ====================================================== */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-6 p-3 rounded-lg bg-orange-50 border border-orange-200">
-          <div className="text-sm text-gray-700">
-            <span className="font-bold">Selected Line Set:</span>{" "}
-            {headerInfo.lineCode || "Not selected"}
-            {headerInfo.partNo ? ` / ${headerInfo.partNo}` : ""}
-            {headerInfo.machineNo ? ` / ${headerInfo.machineNo}` : ""}
-          </div>
-
-          {isLineSetComplete && (
-            <button
-              type="button"
-              onClick={handleChangeLine}
-              className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded font-bold text-sm transition-colors cursor-pointer"
-            >
-              Change Line
-            </button>
-          )}
         </div>
 
         {/* =====================================================

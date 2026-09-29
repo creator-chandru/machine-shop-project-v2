@@ -10,7 +10,9 @@ import {
   Wrench,
   FileText,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  BadgeCheck,
+  SearchCheck
 } from 'lucide-react';
 import { useLineSet } from '../context/LineSetContext.jsx';
 
@@ -40,7 +42,10 @@ const Operator = () => {
     { name: "Tool Change Record", path:`/operator/${shopId}/tool-change-record`, icon: Wrench},
     { name: "Daily Production Report", path:`/operator/${shopId}/daily-production-report`, icon: FileText},
     { name: "Daily Production Idle Time Report", path:`/operator/${shopId}/daily-production-idle-time-report`, icon: Clock},
-    { name: "Breakdown Intimation / Service Report", path:`/operator/${shopId}/breakdown-intimation-service-report`, icon: AlertTriangle}
+    { name: "Breakdown Intimation / Service Report", path:`/operator/${shopId}/breakdown-intimation-service-report`, icon: AlertTriangle},
+    { name: "Skill Evaluation - Practical Production and Quantity", path:`/operator/${shopId}/skill-evaluation-practical`, icon:BadgeCheck},
+    { name: "Operator Observation Sheet", path:`/operator/${shopId}/operator-observation-sheet`,icon:SearchCheck},
+    { name: "Competency Evaluation Form", path:`/operator/${shopId}/competency-evaluation-form`,icon:ShieldCheck}
   ];
 
   return (

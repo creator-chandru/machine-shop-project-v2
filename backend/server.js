@@ -15,7 +15,9 @@ const dailyProductionRoutes = require("./routes/dailyProductionReport.js");
 const dailyProductionIdleTimeRoutes = require("./routes/dailyProductionIdleTimeRoutes.js"); 
 const partQtyRoutes = require("./routes/partQtyRoutes.js");
 const partMappingRoutes = require("./routes/partMappingRoutes.js");
-
+const operatorObservationSheetRoutes = require("./routes/operatorObservationSheetRouter.js");
+const skillEvaluationPracticalRoutes = require("./routes/skillEvaluationPractical.js");
+const competencyEvaluationFormRoutes = require("./routes/competencyEvaluationFormRoutes.js");
 const app = express();
 
 app.use(cors({
@@ -39,8 +41,12 @@ app.use('/api',ToolsChangeRecord);
 app.use('/api',RecordofSignifcantEvent);
 app.use('/api', dailyProductionRoutes);
 app.use('/api', dailyProductionIdleTimeRoutes);
+app.use('/api', operatorObservationSheetRoutes);
+app.use('/api', skillEvaluationPracticalRoutes);
+app.use('/api', competencyEvaluationFormRoutes);
 app.use('/api/parts', partQtyRoutes);
 app.use('/api/mappings', partMappingRoutes);
+
 
 
 const PORT = process.env.PORT || 5000;

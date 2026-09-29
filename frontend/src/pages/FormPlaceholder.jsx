@@ -10,7 +10,9 @@ import RecordOfSignificantEvent from "./RecordOfSignificantEvent";
 import DailyProductionReport from "./daily_Production_report";
 import DailyProductionIdleTimeReport from "./daily_production_idle_time_report";
 import BreakdownIntimationServiceReport from "./breakdown_intimation_service_report";
-
+import SkillEvaluationPractical from "./skillEvaluationPractical";
+import OperatorObservationSheet from "./operatorObservationSheet";
+import CompetencyEvaluationForm from "./competencyEvaluationForm";
 /**
  * Central map for operator forms
  *
@@ -39,6 +41,11 @@ const formMap = {
      <BreakdownIntimationServiceReport />
    ),
 
+   "skill-evaluation-practical": <SkillEvaluationPractical />,
+
+   "operator-observation-sheet": <OperatorObservationSheet />,
+   
+   "competency-evaluation-form": <CompetencyEvaluationForm />
   // Future forms:
   // "some-form": <SomeForm />,
 };

@@ -425,6 +425,58 @@ export default function DailyProductionIdleTimeReport() {
   };
 
   const handleLossChange = (colIdx, lossId, shift, val) => {
+    if (val !== "") {
+      const enteredVal = parseFloat(val);
+
+      // 1. Prevent negative numbers
+      if (isNaN(enteredVal) || enteredVal < 0) {
+        triggerToast("Loss value cannot be negative!", "error");
+        return;
+      }
+
+      const shiftName =
+        shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III";
+
+      const capVal = lineColumns[colIdx]?.capacity?.[shift];
+      const capNum = parseFloat(capVal);
+
+      // 2. Require valid capacity first
+      if (capVal === "" || isNaN(capNum) || capNum <= 0) {
+        triggerToast(
+          `Please enter the Capacity for Shift ${shiftName} first before entering Loss values.`,
+          "error"
+        );
+        return;
+      }
+
+      // 3. Individual loss cannot exceed capacity
+      if (enteredVal > capNum) {
+        triggerToast(
+          `Loss value (${enteredVal}) cannot exceed the capacity (${capNum}) for Shift ${shiftName}!`,
+          "error"
+        );
+        return;
+      }
+
+      // 4. Calculate total loss if this value is applied
+      const otherLossesTotal = LOSS_REASONS.reduce((acc, loss) => {
+        if (loss.id === lossId) return acc;
+        const currentVal =
+          parseFloat(lineColumns[colIdx]?.losses?.[`loss_${loss.id}`]?.[shift]) || 0;
+        return acc + currentVal;
+      }, 0);
+
+      const projectedTotal = otherLossesTotal + enteredVal;
+
+      if (projectedTotal > capNum) {
+        triggerToast(
+          `Total Loss (${projectedTotal}) cannot exceed the capacity (${capNum}) for Shift ${shiftName}!`,
+          "error"
+        );
+        return;
+      }
+    }
+
     setLineColumns((prev) => {
       const next = [...prev];
 
@@ -568,6 +620,16 @@ export default function DailyProductionIdleTimeReport() {
             "error"
           );
 
+          return;
+        }
+
+        // --- NEW: Validate Total Loss against Capacity ---
+        const totalLoss = parseFloat(calcTotalLoss(col, shift)) || 0;
+        if (totalLoss > 0 && (!col.capacity[shift] || totalLoss > cap)) {
+          triggerToast(
+            `Line ${i + 1} (Shift ${shiftName}): Total Loss (${totalLoss}) cannot exceed capacity (${cap})!`,
+            "error"
+          );
           return;
         }
       }

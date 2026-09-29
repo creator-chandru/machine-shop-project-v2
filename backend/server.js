@@ -14,6 +14,7 @@ const RecordofSignifcantEvent=require("./routes/RecordOfSignificantEvent.js");
 const dailyProductionRoutes = require("./routes/dailyProductionReport.js");
 const dailyProductionIdleTimeRoutes = require("./routes/dailyProductionIdleTimeRoutes.js"); 
 const partQtyRoutes = require("./routes/partQtyRoutes.js");
+const partMappingRoutes = require("./routes/partMappingRoutes.js");
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api',RecordofSignifcantEvent);
 app.use('/api', dailyProductionRoutes);
 app.use('/api', dailyProductionIdleTimeRoutes);
 app.use('/api/parts', partQtyRoutes);
+app.use('/api/mappings', partMappingRoutes);
 
 
 const PORT = process.env.PORT || 5000;

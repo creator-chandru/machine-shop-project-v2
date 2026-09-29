@@ -5,7 +5,8 @@ const router = express.Router();
 const {
   getMachineShop3Details,
   getMachineShop3LineDetails,
-  savePreOperationChecklist
+  savePreOperationChecklist,
+  getLatestMachineParams
 } = require('../controllers/preOperationChecklistController.js');
 
 
@@ -35,6 +36,12 @@ router.get(
 router.post(
   '/pre-operation-checklist',
   savePreOperationChecklist
+);
+
+// Add this below your existing routes:
+router.get(
+  '/machine-shop/:shopId/latest-params',
+  getLatestMachineParams
 );
 
 

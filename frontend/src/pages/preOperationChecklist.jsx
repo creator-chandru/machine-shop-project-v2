@@ -20,124 +20,18 @@ const initialFormData = {
   },
 
   parameters: [
-    {
-      slNo: 1,
-      label: "System pressure",
-      unit: "KGF/CM2",
-      specification: "",
-      specEditable: true,
-      checkMethod: "PRESSURE GAUGE",
-      hasSubRows: false
-    },
-    {
-      slNo: 2,
-      label: "Clamping pressure",
-      unit: "KGF/CM2",
-      specification: "",
-      specEditable: true,
-      checkMethod: "PRESSURE GAUGE",
-      hasSubRows: false
-    },
-    {
-      slNo: 3,
-      label: "Orientation pressure",
-      unit: "KGF/CM2",
-      specification: "",
-      specEditable: true,
-      checkMethod: "PRESSURE GAUGE",
-      hasSubRows: false
-    },
-    {
-      slNo: 4,
-      label: "PROGRAM NO",
-      unit: "",
-      specification: "",
-      specEditable: true,
-      checkMethod: "VISUAL",
-      hasSubRows: false
-    },
-    {
-      slNo: 5,
-      label: "Hydraulic oil level",
-      unit: "",
-      note: "[Above the minimum level]",
-      specification: "",
-      specEditable: false,
-      checkMethod: "LEVEL INDICATOR",
-      hasSubRows: true,
-      subRows: ["BEFORE", "AFTER"]
-    },
-    {
-      slNo: 6,
-      label: "Coolant oil level",
-      unit: "",
-      note: "[Above the minimum level]",
-      specification: "",
-      specEditable: false,
-      checkMethod: "LEVEL INDICATOR",
-      hasSubRows: true,
-      subRows: ["BEFORE", "AFTER"]
-    },
-    {
-      slNo: 7,
-      label: "Lub oil Level",
-      unit: "",
-      note: "[Above the minimum level]",
-      specification: "",
-      specEditable: false,
-      checkMethod: "LEVEL INDICATOR",
-      hasSubRows: true,
-      subRows: ["BEFORE", "AFTER"]
-    },
-    {
-      slNo: 8,
-      label: "Coolant oil ratio",
-      unit: "",
-      specification: "[3 TO 5]",
-      specEditable: false,
-      checkMethod: "REFRACTO METER",
-      hasSubRows: true,
-      subRows: ["BEFORE", "AFTER"]
-    },
-    {
-      slNo: 9,
-      label: "Air pressure Level",
-      unit: "",
-      specification: "MINIMUM 4 BAR",
-      specEditable: false,
-      checkMethod: "PRESSURE GAUGE",
-      hasSubRows: false
-    },
-    {
-      slNo: 10,
-      label: "Fixture Condition",
-      unit: "",
-      specification:
-        "Check - Dent, Damage, Orientation, Clamp & nut screw not to be in loose condition.",
-      specEditable: false,
-      checkMethod: "VISUAL",
-      hasSubRows: false
-    },
-    {
-      slNo: 11,
-      label: "Andon Tower Lamp Condition",
-      unit: "",
-      specification:
-        "Free from damage & Check indication light working condition",
-      specEditable: false,
-      checkMethod: "VISUAL",
-      hasSubRows: false
-    },
-    {
-      slNo: 12,
-      label:
-        "Double Hand switches, Limit switches, Safety sensors",
-      unit: "",
-      specification: "Good Working condition",
-      specEditable: false,
-      checkMethod: "Operate",
-      hasSubRows: false
-    }
+    { slNo: 1, label: "System pressure", unit: "KGF/CM2", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 2, label: "Clamping pressure", unit: "KGF/CM2", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 3, label: "Orientation pressure", unit: "KGF/CM2", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 4, label: "PROGRAM NO", unit: "", specification: "", specEditable: true, checkMethod: "VISUAL", hasSubRows: false },
+    { slNo: 5, label: "Hydraulic oil level", unit: "", note: "[Above the minimum level]", specification: "", specEditable: false, checkMethod: "LEVEL INDICATOR", hasSubRows: true, subRows: ["BEFORE", "AFTER"] },
+    { slNo: 6, label: "Coolant oil level", unit: "", note: "[Above the minimum level]", specification: "", specEditable: false, checkMethod: "LEVEL INDICATOR", hasSubRows: true, subRows: ["BEFORE", "AFTER"] },
+    { slNo: 7, label: "Lub oil Level", unit: "", note: "[Above the minimum level]", specification: "", specEditable: false, checkMethod: "LEVEL INDICATOR", hasSubRows: true, subRows: ["BEFORE", "AFTER"] },
+    { slNo: 8, label: "Coolant oil ratio", unit: "", specification: "[3 TO 5]", specEditable: false, checkMethod: "REFRACTO METER", hasSubRows: true, subRows: ["BEFORE", "AFTER"] },
+    { slNo: 9, label: "Air pressure Level", unit: "", specification: "MINIMUM 4 BAR", specEditable: false, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 10, label: "Fixture Condition", unit: "", specification: "Check - Dent, Damage, Orientation, Clamp & nut screw not to be in loose condition.", specEditable: false, checkMethod: "VISUAL", hasSubRows: false },
+    { slNo: 11, label: "Andon Tower Lamp Condition", unit: "", specification: "Free from damage & Check indication light working condition", specEditable: false, checkMethod: "VISUAL", hasSubRows: false },
+    { slNo: 12, label: "Double Hand switches, Limit switches, Safety sensors", unit: "", specification: "Good Working condition", specEditable: false, checkMethod: "Operate", hasSubRows: false }
   ],
 
   signatures: {
@@ -154,21 +48,13 @@ const initialFormData = {
   ]
 };
 
-// Toast notification component
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
-
   const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
-
   return (
     <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
       <span className="text-sm font-semibold">{message}</span>
-      <button 
-        onClick={onClose}
-        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
-      >
-        ×
-      </button>
+      <button onClick={onClose} className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none">×</button>
     </div>
   );
 };
@@ -176,70 +62,129 @@ const Toast = ({ message, type, onClose }) => {
 export default function PreOperationChecklist() {
   const { shopId } = useParams();
   const navigate = useNavigate();
-  const {
-    lineSet,
-    setLineSet,
-    clearLineSet,
-    isLineSetComplete
-  } = useLineSet();
+  const { lineSet, setLineSet } = useLineSet();
+  
   const [headerInfo, setHeaderInfo] = useState({ ...initialFormData.header });
   const [values, setValues] = useState({});
   const [signatures, setSignatures] = useState({});
   const [specifications, setSpecifications] = useState({});
+  
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-
-  // Toast state
   const [toast, setToast] = useState({ message: '', type: '' });
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
-    setTimeout(() => {
-      setToast({ message: '', type: '' });
-    }, 4000);
+    setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
 
-  // ==========================================================
-  // MACHINE SHOP 3 DATA
-  // ==========================================================
   const [machineDetails, setMachineDetails] = useState([]);
+  const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
   // ==========================================================
-  // FETCH MACHINE SHOP 3 DATA
+  // DYNAMIC RENDER-TIME VALIDATION
+  // ==========================================================
+  const getValidationError = (slNo) => {
+    // Only validate the first 3 rows
+    if (![1, 2, 3].includes(slNo)) return null;
+    
+    const val = values[slNo];
+    if (!val) return null; // No error if the input is empty
+
+    // Get spec from state, or fallback to initial data
+    const spec = specifications[slNo] !== undefined 
+      ? specifications[slNo] 
+      : initialFormData.parameters.find(p => p.slNo === slNo)?.specification;
+      
+    if (!spec) return null;
+
+    const parsedVal = parseFloat(val);
+    if (isNaN(parsedVal)) return null;
+
+    // Extract min and max from formats like "40-50"
+    const rangeMatch = spec.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
+    if (rangeMatch) {
+      const min = parseFloat(rangeMatch[1]);
+      const max = parseFloat(rangeMatch[2]);
+      if (parsedVal < min) return `Min: ${min}`;
+      if (parsedVal > max) return `Max: ${max}`;
+    }
+    
+    return null;
+  };
+
+  // ==========================================================
+  // FETCH MACHINE DETAILS & MAPPINGS
   // ==========================================================
   useEffect(() => {
-    const fetchMachineDetails = async () => {
+    const fetchData = async () => {
       try {
-        if (shopId !== "3") {
-          setMachineDetails([]);
-          return;
-        }
+        if (!shopId) return;
 
         const token = localStorage.getItem('token');
-        const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        );
-        if (!res.ok) {
-          throw new Error('Failed to fetch Machine Shop 3 details');
+        const headers = { Authorization: `Bearer ${token}` };
+        const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+        const machineRes = await fetch(`${baseUrl}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
+        if (machineRes.ok) {
+          const machineData = await machineRes.json();
+          setMachineDetails(machineData);
         }
 
-        const data = await res.json();
-        setMachineDetails(data);
+        const mappingRes = await fetch(`${baseUrl}/api/mappings/${shopId}/lines`, { headers });
+        if (mappingRes.ok) {
+          const mappingData = await mappingRes.json();
+          setLineMappings(mappingData);
+        }
       } catch (err) {
-        console.error('Machine details fetch error:', err);
-        triggerToast('Failed to load Machine Shop 3 details.', 'error');
+        console.error('Data fetch error:', err);
+        triggerToast('Failed to load required data.', 'error');
       } finally {
         setLoadingMachineDetails(false);
       }
     };
-    fetchMachineDetails();
+    fetchData();
   }, [shopId]);
+
+  // ==========================================================
+  // AUTO-FILL LATEST MACHINE PARAMETERS (slNo: 1, 2, 3, 4) - SPECIFICATIONS ONLY
+  // ==========================================================
+  useEffect(() => {
+    const fetchLatestParams = async () => {
+      if (!shopId || !headerInfo.lineCode || !headerInfo.machineNo) return;
+
+      try {
+        const token = localStorage.getItem('token');
+        const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+        
+        const res = await fetch(
+          `${baseUrl}/api/machine-shop/${shopId}/latest-params?lineCode=${headerInfo.lineCode}&machineNo=${headerInfo.machineNo}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          
+          if (data && data.length > 0) {
+            setSpecifications(prev => {
+              const newSpecs = { ...prev };
+              data.forEach(item => {
+                newSpecs[item.slNo] = item.specification || '';
+              });
+              return newSpecs;
+            });
+
+            triggerToast("Latest specifications loaded.", "success");
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch latest parameters:', err);
+      }
+    };
+
+    fetchLatestParams();
+  }, [shopId, headerInfo.lineCode, headerInfo.machineNo]);
 
   // ==========================================================
   // SYNC SHARED LINE SET
@@ -255,90 +200,37 @@ export default function PreOperationChecklist() {
   }, [lineSet]);
 
   // ==========================================================
-  // LINE CODE OPTIONS
+  // OPTIONS CALCULATION
   // ==========================================================
-  const lineCodes = [
-    ...new Set(
-      machineDetails
-        .map((item) => item.lineCode)
-        .filter(Boolean)
-    )
-  ];
+  const lineCodes = lineMappings.length > 0 
+    ? lineMappings.map(m => m.lineCode)
+    : [...new Set(machineDetails.map(item => item.lineCode).filter(Boolean))];
+
+  const machineOptionsRaw = machineDetails.filter((item) => item.lineCode === headerInfo.lineCode);
+  
+  const machineOptions = Array.from(new Set(machineOptionsRaw.map(m => m.machineNo)))
+    .map(mNo => machineOptionsRaw.find(m => m.machineNo === mNo));
 
   // ==========================================================
-  // SELECTED LINE DETAILS
-  // ==========================================================
-  const selectedLineDetails = machineDetails.filter(
-    (item) => item.lineCode === headerInfo.lineCode
-  );
-
-  // ==========================================================
-  // PART OPTIONS
-  // ==========================================================
-  const partOptions = [
-    ...new Map(
-      selectedLineDetails
-        .filter((item) => item.partNo)
-        .map((item) => [
-          item.partNo,
-          {
-            partNo: item.partNo,
-            partName: item.partName || ""
-          }
-        ])
-    ).values()
-  ];
-
-  // ==========================================================
-  // SELECTED PART DETAILS
-  // ==========================================================
-  const selectedPartDetails = machineDetails.filter(
-    (item) =>
-      item.lineCode === headerInfo.lineCode &&
-      (item.partNo || '') === headerInfo.partNo
-  );
-  const selectedPartMaster = selectedPartDetails[0] || null;
-
-  // ==========================================================
-  // MACHINE OPTIONS
-  // ==========================================================
-  const machineOptions = selectedPartDetails;
-
-  // ==========================================================
-  // HEADER CHANGE
+  // HANDLERS
   // ==========================================================
   const handleHeaderChange = (field, val) => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      [field]: val
-    }));
+    setHeaderInfo((prev) => ({ ...prev, [field]: val }));
   };
 
-  // ==========================================================
-  // LINE SET HANDLERS
-  // ==========================================================
   const handleLineChange = (lineCode) => {
+    const mapping = lineMappings.find(m => m.lineCode === lineCode);
+    const autoPartName = mapping?.partSet || "";
+    const autoPartNo = mapping?.idSet || "";
+
+    setValues({});
+    setSpecifications({});
+
     setLineSet({
       machineShop: shopId,
       lineCode,
-      partName: "",
-      partNo: "",
-      machineNo: ""
-    });
-  };
-
-  const handlePartNoChange = (partNo) => {
-    const selectedPart = machineDetails.find(
-      (item) =>
-        item.lineCode === headerInfo.lineCode &&
-        (item.partNo || "") === partNo
-    );
-
-    setLineSet({
-      machineShop: shopId,
-      lineCode: headerInfo.lineCode,
-      partName: selectedPart?.partName || "",
-      partNo,
+      partName: autoPartName,
+      partNo: autoPartNo,
       machineNo: ""
     });
   };
@@ -347,65 +239,39 @@ export default function PreOperationChecklist() {
     setLineSet({
       machineShop: shopId,
       lineCode: headerInfo.lineCode,
-      partName: selectedPartMaster?.partName || "",
+      partName: headerInfo.partName,
       partNo: headerInfo.partNo,
       machineNo
     });
   };
 
-  const handleChangeLine = () => {
-    clearLineSet();
-  };
-
-  // ==========================================================
-  // SPECIFICATION CHANGE
-  // ==========================================================
   const handleSpecificationChange = (slNo, val) => {
-    setSpecifications((prev) => ({
-      ...prev,
-      [slNo]: val
-    }));
+    setSpecifications((prev) => ({ ...prev, [slNo]: val }));
   };
 
-  // ==========================================================
-  // VALUE CHANGE
-  // ==========================================================
   const handleValueChange = (slNo, subRow, val) => {
     setValues((prev) => {
       if (subRow) {
-        const paramValues = prev[slNo] || {};
-        return {
-          ...prev,
-          [slNo]: {
-            ...paramValues,
-            [subRow]: val
-          }
-        };
+        return { ...prev, [slNo]: { ...(prev[slNo] || {}), [subRow]: val } };
       }
-
-      return {
-        ...prev,
-        [slNo]: val
-      };
+      return { ...prev, [slNo]: val };
     });
   };
 
-  // ==========================================================
-  // SIGNATURE CHANGE
-  // ==========================================================
   const handleSignatureChange = (role, val) => {
-    setSignatures((prev) => ({
-      ...prev,
-      [role]: val
-    }));
+    setSignatures((prev) => ({ ...prev, [role]: val }));
   };
 
-  // ==========================================================
-  // SAVE
-  // ==========================================================
   const handleSave = async () => {
-    if (!isLineSetComplete) {
-      triggerToast("Please select Line code, Part No and Machine No before saving.", "error");
+    if (!lineSet.lineCode || !lineSet.partNo || !lineSet.machineNo) {
+      triggerToast("Please select Line code and Machine No.", "error");
+      return;
+    }
+
+    // Block saving if there are active validation errors calculated directly
+    const hasErrors = [1, 2, 3].some(slNo => getValidationError(slNo) !== null);
+    if (hasErrors) {
+      triggerToast("Please fix the value ranges before saving.", "error");
       return;
     }
 
@@ -421,13 +287,7 @@ export default function PreOperationChecklist() {
         partNo: lineSet.partNo,
         machineNo: lineSet.machineNo
       },
-      lineSet: {
-        machineShop: lineSet.machineShop,
-        lineCode: lineSet.lineCode,
-        partName: lineSet.partName,
-        partNo: lineSet.partNo,
-        machineNo: lineSet.machineNo
-      },
+      lineSet: { ...lineSet },
       values,
       signatures,
       specifications,
@@ -436,62 +296,37 @@ export default function PreOperationChecklist() {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/pre-operation-checklist`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(payload)
-        }
-      );
+      const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-      if (!res.ok) {
-        throw new Error('Save failed');
-      }
-
-      const data = await res.json();
-
-      // Update LineSetContext with the latest selection
-      setLineSet({
-        machineShop: shopId,
-        lineCode: headerInfo.lineCode,
-        partName: headerInfo.partName,
-        partNo: headerInfo.partNo,
-        machineNo: headerInfo.machineNo
+      const res = await fetch(`${baseUrl}/api/pre-operation-checklist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
       });
 
-      // Hide "Saving..."
-      setIsSaving(false);
+      if (!res.ok) throw new Error('Save failed');
 
-      // Show success message
+      setLineSet({ ...lineSet, machineShop: shopId });
+
       setSaveSuccess(true);
-
-      // Keep success message visible for 2 seconds
       await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Go to Form 2
       navigate(`/operator/${shopId}/error-proofing-checksheet`);
 
     } catch (err) {
       console.error('Save error:', err);
+      triggerToast(err.message || 'Failed to save checklist.', 'error');
+    } finally {
       setIsSaving(false);
-      triggerToast(err.message || 'Failed to save checklist. Check console for details.', 'error');
     }
   };
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
-
-      {/* Toast Notification */}
-      <Toast 
-        message={toast.message} 
-        type={toast.type} 
-        onClose={() => setToast({ message: '', type: '' })} 
-      />
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: '' })} />
 
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -499,167 +334,94 @@ export default function PreOperationChecklist() {
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  Saving Data...
-                </h2>
-                <p className="text-gray-500 mt-2">
-                  Please wait
-                </p>
+                <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
               </>
             ) : (
-              <>
-                <h2 className="text-xl font-bold text-green-800">
-                  Data Saved Successfully
-                </h2>
-                <p className="text-gray-500 mt-2">
-                  Loading next form...
-                </p>
-              </>
+              <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
             )}
           </div>
         </div>
       )}
 
       <div className="bg-white w-full max-w-[90rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
-
-        {/* =====================================================
-            CARD HEADER
-        ====================================================== */}
+        
+        {/* HEADER AREA */}
         <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
           <div>
-            <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
-              {initialFormData.company}
-            </span>
-            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
-              {initialFormData.title}
-            </h2>
+            <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">{initialFormData.company}</span>
+            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">{initialFormData.title}</h2>
             <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {initialFormData.formCode}</span>
-              <span>|</span>
-              <span>Revision: {initialFormData.revision}</span>
-              <span>|</span>
+              <span>Form Code: {initialFormData.formCode}</span> |
+              <span>Revision: {initialFormData.revision}</span> |
               <span>Revision Date: {initialFormData.revisionDate}</span>
             </div>
           </div>
         </div>
 
-        {/* =====================================================
-            HEADER META FIELDS
-        ====================================================== */}
+        {/* CONTROLS */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
-          {/* LINE CODE */}
           <div>
-            <label
-              htmlFor="header-lineCode"
-              className="font-bold text-gray-700 block mb-1 text-sm"
-            >
-              Line Code
-            </label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Line Code</label>
             <select
-              id="header-lineCode"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.lineCode}
               onChange={(e) => handleLineChange(e.target.value)}
               disabled={loadingMachineDetails}
             >
-              <option value="">
-                {loadingMachineDetails ? "Loading..." : "Select Line Code"}
-              </option>
+              <option value="">{loadingMachineDetails ? "Loading..." : "Select Line Code"}</option>
               {lineCodes.map((lineCode) => (
-                <option key={lineCode} value={lineCode}>
-                  {lineCode}
-                </option>
+                <option key={lineCode} value={lineCode}>{lineCode}</option>
               ))}
             </select>
           </div>
 
-          {/* PART NO */}
           <div>
-            <label
-              htmlFor="header-partNo"
-              className="font-bold text-gray-700 block mb-1 text-sm"
-            >
-              Part No
-            </label>
-            <select
-              id="header-partNo"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-              value={headerInfo.partNo}
-              onChange={(e) => handlePartNoChange(e.target.value)}
-              disabled={!headerInfo.lineCode}
-            >
-              <option value="">Select Part No</option>
-              {partOptions.map((part) => (
-                <option key={part.partNo} value={part.partNo}>
-                  {part.partNo}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* PART NAME */}
-          <div>
-            <label
-              htmlFor="header-partName"
-              className="font-bold text-gray-700 block mb-1 text-sm"
-            >
-              Part Name
-            </label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Part No (Auto-filled)</label>
             <input 
-              id="header-partName"
+              type="text"
+              readOnly
+              className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
+              value={headerInfo.partNo || ""}
+              placeholder="Select line first"
+            />
+          </div>
+
+          <div>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Part Name (Auto-filled)</label>
+            <input 
               type="text"
               readOnly
               className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
               value={headerInfo.partName || ""}
-              placeholder="Auto-filled"
+              placeholder="Select line first"
             />
           </div>
 
-          {/* MACHINE NO */}
           <div>
-            <label
-              htmlFor="header-machineNo"
-              className="font-bold text-gray-700 block mb-1 text-sm"
-            >
-              Machine No
-            </label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Machine No</label>
             <select
-              id="header-machineNo"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.machineNo}
-              onChange={(e) => {
-                handleMachineChange(e.target.value);
-              }}
-              disabled={!headerInfo.lineCode || !headerInfo.partNo}
+              onChange={(e) => handleMachineChange(e.target.value)}
+              disabled={!headerInfo.lineCode}
             >
               <option value="">Select Machine</option>
-              {machineOptions.map((machine) => (
-                <option key={machine.id} value={machine.machineNo}>
-                  {machine.machineNo}
-                  {machine.machineType ? ` - ${machine.machineType}` : ""}
+              {machineOptions.map((machine, index) => (
+                <option key={index} value={machine.machineNo}>
+                  {machine.machineNo} {machine.machineType ? ` - ${machine.machineType}` : ""}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* OP NO */}
           <div>
-            <label
-              htmlFor="header-opNo"
-              className="font-bold text-gray-700 block mb-1 text-sm"
-            >
-              OP No
-            </label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">OP No</label>
             <select
-              id="header-opNo"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.opNo}
-              onChange={(e) => {
-                handleHeaderChange('opNo', e.target.value);
-              }}
+              onChange={(e) => handleHeaderChange('opNo', e.target.value)}
             >
-              <option value="">Select OP No</option>
-
+              <option value="">Select OP</option>
               <option value="20">20</option>
               <option value="30">30</option>
               <option value="40">40</option>
@@ -669,16 +431,9 @@ export default function PreOperationChecklist() {
             </select>
           </div>
 
-          {/* DATE */}
           <div>
-            <label
-              htmlFor="header-date"
-              className="font-bold text-gray-700 block mb-1 text-sm"
-            >
-              Date
-            </label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Date</label>
             <input
-              id="header-date"
               type="date"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.date}
@@ -687,9 +442,7 @@ export default function PreOperationChecklist() {
           </div>
         </div>
 
-        {/* =====================================================
-            MAIN TABLE
-        ====================================================== */}
+        {/* TABLE */}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse border border-gray-800 text-sm text-center">
             <thead className="bg-gray-100 text-gray-800 font-bold">
@@ -705,99 +458,44 @@ export default function PreOperationChecklist() {
             </thead>
             <tbody>
               {initialFormData.parameters.map((param) => {
+                
+                // Fetch potential dynamic validation error for this row
+                const errorMsg = getValidationError(param.slNo);
+
                 if (param.hasSubRows) {
                   return (
                     <React.Fragment key={`param-${param.slNo}`}>
                       {param.subRows.map((subRow, subIdx) => {
                         const cellValue = values[param.slNo]?.[subRow] || '';
-
                         return (
                           <tr key={`param-${param.slNo}-${subRow}`}>
                             {subIdx === 0 && (
                               <>
-                                <td
-                                  rowSpan={param.subRows.length}
-                                  className="border border-gray-800 p-2 font-medium"
-                                >
-                                  {param.slNo}
-                                </td>
-
-                                <td
-                                  rowSpan={param.subRows.length}
-                                  className="border border-gray-800 p-2 text-left px-3"
-                                >
+                                <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 font-medium">{param.slNo}</td>
+                                <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 text-left px-3">
                                   <span className="font-medium">{param.label}</span>
-                                  {param.note && (
-                                    <span className="text-xs text-gray-500 block mt-0.5">
-                                      {param.note}
-                                    </span>
-                                  )}
+                                  {param.note && <span className="text-xs text-gray-500 block mt-0.5">{param.note}</span>}
                                 </td>
-
-                                <td
-                                  rowSpan={param.subRows.length}
-                                  className="border border-gray-800 p-2 text-left px-3 text-gray-700"
-                                >
+                                <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 text-left px-3 text-gray-700">
                                   {param.specEditable ? (
-                                    <input
-                                      type="text"
-                                      className="w-full h-full text-center outline-none bg-transparent py-1"
-                                      value={specifications[param.slNo] || ''}
-                                      onChange={(e) =>
-                                        handleSpecificationChange(param.slNo, e.target.value)
-                                      }
-                                      placeholder="Enter spec"
-                                    />
-                                  ) : (
-                                    param.specification || '-'
-                                  )}
+                                    <input type="text" className="w-full h-full text-center outline-none bg-transparent py-1" value={specifications[param.slNo] || ''} onChange={(e) => handleSpecificationChange(param.slNo, e.target.value)} placeholder="Enter spec" />
+                                  ) : (param.specification || '-')}
                                 </td>
-
-                                <td
-                                  rowSpan={param.subRows.length}
-                                  className="border border-gray-800 p-2 text-gray-700"
-                                >
-                                  {param.unit || '-'}
-                                </td>
-
-                                <td
-                                  rowSpan={param.subRows.length}
-                                  className="border border-gray-800 p-2 text-gray-700"
-                                >
-                                  {param.checkMethod}
-                                </td>
+                                <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 text-gray-700">{param.unit || '-'}</td>
+                                <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 text-gray-700">{param.checkMethod}</td>
                               </>
                             )}
-
-                            <td className="border border-gray-800 p-2 bg-gray-50 font-semibold text-gray-600">
-                              {subRow}
-                            </td>
-
+                            <td className="border border-gray-800 p-2 bg-gray-50 font-semibold text-gray-600">{subRow}</td>
                             <td className="border border-gray-800 p-0">
                               {[5, 6, 7].includes(param.slNo) ? (
-                                <select
-                                  className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
-                                  aria-label={`${param.label} ${subRow} Value`}
-                                  value={cellValue}
-                                  onChange={(e) =>
-                                    handleValueChange(param.slNo, subRow, e.target.value)
-                                  }
-                                >
+                                <select className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer" value={cellValue} onChange={(e) => handleValueChange(param.slNo, subRow, e.target.value)}>
                                   <option value=""></option>
                                   <option value="MIN">MIN</option>
                                   <option value="MID">MID</option>
                                   <option value="MAX">MAX</option>
                                 </select>
                               ) : (
-                                <input
-                                  type="text"
-                                  className="w-full h-full text-center outline-none bg-transparent py-2"
-                                  aria-label={`${param.label} ${subRow} Value`}
-                                  value={cellValue}
-                                  onChange={(e) =>
-                                    handleValueChange(param.slNo, subRow, e.target.value)
-                                  }
-                                />
+                                <input type="text" className="w-full h-full text-center outline-none bg-transparent py-2" value={cellValue} onChange={(e) => handleValueChange(param.slNo, subRow, e.target.value)} />
                               )}
                             </td>
                           </tr>
@@ -808,100 +506,54 @@ export default function PreOperationChecklist() {
                 }
 
                 const cellValue = values[param.slNo] || '';
-
                 return (
                   <tr key={`param-${param.slNo}`}>
-                    <td className="border border-gray-800 p-2 font-medium">
-                      {param.slNo}
-                    </td>
-
+                    <td className="border border-gray-800 p-2 font-medium">{param.slNo}</td>
                     <td className="border border-gray-800 p-2 text-left px-3">
                       <span className="font-medium">{param.label}</span>
-                      {param.note && (
-                        <span className="text-xs text-gray-500 block mt-0.5">
-                          {param.note}
-                        </span>
-                      )}
+                      {param.note && <span className="text-xs text-gray-500 block mt-0.5">{param.note}</span>}
                     </td>
-
                     <td className="border border-gray-800 p-2 text-left px-3 text-gray-700">
                       {param.specEditable ? (
-                        <input
-                          type="text"
-                          className="w-full h-full text-center outline-none bg-transparent py-1"
-                          value={specifications[param.slNo] || ''}
-                          onChange={(e) =>
-                            handleSpecificationChange(param.slNo, e.target.value)
-                          }
-                          placeholder="Enter spec"
-                        />
-                      ) : (
-                        param.specification || '-'
-                      )}
+                        <input type="text" className="w-full h-full text-center outline-none bg-transparent py-1" value={specifications[param.slNo] || ''} onChange={(e) => handleSpecificationChange(param.slNo, e.target.value)} placeholder="Enter spec" />
+                      ) : (param.specification || '-')}
                     </td>
-
-                    <td className="border border-gray-800 p-2 text-gray-700">
-                      {param.unit || '-'}
-                    </td>
-
-                    <td className="border border-gray-800 p-2 text-gray-700">
-                      {param.checkMethod}
-                    </td>
-
-                    <td className="border border-gray-800 p-2 text-gray-400">
-                      -
-                    </td>
-
-                    <td className="border border-gray-800 p-0">
+                    <td className="border border-gray-800 p-2 text-gray-700">{param.unit || '-'}</td>
+                    <td className="border border-gray-800 p-2 text-gray-700">{param.checkMethod}</td>
+                    <td className="border border-gray-800 p-2 text-gray-400">-</td>
+                    <td className="border border-gray-800 p-0 relative align-middle">
                       {[4, 10, 11, 12].includes(param.slNo) ? (
-                        <select
-                          className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer"
-                          aria-label={`${param.label} Value`}
-                          value={cellValue}
-                          onChange={(e) =>
-                            handleValueChange(param.slNo, null, e.target.value)
-                          }
-                        >
+                        <select className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer" value={cellValue} onChange={(e) => handleValueChange(param.slNo, null, e.target.value)}>
                           <option value=""></option>
                           <option value="OK">OK</option>
                           <option value="NOT OK">NOT OK</option>
                         </select>
                       ) : (
-                        <input
-                          type="text"
-                          className="w-full h-full text-center outline-none bg-transparent py-2"
-                          aria-label={`${param.label} Value`}
-                          value={cellValue}
-                          onChange={(e) =>
-                            handleValueChange(param.slNo, null, e.target.value)
-                          }
-                        />
+                        <div className="flex flex-col items-center justify-center p-1 relative">
+                          <input 
+                            type="text" 
+                            className={`w-full text-center outline-none bg-transparent py-1 ${errorMsg ? 'border-2 border-orange-500 rounded' : ''}`} 
+                            value={cellValue} 
+                            onChange={(e) => handleValueChange(param.slNo, null, e.target.value)} 
+                          />
+                          {/* Render Error Message matching your image */}
+                          {errorMsg && (
+                            <span className="text-red-500 text-xs font-bold w-full text-left pl-1">
+                              {errorMsg}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
                 );
               })}
 
-              {/* =================================================
-                  SIGNATURE ROWS
-              ================================================== */}
               {initialFormData.signatures.roles.map((role) => (
                 <tr key={`sig-${role}`}>
-                  <td
-                    colSpan={6}
-                    className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700"
-                  >
-                    {role} Signature
-                  </td>
-
+                  <td colSpan={6} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">{role} Signature</td>
                   <td className="border border-gray-800 p-0">
-                    <input
-                      type="text"
-                      className="w-full h-full text-center outline-none bg-transparent py-2 font-medium"
-                      aria-label={`${role} Signature`}
-                      value={signatures[role] || ''}
-                      onChange={(e) => handleSignatureChange(role, e.target.value)}
-                    />
+                    <input type="text" className="w-full h-full text-center outline-none bg-transparent py-2 font-medium" value={signatures[role] || ''} onChange={(e) => handleSignatureChange(role, e.target.value)} />
                   </td>
                 </tr>
               ))}
@@ -909,40 +561,19 @@ export default function PreOperationChecklist() {
           </table>
         </div>
 
-        {/* =====================================================
-            NOTES
-        ====================================================== */}
+        {/* NOTES & SAVE */}
         <div className="border-2 border-gray-800 flex flex-col mt-4">
-          <div className="px-2 py-1 font-bold text-gray-800 text-sm border-b border-gray-800 bg-gray-100">
-            Notes / Instructions:
-          </div>
-
+          <div className="px-2 py-1 font-bold text-gray-800 text-sm border-b border-gray-800 bg-gray-100">Notes / Instructions:</div>
           <ol className="list-decimal list-inside p-3 text-xs text-gray-700 space-y-1.5 leading-relaxed bg-white">
-            {initialFormData.notes.map((note, idx) => (
-              <li key={`note-${idx}`}>{note}</li>
-            ))}
+            {initialFormData.notes.map((note, idx) => <li key={`note-${idx}`}>{note}</li>)}
           </ol>
         </div>
 
-        {/* =====================================================
-            SAVE BUTTON
-        ====================================================== */}
         <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer"
-          >
-            {isSaving
-              ? "SAVING..."
-              : saveSuccess
-              ? "SAVED ✓"
-              : "SAVE & CONTINUE"
-            }
+          <button type="button" onClick={handleSave} disabled={isSaving || saveSuccess} className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer">
+            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & CONTINUE"}
           </button>
         </div>
-
       </div>
     </div>
   );

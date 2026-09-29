@@ -462,6 +462,43 @@ const savePreOperationChecklist = async (req, res) => {
   }
 };
 
+// ============================================================
+// GET LATEST PRE-OPERATION PARAMETERS (SPECIFICATIONS ONLY)
+// ============================================================
+const getLatestMachineParams = async (req, res) => {
+  const { shopId } = req.params;
+  const { lineCode, machineNo } = req.query;
+
+  try {
+    const request = new sql.Request();
+    
+    const result = await request
+      .input('shopId', sql.Int, shopId)
+      .input('lineCode', sql.NVarChar(50), lineCode)
+      .input('machineNo', sql.NVarChar(50), machineNo)
+      .query(`
+        SELECT slNo, specification
+        FROM PreOperationChecklist
+        WHERE machineShop = @shopId 
+          AND lineCode = @lineCode 
+          AND machineNo = @machineNo
+          AND slNo IN (1, 2, 3, 4)
+          AND id IN (
+              SELECT MAX(id)
+              FROM PreOperationChecklist
+              WHERE machineShop = @shopId 
+                AND lineCode = @lineCode 
+                AND machineNo = @machineNo
+              GROUP BY slNo
+          )
+      `);
+
+    res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error('Error fetching latest params:', err);
+    res.status(500).json({ error: 'Failed to fetch latest parameters' });
+  }
+};
 
 // ============================================================
 // EXPORTS
@@ -470,5 +507,6 @@ const savePreOperationChecklist = async (req, res) => {
 module.exports = {
   getMachineShop3Details,
   getMachineShop3LineDetails,
-  savePreOperationChecklist
+  savePreOperationChecklist,
+  getLatestMachineParams
 };

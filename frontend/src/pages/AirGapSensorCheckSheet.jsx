@@ -91,6 +91,7 @@ export default function AirGapSensorCheckSheet() {
   });
 
   const [machineDetails, setMachineDetails] = useState([]);
+  const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
   const [blocks, setBlocks] = useState(
@@ -137,71 +138,79 @@ export default function AirGapSensorCheckSheet() {
     }
   }, [lineSet]);
 
-  // Fetch machine details for shopId (like Pre-Operation Checklist)
+  // Fetch machine details + line mappings for shopId
   useEffect(() => {
-    const fetchMachineDetails = async () => {
+    const fetchData = async () => {
       try {
-        if (shopId !== "3") {
-          setMachineDetails([]);
-          return;
-        }
+        if (!shopId) return;
 
         const token = localStorage.getItem("token");
+        const headers = { Authorization: `Bearer ${token}` };
 
-        const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
+        // Fetch machine details
+        const machineRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`,
+          { headers }
         );
 
-        if (!res.ok) {
-          throw new Error("Failed to fetch Machine Shop 3 details");
+        if (!machineRes.ok) {
+          throw new Error("Failed to fetch Machine Shop details");
         }
 
-        const data = await res.json();
-        setMachineDetails(data);
+        const machineData = await machineRes.json();
+        setMachineDetails(machineData);
+
+        // Fetch line mappings
+        const mappingRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
+          { headers }
+        );
+
+        if (!mappingRes.ok) {
+          throw new Error("Failed to fetch line mappings");
+        }
+
+        const mappingData = await mappingRes.json();
+        setLineMappings(mappingData);
+
       } catch (err) {
-  console.error("Machine details fetch error:", err);
-  triggerToast("Failed to load Machine Shop 3 details.", "error");
-} finally {
-  setLoadingMachineDetails(false);
-}
+        console.error("Data fetch error:", err);
+        triggerToast("Failed to load required data.", "error");
+      } finally {
+        setLoadingMachineDetails(false);
+      }
     };
 
-    fetchMachineDetails();
+    fetchData();
   }, [shopId]);
 
-  // Derived options (same as Pre-Operation / Error Proofing)
-  const lineCodes = [
-    ...new Set(
-      machineDetails
-        .map((item) => item.lineCode)
-        .filter(Boolean)
-    )
-  ];
+  // Line code options
+  const lineCodes =
+    lineMappings.length > 0
+      ? lineMappings.map((m) => m.lineCode)
+      : [
+          ...new Set(
+            machineDetails
+              .map((item) => item.lineCode)
+              .filter(Boolean)
+          )
+        ];
 
-  const selectedLineDetails = machineDetails.filter(
+  // Machine options depend ONLY on Line Code
+  const machineOptionsRaw = machineDetails.filter(
     (item) => item.lineCode === headerInfo.lineCode
   );
 
-  const partOptions = [
-    ...new Map(
-      selectedLineDetails
-        .filter((item) => item.partNo)
-        .map((item) => [item.partNo, item])
-    ).values()
-  ];
-
-  const selectedPartDetails = machineDetails.filter(
-    (item) =>
-      item.lineCode === headerInfo.lineCode &&
-      item.partNo === headerInfo.partNo
+  // Remove duplicate machine numbers
+  const machineOptions = Array.from(
+    new Set(
+      machineOptionsRaw
+        .map((m) => m.machineNo)
+        .filter(Boolean)
+    )
+  ).map((machineNo) =>
+    machineOptionsRaw.find((m) => m.machineNo === machineNo)
   );
-
-  const machineOptions = selectedPartDetails;
 
   const handleHeaderChange = (field, val) => {
     setHeaderInfo((prev) => ({
@@ -211,50 +220,29 @@ export default function AirGapSensorCheckSheet() {
   };
 
   const handleLineChange = (lineCode) => {
+    const mapping = lineMappings.find((m) => m.lineCode === lineCode);
+
+    const autoPartName = mapping?.partSet || "";
+    const autoPartNo = mapping?.idSet || "";
+
     setHeaderInfo((prev) => ({
       ...prev,
       lineCode,
-      partNo: "",
-      partName: "",
+      partName: autoPartName,
+      partNo: autoPartNo,
       machineNo: ""
     }));
 
     setLineSet({
       machineShop: shopId,
       lineCode,
-      partName: "",
-      partNo: "",
+      partName: autoPartName,
+      partNo: autoPartNo,
       machineNo: ""
     });
   };
 
-  const handlePartNoChange = (partNo) => {
-    const selectedPart = machineDetails.find(
-      (item) =>
-        item.lineCode === headerInfo.lineCode &&
-        item.partNo === partNo
-    );
-
-    const partName = selectedPart?.partName || "";
-
-    setHeaderInfo((prev) => ({
-      ...prev,
-      partNo,
-      partName,
-      machineNo: ""
-    }));
-
-    setLineSet({
-      machineShop: shopId,
-      lineCode: headerInfo.lineCode,
-      partName,
-      partNo,
-      machineNo: ""
-    });
-  };
-
-  // Fetch saved Air Gap data whenever the selected date/header changes.
-  // Previously saved shifts are loaded and locked; unrecorded shifts stay editable.
+  // Fetch saved Air Gap data whenever the selected date/header changes
   useEffect(() => {
     const fetchSavedAirGapData = async () => {
       if (!shopId || !headerInfo.lineCode || !headerInfo.partNo || !headerInfo.date) {
@@ -448,12 +436,10 @@ export default function AirGapSensorCheckSheet() {
 
   const handleSave = async () => {
     if (!headerInfo.lineCode || !headerInfo.partNo || !headerInfo.partName) {
-      triggerToast("Please select Line Code, Part No, and Part Name before proceeding.", "error");
+      triggerToast("Please select Line Code before proceeding.", "error");
       return;
     }
 
-    // Only unlocked shifts that are fully filled are saved.
-    // This prevents empty Shift II/III rows from being created.
     const date = headerInfo.date;
     const completeShifts = SHIFTS.filter((shift) => {
       if (lockedShifts[shift]) return false;
@@ -565,36 +551,28 @@ export default function AirGapSensorCheckSheet() {
 
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
-
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-
                 <h2 className="text-xl font-bold text-gray-800">
                   Saving Data...
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Please wait
                 </p>
               </>
             ) : (
               <>
-
                 <h2 className="text-xl font-bold text-green-800">
                   Data Saved Successfully
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Loading next form...
                 </p>
               </>
             )}
-
           </div>
-
         </div>
       )}
 
@@ -621,6 +599,8 @@ export default function AirGapSensorCheckSheet() {
 
         {/* Header Meta Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          
+          {/* LINE CODE */}
           <div>
             <label htmlFor="header-lineCode" className="font-bold text-gray-700 block mb-1 text-sm">
               Line Code
@@ -643,28 +623,22 @@ export default function AirGapSensorCheckSheet() {
             </select>
           </div>
 
+          {/* PART NO - AUTO FILLED */}
           <div>
             <label htmlFor="header-partNo" className="font-bold text-gray-700 block mb-1 text-sm">
               Part No
             </label>
-            <select
+            <input
               id="header-partNo"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              type="text"
+              readOnly
+              className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
               value={headerInfo.partNo}
-              onChange={(e) => handlePartNoChange(e.target.value)}
-              disabled={!headerInfo.lineCode}
-            >
-              <option value="">
-                {headerInfo.lineCode ? "Select Part No" : "Select Line Code First"}
-              </option>
-              {partOptions.map((part) => (
-                <option key={part.partNo} value={part.partNo}>
-                  {part.partNo}
-                </option>
-              ))}
-            </select>
+              placeholder="Auto-filled"
+            />
           </div>
 
+          {/* PART NAME - AUTO FILLED */}
           <div>
             <label htmlFor="header-partName" className="font-bold text-gray-700 block mb-1 text-sm">
               Part Name
@@ -679,6 +653,7 @@ export default function AirGapSensorCheckSheet() {
             />
           </div>
 
+          {/* DATE */}
           <div>
             <label htmlFor="header-date" className="font-bold text-gray-700 block mb-1 text-sm">
               Date
@@ -693,7 +668,7 @@ export default function AirGapSensorCheckSheet() {
           </div>
         </div>
 
-        {/* Action Toolbar with "+ Add Row" Button BEFORE the Table */}
+        {/* Action Toolbar */}
         <div className="flex justify-between items-center mb-2 px-1">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
@@ -768,13 +743,16 @@ export default function AirGapSensorCheckSheet() {
                                 aria-label={`Block ${bIdx + 1} Machine No`}
                                 value={block.machineNo}
                                 onChange={(e) => handleBlockMetaChange(bIdx, 'machineNo', e.target.value)}
-                                disabled={!headerInfo.partNo}
+                                disabled={!headerInfo.lineCode}
                               >
                                 <option value="">
-                                  {headerInfo.partNo ? "Select Machine" : "Select Part No"}
+                                  {headerInfo.lineCode ? "Select Machine" : "Select Line Code"}
                                 </option>
-                                {machineOptions.map((machine) => (
-                                  <option key={machine.id} value={machine.machineNo}>
+                                {machineOptions.map((machine, index) => (
+                                  <option 
+                                    key={machine.id || `${machine.machineNo}-${index}`} 
+                                    value={machine.machineNo}
+                                  >
                                     {machine.machineNo}
                                   </option>
                                 ))}
@@ -894,7 +872,6 @@ export default function AirGapSensorCheckSheet() {
 
         {/* Footer Meta Code & Save Button */}
         <div className="flex justify-end flex-col sm:flex-row justify-end items-center gap-4 mt-6 pt-4 border-t border-gray-300">
-
           <button
             type="button"
             onClick={handleSave}

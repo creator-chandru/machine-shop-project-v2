@@ -21,10 +21,10 @@ const getTodayISODate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const createEmptyRow = () => ({
+const createEmptyRow = (defaultPartNameNo = "") => ({
   machineNo: "",
   machineName: "",
-  partNameNo: "",
+  partNameNo: defaultPartNameNo,
   operationDescription: "",
   operatorName: "",
   produced: "",
@@ -71,6 +71,7 @@ export default function DailyProductionReport() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [machineDetails, setMachineDetails] = useState([]);
+  const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
   // Toast state
@@ -89,6 +90,8 @@ export default function DailyProductionReport() {
     shift: "I",
     shiftInchargeName: "",
     lineCode: "",
+    partName: "",
+    partNo: "",
     partTraceabilityMachining: "",
   });
 
@@ -146,10 +149,25 @@ export default function DailyProductionReport() {
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || header.lineCode;
+      const autoPartName = lineSet.partName || header.partName;
+      const autoPartNo = lineSet.partNo || header.partNo;
+      const defaultPartNameNo = autoPartName && autoPartNo ? `${autoPartName} / ${autoPartNo}` : "";
+
       setHeader((prev) => ({
         ...prev,
         lineCode: lineSet.lineCode || prev.lineCode,
+        partName: lineSet.partName || prev.partName,
+        partNo: lineSet.partNo || prev.partNo,
       }));
+
+      if (defaultPartNameNo) {
+        setRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            partNameNo: r.partNameNo || defaultPartNameNo,
+          }))
+        );
+      }
 
       if (newLineCode) {
         fetchPartTraceability(
@@ -161,56 +179,100 @@ export default function DailyProductionReport() {
     }
   }, [lineSet]);
 
-  // Fetch Master Data for the Specific Machine Shop
+  // Fetch Master Data for the Specific Machine Shop + Line Mappings
   useEffect(() => {
-    const fetchMachineDetails = async () => {
+    const fetchData = async () => {
       try {
         if (!shopId) return;
         const token = localStorage.getItem("token");
+        const headers = { Authorization: `Bearer ${token}` };
+
+        // Fetch machine shop details
         const res = await fetch(`${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/details`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers
         });
 
         if (!res.ok) throw new Error(`Failed to fetch Machine Shop ${shopId} details`);
         const data = await res.json();
         setMachineDetails(data);
+
+        // Fetch line mappings
+        const mappingRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
+          { headers }
+        );
+
+        if (!mappingRes.ok) {
+          throw new Error("Failed to fetch line mappings");
+        }
+
+        const mappingData = await mappingRes.json();
+        setLineMappings(mappingData);
+
       } catch (err) {
-        console.error("Machine details fetch error:", err);
+        console.error("Data fetch error:", err);
+        triggerToast("Failed to load required data.", "error");
       } finally {
         setLoadingMachineDetails(false);
       }
     };
-    fetchMachineDetails();
+    fetchData();
   }, [shopId]);
 
   // Derived Options based on selected Line Code
-  const lineCodes = [...new Set(machineDetails.map((item) => item.lineCode).filter(Boolean))];
-  const selectedLineDetails = machineDetails.filter((item) => item.lineCode === header.lineCode);
+  const lineCodes =
+    lineMappings.length > 0
+      ? lineMappings.map((m) => m.lineCode)
+      : [
+          ...new Set(
+            machineDetails
+              .map((item) => item.lineCode)
+              .filter(Boolean)
+          )
+        ];
 
-  const machineOptions = selectedLineDetails;
-  const partOptions = [
-    ...new Map(
-      selectedLineDetails
-        .filter((item) => item.partNo)
-        .map((item) => [
-          item.partNo,
-          { partNo: item.partNo, partName: item.partName || "" },
-        ])
-    ).values(),
-  ];
+  // Machine options depend ONLY on Line Code
+  const machineOptionsRaw = machineDetails.filter(
+    (item) => item.lineCode === header.lineCode
+  );
+
+  const machineOptions = Array.from(
+    new Set(
+      machineOptionsRaw
+        .map((m) => m.machineNo)
+        .filter(Boolean)
+    )
+  ).map((machineNo) =>
+    machineOptionsRaw.find((m) => m.machineNo === machineNo)
+  );
 
   // Handlers
   const handleHeaderChange = (field, val) => {
     setHeader((prev) => ({ ...prev, [field]: val }));
 
-    // Reset rows and sync lineCode to context if line code changes
+    // Reset rows and sync lineCode/part details to context if line code changes
     if (field === "lineCode") {
-      setRows([createEmptyRow()]);
+      const mapping = lineMappings.find((m) => m.lineCode === val);
+      const autoPartName = mapping?.partSet || "";
+      const autoPartNo = mapping?.idSet || "";
+      const defaultPartNameNo = autoPartName && autoPartNo ? `${autoPartName} / ${autoPartNo}` : "";
+
+      setHeader((prev) => ({
+        ...prev,
+        lineCode: val,
+        partName: autoPartName,
+        partNo: autoPartNo,
+      }));
+
+      setRows([createEmptyRow(defaultPartNameNo)]);
+
       if (setLineSet) {
         setLineSet((prev) => ({
           ...prev,
           machineShop: shopId || "3",
           lineCode: val,
+          partName: autoPartName,
+          partNo: autoPartNo,
         }));
       }
     }
@@ -241,18 +303,11 @@ export default function DailyProductionReport() {
         next[rowIdx] = { ...next[rowIdx], [field]: val };
       }
 
-      // Auto-fill logic for Machine Name and Part Name based on dropdown selection
+      // Auto-fill logic for Machine Name based on machine dropdown selection
       if (field === "machineNo") {
         const selectedMachine = machineOptions.find((m) => m.machineNo === val);
         if (selectedMachine) {
           next[rowIdx].machineName = selectedMachine.machineType || "";
-        }
-      }
-
-      if (field === "partNameNo") {
-        const selectedPart = partOptions.find((p) => p.partNo === val);
-        if (selectedPart) {
-          next[rowIdx].partNameNo = `${selectedPart.partName} / ${selectedPart.partNo}`;
         }
       }
 
@@ -264,7 +319,12 @@ export default function DailyProductionReport() {
     setSignatures((prev) => ({ ...prev, [field]: val }));
   };
 
-  const handleAddRow = () => setRows((prev) => [...prev, createEmptyRow()]);
+  const currentPartNameNo =
+    header.partName && header.partNo
+      ? `${header.partName} / ${header.partNo}`
+      : "";
+
+  const handleAddRow = () => setRows((prev) => [...prev, createEmptyRow(currentPartNameNo)]);
   const handleRemoveRow = () => setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
 
   const handleSave = async () => {
@@ -303,12 +363,14 @@ export default function DailyProductionReport() {
         throw new Error(`Server returned ${res.status}: ${errorText}`);
       }
 
-      // Update LineSetContext with the current lineCode and shopId
+      // Update LineSetContext with the current lineCode, part details, and shopId
       if (setLineSet) {
         setLineSet((prev) => ({
           ...prev,
           machineShop: shopId || "3",
           lineCode: header.lineCode,
+          partName: header.partName,
+          partNo: header.partNo,
         }));
       }
 
@@ -522,23 +584,23 @@ export default function DailyProductionReport() {
                   <tr key={`prod-row-${rIdx}`} className="h-10 hover:bg-gray-50">
                     <td className="border border-gray-800 p-0">
                       <select
-                          className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px]"
-                          value={row.machineNo}
-                          onChange={(e) =>
-                            handleRowChange(rIdx, "machineNo", null, e.target.value)
-                          }
-                          disabled={!header.lineCode}
-                        >
-                          <option value="">Select</option>
-
-                          {[...new Set(machineOptions.map((m) => m.machineNo))]
-                            .filter(Boolean)
-                            .map((machineNo) => (
-                              <option key={machineNo} value={machineNo}>
-                                {machineNo}
-                              </option>
-                            ))}
-                        </select>
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px]"
+                        value={row.machineNo}
+                        onChange={(e) =>
+                          handleRowChange(rIdx, "machineNo", null, e.target.value)
+                        }
+                        disabled={!header.lineCode}
+                      >
+                        <option value="">Select</option>
+                        {machineOptions.map((machine, index) => (
+                          <option 
+                            key={machine.id || `${machine.machineNo}-${index}`} 
+                            value={machine.machineNo}
+                          >
+                            {machine.machineNo}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="border border-gray-800 p-0 bg-gray-50">
                       <input
@@ -549,20 +611,14 @@ export default function DailyProductionReport() {
                         placeholder="Auto-fill"
                       />
                     </td>
-                    <td className="border border-gray-800 p-0">
-                      <select
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium cursor-pointer text-[11px]"
-                        value={row.partNameNo ? row.partNameNo.split(" / ")[1] : ""}
-                        onChange={(e) => handleRowChange(rIdx, "partNameNo", null, e.target.value)}
-                        disabled={!header.lineCode}
-                      >
-                        <option value="">Select Part</option>
-                        {partOptions.map((p) => (
-                          <option key={p.partNo} value={p.partNo}>
-                            {p.partName} / {p.partNo}
-                          </option>
-                        ))}
-                      </select>
+                    <td className="border border-gray-800 p-0 bg-gray-50">
+                      <input
+                        type="text"
+                        readOnly
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium text-[11px] text-gray-700"
+                        value={row.partNameNo}
+                        placeholder="Auto-filled"
+                      />
                     </td>
                     <td className="border border-gray-800 p-0">
                       <input

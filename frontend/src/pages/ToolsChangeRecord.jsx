@@ -40,6 +40,9 @@ const createEmptySection = (
   from: "",
   to: "",
   rows: Array.from({ length: numRows }, () => ({
+    nominalValue: "",
+    operatorSymbol: "±",
+    toleranceValue: "",
     controlSpec: "",
     before: "",
     after: "",
@@ -95,8 +98,8 @@ export default function ToolChangeRecord() {
   });
 
   const [machineDetails, setMachineDetails] = useState([]);
-  const [loadingMachineDetails, setLoadingMachineDetails] =
-    useState(true);
+  const [lineMappings, setLineMappings] = useState([]);
+  const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
   const [sections, setSections] = useState(
     Array.from({ length: INITIAL_SECTIONS }, () =>
@@ -137,6 +140,7 @@ export default function ToolChangeRecord() {
 
     try {
       const token = localStorage.getItem("token");
+      
 
       const response = await fetch(
         `${process.env.REACT_APP_API_URL}/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
@@ -175,8 +179,7 @@ export default function ToolChangeRecord() {
   // Sync with LineSetContext whenever it changes
   useEffect(() => {
     if (lineSet) {
-      const newLineCode =
-        lineSet.lineCode || headerInfo.lineCode;
+      const newLineCode = lineSet.lineCode || headerInfo.lineCode;
 
       setHeaderInfo((prev) => ({
         ...prev,
@@ -190,15 +193,12 @@ export default function ToolChangeRecord() {
         setSections((prev) => {
           if (prev.length > 0 && !prev[0].mcNo) {
             const next = [...prev];
-
             next[0] = {
               ...next[0],
               mcNo: lineSet.machineNo,
             };
-
             return next;
           }
-
           return prev;
         });
       }
@@ -216,94 +216,73 @@ export default function ToolChangeRecord() {
     }
   }, [lineSet]);
 
-  // Fetch machine details for Machine Shop 3
+  // Fetch machine details + line mappings
   useEffect(() => {
-    const fetchMachineDetails = async () => {
+    const fetchData = async () => {
       try {
-        if (shopId !== "3") {
-          setMachineDetails([]);
-          return;
-        }
+        if (!shopId) return;
 
         const token = localStorage.getItem("token");
+        const headers = { Authorization: `Bearer ${token}` };
 
-        const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/3/pre-operation-details`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
+        // Fetch machine details
+        const machineRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`,
+          { headers }
         );
 
-        if (!res.ok) {
-          throw new Error(
-            "Failed to fetch Machine Shop 3 details"
-          );
+        if (!machineRes.ok) {
+          throw new Error("Failed to fetch Machine Shop details");
         }
 
-        const data = await res.json();
+        const machineData = await machineRes.json();
+        setMachineDetails(machineData);
 
-        setMachineDetails(data);
-      } catch (err) {
-        console.error(
-          "Machine details fetch error:",
-          err
+        // Fetch line mappings
+        const mappingRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
+          { headers }
         );
+
+        if (!mappingRes.ok) {
+          throw new Error("Failed to fetch line mappings");
+        }
+
+        const mappingData = await mappingRes.json();
+        setLineMappings(mappingData);
+      } catch (err) {
+        console.error("Data fetch error:", err);
+        triggerToast("Failed to load required data.", "error");
       } finally {
         setLoadingMachineDetails(false);
       }
     };
 
-    fetchMachineDetails();
+    fetchData();
   }, [shopId]);
 
   // Line Code options
-  const lineCodes = [
-    ...new Set(
-      machineDetails
-        .map((item) => item.lineCode)
-        .filter(Boolean)
-    ),
-  ];
+  const lineCodes =
+    lineMappings.length > 0
+      ? lineMappings.map((m) => m.lineCode)
+      : [
+          ...new Set(
+            machineDetails.map((item) => item.lineCode).filter(Boolean)
+          ),
+        ];
 
-  // Details belonging to selected Line Code
-  const selectedLineDetails = machineDetails.filter(
-    (item) =>
-      item.lineCode === headerInfo.lineCode
+  // Machine options depend ONLY on Line Code
+  const machineOptionsRaw = machineDetails.filter(
+    (item) => item.lineCode === headerInfo.lineCode
   );
 
-  // Part No options based on selected Line Code
-  const partOptions = [
-    ...new Map(
-      selectedLineDetails
-        .filter((item) => item.partNo)
-        .map((item) => [item.partNo, item])
-    ).values(),
-  ];
-
-  /*
-   * MACHINE NUMBER OPTIONS
-   *
-   * Machine numbers are now fetched based ONLY on
-   * the selected Line Code.
-   *
-   * Part No is not required for selecting M/C No.
-   */
-  const machineOptions = [
-    ...new Map(
-      machineDetails
-        .filter(
-          (item) =>
-            item.lineCode === headerInfo.lineCode &&
-            item.machineNo
-        )
-        .map((item) => [
-          item.machineNo,
-          item,
-        ])
-    ).values(),
-  ];
+  const machineOptions = Array.from(
+    new Set(
+      machineOptionsRaw.map((m) => m.machineNo).filter(Boolean)
+    )
+  ).map((machineNo) =>
+    machineOptionsRaw.find((m) => m.machineNo === machineNo)
+  );
 
   const handleHeaderChange = (field, val) => {
     setHeaderInfo((prev) => ({
@@ -338,13 +317,18 @@ export default function ToolChangeRecord() {
     }
   };
 
-  // Line Code change handler
+  // Line Code change handler: Auto-populates Part Name & Part No
   const handleLineChange = (lineCode) => {
+    const mapping = lineMappings.find((m) => m.lineCode === lineCode);
+
+    const autoPartName = mapping?.partSet || "";
+    const autoPartNo = mapping?.idSet || "";
+
     setHeaderInfo((prev) => ({
       ...prev,
       lineCode,
-      partNo: "",
-      partName: "",
+      partName: autoPartName,
+      partNo: autoPartNo,
       machineNo: "",
     }));
 
@@ -359,8 +343,8 @@ export default function ToolChangeRecord() {
     setLineSet({
       machineShop: shopId || "3",
       lineCode,
-      partName: "",
-      partNo: "",
+      partName: autoPartName,
+      partNo: autoPartNo,
       machineNo: "",
     });
 
@@ -374,68 +358,10 @@ export default function ToolChangeRecord() {
     });
   };
 
-  const handlePartNoChange = (partNo) => {
-    const selectedPart = machineDetails.find(
-      (item) =>
-        item.lineCode === headerInfo.lineCode &&
-        item.partNo === partNo
-    );
-
-    const partName =
-      selectedPart?.partName || "";
-
-    setHeaderInfo((prev) => ({
-      ...prev,
-      partNo,
-      partName,
-      machineNo: "",
-    }));
-
-    setLineSet({
-      machineShop: shopId || "3",
-      lineCode: headerInfo.lineCode,
-      partName,
-      partNo,
-      machineNo: "",
-    });
-  };
-
-  const handleMachineChange = (machineNo) => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      machineNo,
-    }));
-
-    setLineSet({
-      machineShop: shopId || "3",
-      lineCode: headerInfo.lineCode,
-      partName: headerInfo.partName,
-      partNo: headerInfo.partNo,
-      machineNo,
-    });
-
-    setSections((prev) => {
-      const next = [...prev];
-
-      if (next.length > 0) {
-        next[0] = {
-          ...next[0],
-          mcNo: machineNo,
-        };
-      }
-
-      return next;
-    });
-  };
-
   // Add a new section / column
   const handleAddColumn = () => {
-    const currentNumRows =
-      sections[0]?.rows?.length || INITIAL_ROWS;
-
-    const defaultDate =
-      headerInfo.date || getTodayISODate();
-
+    const currentNumRows = sections[0]?.rows?.length || INITIAL_ROWS;
+    const defaultDate = headerInfo.date || getTodayISODate();
     const defaultShift = "I";
     const newIdx = sections.length;
 
@@ -461,17 +387,11 @@ export default function ToolChangeRecord() {
   // Delete the last section / column
   const handleRemoveColumn = () => {
     setSections((prev) =>
-      prev.length > 1
-        ? prev.slice(0, -1)
-        : prev
+      prev.length > 1 ? prev.slice(0, -1) : prev
     );
   };
 
-  const handleSectionMetaChange = (
-    secIdx,
-    field,
-    val
-  ) => {
+  const handleSectionMetaChange = (secIdx, field, val) => {
     setSections((prev) =>
       prev.map((sec, idx) =>
         idx === secIdx
@@ -483,8 +403,7 @@ export default function ToolChangeRecord() {
       )
     );
 
-    // Keep header machine number in sync with
-    // the first table M/C NO
+    // Keep header machine number in sync with the first table M/C NO
     if (field === "mcNo" && secIdx === 0) {
       setHeaderInfo((prev) => ({
         ...prev,
@@ -501,14 +420,11 @@ export default function ToolChangeRecord() {
     }
 
     if (field === "date" || field === "shift") {
-      const currentSection =
-        sections[secIdx];
-
+      const currentSection = sections[secIdx];
       const date =
         field === "date"
           ? val
-          : currentSection?.date ||
-            headerInfo.date;
+          : currentSection?.date || headerInfo.date;
 
       const shift =
         field === "shift"
@@ -524,23 +440,33 @@ export default function ToolChangeRecord() {
     }
   };
 
-  const handleCellChange = (
-    secIdx,
-    rowIdx,
-    field,
-    val
-  ) => {
+  const handleCellChange = (secIdx, rowIdx, field, val) => {
     setSections((prev) => {
       const next = [...prev];
-      const updatedRows = [
-        ...next[secIdx].rows,
-      ];
+      const updatedRows = [...next[secIdx].rows];
+      const targetRow = { ...updatedRows[rowIdx], [field]: val };
 
-      updatedRows[rowIdx] = {
-        ...updatedRows[rowIdx],
-        [field]: val,
-      };
+      // Synchronize controlSpec whenever subparts update
+      if (
+        field === "nominalValue" ||
+        field === "operatorSymbol" ||
+        field === "toleranceValue"
+      ) {
+        const nominal = field === "nominalValue" ? val : targetRow.nominalValue || "";
+        const symbol = field === "operatorSymbol" ? val : targetRow.operatorSymbol || "±";
+        const tolerance = field === "toleranceValue" ? val : targetRow.toleranceValue || "";
 
+        targetRow.controlSpec =
+          nominal && tolerance
+            ? `${nominal} ${symbol} ${tolerance}`
+            : nominal
+            ? `${nominal} ${symbol}`
+            : tolerance
+            ? `${symbol} ${tolerance}`
+            : "";
+      }
+
+      updatedRows[rowIdx] = targetRow;
       next[secIdx] = {
         ...next[secIdx],
         rows: updatedRows,
@@ -550,15 +476,9 @@ export default function ToolChangeRecord() {
     });
   };
 
-  const handleSignatureChange = (
-    secIdx,
-    sigType,
-    field,
-    val
-  ) => {
+  const handleSignatureChange = (secIdx, sigType, field, val) => {
     setSections((prev) => {
       const next = [...prev];
-
       next[secIdx] = {
         ...next[secIdx],
         [sigType]: {
@@ -579,6 +499,9 @@ export default function ToolChangeRecord() {
         rows: [
           ...sec.rows,
           {
+            nominalValue: "",
+            operatorSymbol: "±",
+            toleranceValue: "",
             controlSpec: "",
             before: "",
             after: "",
@@ -604,22 +527,30 @@ export default function ToolChangeRecord() {
 
   const handleSave = async () => {
     if (!headerInfo.lineCode) {
-      triggerToast(
-        "Please select or enter a Line Code.",
-        "error"
-      );
+      triggerToast("Please select Line Code.", "error");
       return;
     }
 
     setIsSaving(true);
     setSaveSuccess(false);
 
+    // Format controlSpec for each row in the payload
+    const processedSections = sections.map((sec) => ({
+      ...sec,
+      rows: sec.rows.map((row) => ({
+        ...row,
+        controlSpec:
+          row.controlSpec ||
+          (row.nominalValue && row.toleranceValue
+            ? `${row.nominalValue} ${row.operatorSymbol || "±"} ${row.toleranceValue}`
+            : row.nominalValue || ""),
+      })),
+    }));
+
     const payload = {
       header: {
         machineShop: parseInt(
-          shopId ||
-            lineSet?.machineShop ||
-            3,
+          shopId || lineSet?.machineShop || 3,
           10
         ),
         lineCode: headerInfo.lineCode,
@@ -629,12 +560,11 @@ export default function ToolChangeRecord() {
         opNo: headerInfo.opNo,
         date: headerInfo.date,
       },
-      sections,
+      sections: processedSections,
     };
 
     try {
-      const token =
-        localStorage.getItem("token");
+      const token = localStorage.getItem("token");
 
       const res = await fetch(
         `${process.env.REACT_APP_API_URL}/api/tool-change-record`,
@@ -649,12 +579,8 @@ export default function ToolChangeRecord() {
       );
 
       if (!res.ok) {
-        const errorData =
-          await res.json().catch(() => ({}));
-
-        throw new Error(
-          errorData.error || "Save failed"
-        );
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Save failed");
       }
 
       setLineSet({
@@ -668,57 +594,37 @@ export default function ToolChangeRecord() {
       setIsSaving(false);
       setSaveSuccess(true);
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, 2000)
-      );
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       navigate(
-        `/operator/${
-          shopId || 3
-        }/daily-production-report`
+        `/operator/${shopId || 3}/daily-production-report`
       );
     } catch (err) {
-      console.error(
-        "Save error:",
-        err
-      );
-
+      console.error("Save error:", err);
       setIsSaving(false);
-
       triggerToast(
-        err.message ||
-          "Failed to save tool change record.",
+        err.message || "Failed to save tool change record.",
         "error"
       );
     }
   };
 
   // Split sections into chunks of at most 3 columns
-  const getSectionChunks = (
-    allSections
-  ) => {
+  const getSectionChunks = (allSections) => {
     const chunks = [];
-
-    for (
-      let i = 0;
-      i < allSections.length;
-      i += CHUNK_SIZE
-    ) {
+    for (let i = 0; i < allSections.length; i += CHUNK_SIZE) {
       const chunk = allSections
         .slice(i, i + CHUNK_SIZE)
         .map((sec, localIdx) => ({
           sec,
           globalIdx: i + localIdx,
         }));
-
       chunks.push(chunk);
     }
-
     return chunks;
   };
 
-  const sectionChunks =
-    getSectionChunks(sections);
+  const sectionChunks = getSectionChunks(sections);
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
@@ -743,11 +649,9 @@ export default function ToolChangeRecord() {
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-
                 <h2 className="text-xl font-bold text-gray-800">
                   Saving Data...
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Please wait
                 </p>
@@ -757,7 +661,6 @@ export default function ToolChangeRecord() {
                 <h2 className="text-xl font-bold text-green-800">
                   Data Saved Successfully
                 </h2>
-
                 <p className="text-gray-500 mt-2">
                   Loading next form...
                 </p>
@@ -775,9 +678,7 @@ export default function ToolChangeRecord() {
               <button
                 type="button"
                 onClick={() =>
-                  navigate(
-                    `/operator/${shopId || 3}`
-                  )
+                  navigate(`/operator/${shopId || 3}`)
                 }
                 className="p-1 text-gray-600 hover:text-orange-600 hover:bg-gray-100 rounded-full transition-colors"
                 title="Back to Operator Menu"
@@ -795,22 +696,11 @@ export default function ToolChangeRecord() {
             </h2>
 
             <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>
-                Form Code: {formMeta.formCode}
-              </span>
-
+              <span>Form Code: {formMeta.formCode}</span>
               <span>|</span>
-
-              <span>
-                Revision: {formMeta.revision}
-              </span>
-
+              <span>Revision: {formMeta.revision}</span>
               <span>|</span>
-
-              <span>
-                Revision Date:{" "}
-                {formMeta.revisionDate}
-              </span>
+              <span>Revision Date: {formMeta.revisionDate}</span>
             </div>
           </div>
         </div>
@@ -825,50 +715,25 @@ export default function ToolChangeRecord() {
             >
               Line Code
             </label>
-
-            {lineCodes.length > 0 ? (
-              <select
-                id="header-lineCode"
-                className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-                value={headerInfo.lineCode}
-                onChange={(e) =>
-                  handleLineChange(
-                    e.target.value
-                  )
-                }
-              >
-                <option value="">
-                  Select Line Code
+            <select
+              id="header-lineCode"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              value={headerInfo.lineCode}
+              onChange={(e) => handleLineChange(e.target.value)}
+              disabled={loadingMachineDetails}
+            >
+              <option value="">
+                {loadingMachineDetails ? "Loading..." : "Select Line Code"}
+              </option>
+              {lineCodes.map((lineCode) => (
+                <option key={lineCode} value={lineCode}>
+                  {lineCode}
                 </option>
-
-                {lineCodes.map(
-                  (lineCode) => (
-                    <option
-                      key={lineCode}
-                      value={lineCode}
-                    >
-                      {lineCode}
-                    </option>
-                  )
-                )}
-              </select>
-            ) : (
-              <input
-                id="header-lineCode"
-                type="text"
-                className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-                placeholder="Enter Line Code"
-                value={headerInfo.lineCode}
-                onChange={(e) =>
-                  handleLineChange(
-                    e.target.value
-                  )
-                }
-              />
-            )}
+              ))}
+            </select>
           </div>
 
-          {/* PART NO */}
+          {/* PART NO - AUTO FILLED */}
           <div>
             <label
               htmlFor="header-partNo"
@@ -876,56 +741,17 @@ export default function ToolChangeRecord() {
             >
               Part No
             </label>
-
-            {partOptions.length > 0 ? (
-              <select
-                id="header-partNo"
-                className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-                value={headerInfo.partNo}
-                onChange={(e) =>
-                  handlePartNoChange(
-                    e.target.value
-                  )
-                }
-                disabled={
-                  !headerInfo.lineCode
-                }
-              >
-                <option value="">
-                  {headerInfo.lineCode
-                    ? "Select Part No"
-                    : "Select Line First"}
-                </option>
-
-                {partOptions.map(
-                  (part) => (
-                    <option
-                      key={part.partNo}
-                      value={part.partNo}
-                    >
-                      {part.partNo}
-                    </option>
-                  )
-                )}
-              </select>
-            ) : (
-              <input
-                id="header-partNo"
-                type="text"
-                className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-                placeholder="Enter Part No"
-                value={headerInfo.partNo}
-                onChange={(e) =>
-                  handleHeaderChange(
-                    "partNo",
-                    e.target.value
-                  )
-                }
-              />
-            )}
+            <input
+              id="header-partNo"
+              type="text"
+              readOnly
+              className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
+              value={headerInfo.partNo}
+              placeholder="Auto-filled"
+            />
           </div>
 
-          {/* PART NAME */}
+          {/* PART NAME - AUTO FILLED */}
           <div>
             <label
               htmlFor="header-partName"
@@ -933,19 +759,13 @@ export default function ToolChangeRecord() {
             >
               Part Name
             </label>
-
             <input
               id="header-partName"
               type="text"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              readOnly
+              className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
               value={headerInfo.partName}
-              placeholder="Enter or select part name"
-              onChange={(e) =>
-                handleHeaderChange(
-                  "partName",
-                  e.target.value
-                )
-              }
+              placeholder="Auto-filled"
             />
           </div>
 
@@ -957,17 +777,12 @@ export default function ToolChangeRecord() {
             >
               Date
             </label>
-
             <input
               id="header-date"
               type="date"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.date}
-              onChange={(e) =>
-                handleDateChange(
-                  e.target.value
-                )
-              }
+              onChange={(e) => handleDateChange(e.target.value)}
             />
           </div>
         </div>
@@ -981,9 +796,7 @@ export default function ToolChangeRecord() {
 
             <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
               {sections.length}{" "}
-              {sections.length === 1
-                ? "Column"
-                : "Columns"}
+              {sections.length === 1 ? "Column" : "Columns"}
             </span>
           </div>
 
@@ -993,23 +806,17 @@ export default function ToolChangeRecord() {
               onClick={handleAddColumn}
               className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
             >
-              <span className="text-sm font-bold leading-none">
-                +
-              </span>{" "}
+              <span className="text-sm font-bold leading-none">+</span>{" "}
               Add Column
             </button>
 
             {sections.length > 1 && (
               <button
                 type="button"
-                onClick={
-                  handleRemoveColumn
-                }
+                onClick={handleRemoveColumn}
                 className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
               >
-                <span className="text-sm font-bold leading-none">
-                  −
-                </span>{" "}
+                <span className="text-sm font-bold leading-none">−</span>{" "}
                 Delete Column
               </button>
             )}
@@ -1024,10 +831,8 @@ export default function ToolChangeRecord() {
             </span>
 
             <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
-              {sections[0]?.rows?.length ||
-                1}{" "}
-              {(sections[0]?.rows?.length ||
-                1) === 1
+              {sections[0]?.rows?.length || 1}{" "}
+              {(sections[0]?.rows?.length || 1) === 1
                 ? "Row"
                 : "Rows"}
             </span>
@@ -1039,24 +844,17 @@ export default function ToolChangeRecord() {
               onClick={handleAddRow}
               className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
             >
-              <span className="text-sm font-bold leading-none">
-                +
-              </span>{" "}
+              <span className="text-sm font-bold leading-none">+</span>{" "}
               Add Row
             </button>
 
-            {(sections[0]?.rows
-              ?.length || 1) > 1 && (
+            {(sections[0]?.rows?.length || 1) > 1 && (
               <button
                 type="button"
-                onClick={
-                  handleRemoveRow
-                }
+                onClick={handleRemoveRow}
                 className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
               >
-                <span className="text-sm font-bold leading-none">
-                  −
-                </span>{" "}
+                <span className="text-sm font-bold leading-none">−</span>{" "}
                 Delete Row
               </button>
             )}
@@ -1065,670 +863,486 @@ export default function ToolChangeRecord() {
 
         {/* TOOL CHANGE BLOCKS */}
         <div className="space-y-8">
-          {sectionChunks.map(
-            (chunk, chunkIdx) => (
-              <div
-                key={`chunk-${chunkIdx}`}
-                className="space-y-2"
-              >
-                {sectionChunks.length >
-                  1 && (
-                  <div className="flex items-center gap-2 px-1">
-                    <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
-                      Block{" "}
-                      {chunkIdx + 1}
-                    </span>
+          {sectionChunks.map((chunk, chunkIdx) => (
+            <div
+              key={`chunk-${chunkIdx}`}
+              className="space-y-2"
+            >
+              {sectionChunks.length > 1 && (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
+                    Block {chunkIdx + 1}
+                  </span>
 
-                    <span className="text-xs text-gray-500">
-                      (Columns{" "}
-                      {chunk[0].globalIdx +
-                        1}
-                      {chunk.length > 1
-                        ? ` to ${
-                            chunk[
-                              chunk.length -
-                                1
-                            ].globalIdx +
-                            1
-                          }`
-                        : ""}
-                      )
-                    </span>
-                  </div>
-                )}
-
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed bg-white">
-                    <tbody>
-                      {/* PART TRACEABILITY */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <td
-                              key={`hdr-traceability-${globalIdx}`}
-                              colSpan={3}
-                              className="border border-gray-800 p-1.5 text-left font-normal bg-white"
-                            >
-                              <div className="flex items-center gap-1">
-                                <span className="font-bold text-gray-800 whitespace-nowrap">
-                                  PART TRACEABILITY :
-                                </span>
-
-                                <input
-                                  type="text"
-                                  className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
-                                  value={
-                                    sec.partTraceability
-                                  }
-                                  placeholder="Enter / Generate Traceability"
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    handleSectionMetaChange(
-                                      globalIdx,
-                                      "partTraceability",
-                                      e.target
-                                        .value
-                                    )
-                                  }
-                                />
-                              </div>
-                            </td>
-                          )
-                        )}
-                      </tr>
-
-                      {/* TOOL DESCRIPTION */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <td
-                              key={`hdr-desc-${globalIdx}`}
-                              colSpan={3}
-                              className="border border-gray-800 p-1.5 text-left font-normal bg-white"
-                            >
-                              <div className="flex items-center gap-1">
-                                <span className="font-bold text-gray-800 whitespace-nowrap">
-                                  TOOL DESCRIPTION :
-                                </span>
-
-                                <input
-                                  type="text"
-                                  className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
-                                  value={
-                                    sec.toolDescription
-                                  }
-                                  placeholder="Enter Tool Description"
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    handleSectionMetaChange(
-                                      globalIdx,
-                                      "toolDescription",
-                                      e.target
-                                        .value
-                                    )
-                                  }
-                                />
-                              </div>
-                            </td>
-                          )
-                        )}
-                      </tr>
-
-                      {/* M/C NO & OP NO */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <td
-                              key={`hdr-mcop-${globalIdx}`}
-                              colSpan={3}
-                              className="border border-gray-800 p-1 font-normal bg-white"
-                            >
-                              <div className="grid grid-cols-2 divide-x divide-gray-800">
-                                {/* M/C NO */}
-                                <div className="flex items-center px-1 gap-1">
-                                  <span className="font-bold text-gray-800 whitespace-nowrap">
-                                    M/C NO :
-                                  </span>
-
-                                  {machineOptions.length >
-                                  0 ? (
-                                    <select
-                                      className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
-                                      value={
-                                        sec.mcNo
-                                      }
-                                      onChange={(
-                                        e
-                                      ) =>
-                                        handleSectionMetaChange(
-                                          globalIdx,
-                                          "mcNo",
-                                          e.target
-                                            .value
-                                        )
-                                      }
-                                    >
-                                      <option value="">
-                                        Select M/C
-                                      </option>
-
-                                      {machineOptions.map(
-                                        (
-                                          m
-                                        ) => (
-                                          <option
-                                            key={
-                                              m.id
-                                            }
-                                            value={
-                                              m.machineNo
-                                            }
-                                          >
-                                            {
-                                              m.machineNo
-                                            }
-                                          </option>
-                                        )
-                                      )}
-                                    </select>
-                                  ) : (
-                                    <input
-                                      type="text"
-                                      className="w-full outline-none font-medium text-center bg-transparent"
-                                      placeholder={
-                                        headerInfo.lineCode
-                                          ? "No M/C found"
-                                          : "Select Line First"
-                                      }
-                                      value={
-                                        sec.mcNo
-                                      }
-                                      onChange={(
-                                        e
-                                      ) =>
-                                        handleSectionMetaChange(
-                                          globalIdx,
-                                          "mcNo",
-                                          e.target
-                                            .value
-                                        )
-                                      }
-                                    />
-                                  )}
-                                </div>
-
-                                {/* OP NO */}
-                                <div className="flex items-center px-1 gap-1">
-                                  <span className="font-bold text-gray-800 whitespace-nowrap">
-                                    OP NO :
-                                  </span>
-
-                                  <select
-                                    id="header-opNo"
-                                    className="w-full outline-none font-medium text-center bg-transparent"
-                                    value={
-                                      headerInfo.opNo
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      setHeaderInfo(
-                                        (
-                                          prev
-                                        ) => ({
-                                          ...prev,
-                                          opNo: e
-                                            .target
-                                            .value,
-                                        })
-                                      )
-                                    }
-                                  >
-                                    <option value="">
-                                      Select OP No
-                                    </option>
-
-                                    <option value="20">
-                                      20
-                                    </option>
-
-                                    <option value="30">
-                                      30
-                                    </option>
-
-                                    <option value="40">
-                                      40
-                                    </option>
-
-                                    <option value="50">
-                                      50
-                                    </option>
-
-                                    <option value="60">
-                                      60
-                                    </option>
-
-                                    <option value="70">
-                                      70
-                                    </option>
-                                  </select>
-                                </div>
-                              </div>
-                            </td>
-                          )
-                        )}
-                      </tr>
-
-                      {/* DATE & SHIFT */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <td
-                              key={`hdr-dateshift-${globalIdx}`}
-                              colSpan={3}
-                              className="border border-gray-800 p-1 font-normal bg-white"
-                            >
-                              <div className="grid grid-cols-2 divide-x divide-gray-800">
-                                <div className="flex items-center px-1 gap-1">
-                                  <span className="font-bold text-gray-800 whitespace-nowrap">
-                                    DATE :
-                                  </span>
-
-                                  <input
-                                    type="date"
-                                    className="w-full outline-none font-medium text-center bg-transparent"
-                                    value={
-                                      sec.date
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleSectionMetaChange(
-                                        globalIdx,
-                                        "date",
-                                        e.target
-                                          .value
-                                      )
-                                    }
-                                  />
-                                </div>
-
-                                <div className="flex items-center px-1 gap-1">
-                                  <span className="font-bold text-gray-800 whitespace-nowrap">
-                                    SHIFT :
-                                  </span>
-
-                                  <select
-                                    className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
-                                    value={
-                                      sec.shift
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleSectionMetaChange(
-                                        globalIdx,
-                                        "shift",
-                                        e.target
-                                          .value
-                                      )
-                                    }
-                                  >
-                                    <option value="I">
-                                      I
-                                    </option>
-
-                                    <option value="II">
-                                      II
-                                    </option>
-
-                                    <option value="III">
-                                      III
-                                    </option>
-                                  </select>
-                                </div>
-                              </div>
-                            </td>
-                          )
-                        )}
-                      </tr>
-
-                      {/* FROM & TO TIME */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <td
-                              key={`hdr-fromto-${globalIdx}`}
-                              colSpan={3}
-                              className="border border-gray-800 p-1 font-normal bg-white"
-                            >
-                              <div className="grid grid-cols-2 divide-x divide-gray-800">
-                                <div className="flex items-center px-1 gap-1">
-                                  <span className="font-bold text-gray-800 whitespace-nowrap">
-                                    FROM :
-                                  </span>
-
-                                  <input
-                                    type="time"
-                                    className="w-full outline-none font-medium text-center bg-transparent"
-                                    value={
-                                      sec.from
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleSectionMetaChange(
-                                        globalIdx,
-                                        "from",
-                                        e.target
-                                          .value
-                                      )
-                                    }
-                                  />
-                                </div>
-
-                                <div className="flex items-center px-1 gap-1">
-                                  <span className="font-bold text-gray-800 whitespace-nowrap">
-                                    TO :
-                                  </span>
-
-                                  <input
-                                    type="time"
-                                    className="w-full outline-none font-medium text-center bg-transparent"
-                                    value={
-                                      sec.to
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleSectionMetaChange(
-                                        globalIdx,
-                                        "to",
-                                        e.target
-                                          .value
-                                      )
-                                    }
-                                  />
-                                </div>
-                              </div>
-                            </td>
-                          )
-                        )}
-                      </tr>
-
-                      {/* CONTROL SPEC / BEFORE / AFTER HEADER */}
-                      <tr className="bg-gray-100 text-gray-800 font-bold">
-                        {chunk.map(
-                          ({
-                            globalIdx,
-                          }) => (
-                            <React.Fragment
-                              key={`subcols-${globalIdx}`}
-                            >
-                              <th className="border border-gray-800 p-1.5 w-[11%]">
-                                CONTROL SPEC
-                              </th>
-
-                              <th className="border border-gray-800 p-1.5 w-[7%]">
-                                BEFORE
-                              </th>
-
-                              <th className="border border-gray-800 p-1.5 w-[7%]">
-                                AFTER
-                              </th>
-                            </React.Fragment>
-                          )
-                        )}
-                      </tr>
-
-                      {/* SPECIFICATION DATA ROWS */}
-                      {sections[0]?.rows.map(
-                        (_, rIdx) => (
-                          <tr
-                            key={`data-row-${chunkIdx}-${rIdx}`}
-                            className="h-8"
-                          >
-                            {chunk.map(
-                              ({
-                                sec,
-                                globalIdx,
-                              }) => {
-                                const rowData =
-                                  sec.rows[
-                                    rIdx
-                                  ] || {
-                                    controlSpec:
-                                      "",
-                                    before:
-                                      "",
-                                    after:
-                                      "",
-                                  };
-
-                                return (
-                                  <React.Fragment
-                                    key={`cell-${globalIdx}-${rIdx}`}
-                                  >
-                                    {/* CONTROL SPEC */}
-                                    <td className="border border-gray-800 p-0">
-                                      <input
-                                        type="text"
-                                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1"
-                                        placeholder="Specification"
-                                        aria-label={`Column ${
-                                          globalIdx +
-                                          1
-                                        } Row ${
-                                          rIdx +
-                                          1
-                                        } Control Spec`}
-                                        value={
-                                          rowData.controlSpec
-                                        }
-                                        onChange={(
-                                          e
-                                        ) =>
-                                          handleCellChange(
-                                            globalIdx,
-                                            rIdx,
-                                            "controlSpec",
-                                            e
-                                              .target
-                                              .value
-                                          )
-                                        }
-                                      />
-                                    </td>
-
-                                    {/* BEFORE */}
-                                    <td className="border border-gray-800 p-0">
-                                      <input
-                                        type="text"
-                                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1"
-                                        placeholder="Before"
-                                        aria-label={`Column ${
-                                          globalIdx +
-                                          1
-                                        } Row ${
-                                          rIdx +
-                                          1
-                                        } Before`}
-                                        value={
-                                          rowData.before
-                                        }
-                                        onChange={(
-                                          e
-                                        ) =>
-                                          handleCellChange(
-                                            globalIdx,
-                                            rIdx,
-                                            "before",
-                                            e
-                                              .target
-                                              .value
-                                          )
-                                        }
-                                      />
-                                    </td>
-
-                                    {/* AFTER */}
-                                    <td className="border border-gray-800 p-0">
-                                      <input
-                                        type="text"
-                                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1"
-                                        placeholder="After"
-                                        aria-label={`Column ${
-                                          globalIdx +
-                                          1
-                                        } Row ${
-                                          rIdx +
-                                          1
-                                        } After`}
-                                        value={
-                                          rowData.after
-                                        }
-                                        onChange={(
-                                          e
-                                        ) =>
-                                          handleCellChange(
-                                            globalIdx,
-                                            rIdx,
-                                            "after",
-                                            e
-                                              .target
-                                              .value
-                                          )
-                                        }
-                                      />
-                                    </td>
-                                  </React.Fragment>
-                                );
-                              }
-                            )}
-                          </tr>
-                        )
-                      )}
-
-                      {/* TOOL CHANGED BY */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <React.Fragment
-                              key={`tc-sig-${globalIdx}`}
-                            >
-                              <td className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-50 align-middle w-[11%]">
-                                TOOL CHANGED BY
-                              </td>
-
-                              <td
-                                colSpan={2}
-                                className="border border-gray-800 p-0 text-left w-[14%]"
-                              >
-                                <div className="flex items-center px-2 py-1 gap-1">
-                                  <input
-                                    type="text"
-                                    className="w-full outline-none font-medium bg-transparent"
-                                    placeholder="Signature"
-                                    value={
-                                      sec
-                                        .toolChangedBy
-                                        ?.signature ||
-                                      ""
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleSignatureChange(
-                                        globalIdx,
-                                        "toolChangedBy",
-                                        "signature",
-                                        e
-                                          .target
-                                          .value
-                                      )
-                                    }
-                                  />
-                                </div>
-                              </td>
-                            </React.Fragment>
-                          )
-                        )}
-                      </tr>
-
-                      {/* VERIFIED BY QC */}
-                      <tr>
-                        {chunk.map(
-                          ({
-                            sec,
-                            globalIdx,
-                          }) => (
-                            <React.Fragment
-                              key={`qc-sig-${globalIdx}`}
-                            >
-                              <td className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-50 align-middle w-[11%]">
-                                VERIFIED BY QC
-                              </td>
-
-                              <td
-                                colSpan={2}
-                                className="border border-gray-800 p-0 text-left w-[14%]"
-                              >
-                                <div className="flex items-center px-2 py-1 gap-1">
-                                  <input
-                                    type="text"
-                                    className="w-full outline-none font-medium bg-transparent"
-                                    placeholder="Signature"
-                                    value={
-                                      sec
-                                        .verifiedByQc
-                                        ?.signature ||
-                                      ""
-                                    }
-                                    onChange={(
-                                      e
-                                    ) =>
-                                      handleSignatureChange(
-                                        globalIdx,
-                                        "verifiedByQc",
-                                        "signature",
-                                        e
-                                          .target
-                                          .value
-                                      )
-                                    }
-                                  />
-                                </div>
-                              </td>
-                            </React.Fragment>
-                          )
-                        )}
-                      </tr>
-                    </tbody>
-                  </table>
+                  <span className="text-xs text-gray-500">
+                    (Columns {chunk[0].globalIdx + 1}
+                    {chunk.length > 1
+                      ? ` to ${
+                          chunk[chunk.length - 1].globalIdx + 1
+                        }`
+                      : ""}
+                    )
+                  </span>
                 </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed bg-white">
+                  <tbody>
+                    {/* PART TRACEABILITY */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <td
+                          key={`hdr-traceability-${globalIdx}`}
+                          colSpan={3}
+                          className="border border-gray-800 p-1.5 text-left font-normal bg-white"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span className="font-bold text-gray-800 whitespace-nowrap">
+                              PART TRACEABILITY :
+                            </span>
+
+                            <input
+                              type="text"
+                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
+                              value={sec.partTraceability}
+                              placeholder="Enter / Generate Traceability"
+                              onChange={(e) =>
+                                handleSectionMetaChange(
+                                  globalIdx,
+                                  "partTraceability",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+
+                    {/* TOOL DESCRIPTION */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <td
+                          key={`hdr-desc-${globalIdx}`}
+                          colSpan={3}
+                          className="border border-gray-800 p-1.5 text-left font-normal bg-white"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span className="font-bold text-gray-800 whitespace-nowrap">
+                              TOOL DESCRIPTION :
+                            </span>
+
+                            <input
+                              type="text"
+                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
+                              value={sec.toolDescription}
+                              placeholder="Enter Tool Description"
+                              onChange={(e) =>
+                                handleSectionMetaChange(
+                                  globalIdx,
+                                  "toolDescription",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+
+                    {/* M/C NO & OP NO */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <td
+                          key={`hdr-mcop-${globalIdx}`}
+                          colSpan={3}
+                          className="border border-gray-800 p-1 font-normal bg-white"
+                        >
+                          <div className="grid grid-cols-2 divide-x divide-gray-800">
+                            {/* M/C NO */}
+                            <div className="flex items-center px-1 gap-1">
+                              <span className="font-bold text-gray-800 whitespace-nowrap">
+                                M/C NO :
+                              </span>
+
+                              <select
+                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
+                                value={sec.mcNo}
+                                onChange={(e) =>
+                                  handleSectionMetaChange(
+                                    globalIdx,
+                                    "mcNo",
+                                    e.target.value
+                                  )
+                                }
+                                disabled={!headerInfo.lineCode}
+                              >
+                                <option value="">
+                                  {headerInfo.lineCode
+                                    ? "Select M/C"
+                                    : "Select Line First"}
+                                </option>
+
+                                {machineOptions.map((m, index) => (
+                                  <option
+                                    key={m.id || `${m.machineNo}-${index}`}
+                                    value={m.machineNo}
+                                  >
+                                    {m.machineNo}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* OP NO */}
+                            <div className="flex items-center px-1 gap-1">
+                              <span className="font-bold text-gray-800 whitespace-nowrap">
+                                OP NO :
+                              </span>
+
+                              <select
+                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
+                                value={sec.opNo || headerInfo.opNo}
+                                onChange={(e) =>
+                                  handleSectionMetaChange(
+                                    globalIdx,
+                                    "opNo",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <option value="">Select OP No</option>
+                                <option value="20">20</option>
+                                <option value="30">30</option>
+                                <option value="40">40</option>
+                                <option value="50">50</option>
+                                <option value="60">60</option>
+                                <option value="70">70</option>
+                              </select>
+                            </div>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+
+                    {/* DATE & SHIFT */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <td
+                          key={`hdr-dateshift-${globalIdx}`}
+                          colSpan={3}
+                          className="border border-gray-800 p-1 font-normal bg-white"
+                        >
+                          <div className="grid grid-cols-2 divide-x divide-gray-800">
+                            <div className="flex items-center px-1 gap-1">
+                              <span className="font-bold text-gray-800 whitespace-nowrap">
+                                DATE :
+                              </span>
+
+                              <input
+                                type="date"
+                                className="w-full outline-none font-medium text-center bg-transparent"
+                                value={sec.date}
+                                onChange={(e) =>
+                                  handleSectionMetaChange(
+                                    globalIdx,
+                                    "date",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center px-1 gap-1">
+                              <span className="font-bold text-gray-800 whitespace-nowrap">
+                                SHIFT :
+                              </span>
+
+                              <select
+                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
+                                value={sec.shift}
+                                onChange={(e) =>
+                                  handleSectionMetaChange(
+                                    globalIdx,
+                                    "shift",
+                                    e.target.value
+                                  )
+                                }
+                              >
+                                <option value="I">I</option>
+                                <option value="II">II</option>
+                                <option value="III">III</option>
+                              </select>
+                            </div>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+
+                    {/* FROM & TO TIME */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <td
+                          key={`hdr-fromto-${globalIdx}`}
+                          colSpan={3}
+                          className="border border-gray-800 p-1 font-normal bg-white"
+                        >
+                          <div className="grid grid-cols-2 divide-x divide-gray-800">
+                            <div className="flex items-center px-1 gap-1">
+                              <span className="font-bold text-gray-800 whitespace-nowrap">
+                                FROM :
+                              </span>
+
+                              <input
+                                type="time"
+                                className="w-full outline-none font-medium text-center bg-transparent"
+                                value={sec.from}
+                                onChange={(e) =>
+                                  handleSectionMetaChange(
+                                    globalIdx,
+                                    "from",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+
+                            <div className="flex items-center px-1 gap-1">
+                              <span className="font-bold text-gray-800 whitespace-nowrap">
+                                TO :
+                              </span>
+
+                              <input
+                                type="time"
+                                className="w-full outline-none font-medium text-center bg-transparent"
+                                value={sec.to}
+                                onChange={(e) =>
+                                  handleSectionMetaChange(
+                                    globalIdx,
+                                    "to",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+
+                    {/* CONTROL SPEC / BEFORE / AFTER HEADER */}
+                    <tr className="bg-gray-100 text-gray-800 font-bold">
+                      {chunk.map(({ globalIdx }) => (
+                        <React.Fragment key={`subcols-${globalIdx}`}>
+                          <th className="border border-gray-800 p-1.5 w-[14%]">
+                            CONTROL SPEC
+                          </th>
+
+                          <th className="border border-gray-800 p-1.5 w-[5.5%]">
+                            BEFORE
+                          </th>
+
+                          <th className="border border-gray-800 p-1.5 w-[5.5%]">
+                            AFTER
+                          </th>
+                        </React.Fragment>
+                      ))}
+                    </tr>
+
+                    {/* SPECIFICATION DATA ROWS */}
+                    {sections[0]?.rows.map((_, rIdx) => (
+                      <tr
+                        key={`data-row-${chunkIdx}-${rIdx}`}
+                        className="h-8"
+                      >
+                        {chunk.map(({ sec, globalIdx }) => {
+                          const rowData = sec.rows[rIdx] || {
+                            nominalValue: "",
+                            operatorSymbol: "±",
+                            toleranceValue: "",
+                            controlSpec: "",
+                            before: "",
+                            after: "",
+                          };
+
+                          return (
+                            <React.Fragment
+                              key={`cell-${globalIdx}-${rIdx}`}
+                            >
+                              {/* CONTROL SPEC WITH DYNAMIC SYMBOL DROPDOWN */}
+                              <td className="border border-gray-800 p-0.5">
+                                <div className="flex items-center justify-center gap-1 w-full h-full px-1">
+                                  {/* Numerical Value Before Symbol */}
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    className="w-[45%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500"
+                                    placeholder="100.5"
+                                    aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Nominal Value`}
+                                    value={rowData.nominalValue ?? ""}
+                                    onChange={(e) =>
+                                      handleCellChange(
+                                        globalIdx,
+                                        rIdx,
+                                        "nominalValue",
+                                        e.target.value
+                                      )
+                                    }
+                                  />
+
+                                  {/* Symbol Dropdown: ±, +, - */}
+                                  <select
+                                    className="w-[25%] h-full text-center outline-none bg-gray-50 border border-gray-300 rounded cursor-pointer font-bold text-xs py-0.5"
+                                    aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Operator Symbol`}
+                                    value={rowData.operatorSymbol || "±"}
+                                    onChange={(e) =>
+                                      handleCellChange(
+                                        globalIdx,
+                                        rIdx,
+                                        "operatorSymbol",
+                                        e.target.value
+                                      )
+                                    }
+                                  >
+                                    <option value="±">±</option>
+                                    <option value="+">+</option>
+                                    <option value="-">-</option>
+                                  </select>
+
+                                  {/* Numerical Tolerance Value After Symbol */}
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    className="w-[30%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500"
+                                    placeholder="5.3"
+                                    aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Tolerance Value`}
+                                    value={rowData.toleranceValue ?? ""}
+                                    onChange={(e) =>
+                                      handleCellChange(
+                                        globalIdx,
+                                        rIdx,
+                                        "toleranceValue",
+                                        e.target.value
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </td>
+
+                              {/* BEFORE */}
+                              <td className="border border-gray-800 p-0">
+                                <input
+                                  type="text"
+                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium"
+                                  placeholder="Before"
+                                  aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Before`}
+                                  value={rowData.before}
+                                  onChange={(e) =>
+                                    handleCellChange(
+                                      globalIdx,
+                                      rIdx,
+                                      "before",
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </td>
+
+                              {/* AFTER */}
+                              <td className="border border-gray-800 p-0">
+                                <input
+                                  type="text"
+                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium"
+                                  placeholder="After"
+                                  aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} After`}
+                                  value={rowData.after}
+                                  onChange={(e) =>
+                                    handleCellChange(
+                                      globalIdx,
+                                      rIdx,
+                                      "after",
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </td>
+                            </React.Fragment>
+                          );
+                        })}
+                      </tr>
+                    ))}
+
+                    {/* TOOL CHANGED BY */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <React.Fragment key={`tc-sig-${globalIdx}`}>
+                          <td className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                            TOOL CHANGED BY
+                          </td>
+
+                          <td
+                            colSpan={2}
+                            className="border border-gray-800 p-0 text-left w-[11%]"
+                          >
+                            <div className="flex items-center px-2 py-1 gap-1">
+                              <input
+                                type="text"
+                                className="w-full outline-none font-medium bg-transparent"
+                                placeholder="Signature"
+                                value={sec.toolChangedBy?.signature || ""}
+                                onChange={(e) =>
+                                  handleSignatureChange(
+                                    globalIdx,
+                                    "toolChangedBy",
+                                    "signature",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          </td>
+                        </React.Fragment>
+                      ))}
+                    </tr>
+
+                    {/* VERIFIED BY QC */}
+                    <tr>
+                      {chunk.map(({ sec, globalIdx }) => (
+                        <React.Fragment key={`qc-sig-${globalIdx}`}>
+                          <td className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                            VERIFIED BY QC
+                          </td>
+
+                          <td
+                            colSpan={2}
+                            className="border border-gray-800 p-0 text-left w-[11%]"
+                          >
+                            <div className="flex items-center px-2 py-1 gap-1">
+                              <input
+                                type="text"
+                                className="w-full outline-none font-medium bg-transparent"
+                                placeholder="Signature"
+                                value={sec.verifiedByQc?.signature || ""}
+                                onChange={(e) =>
+                                  handleSignatureChange(
+                                    globalIdx,
+                                    "verifiedByQc",
+                                    "signature",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          </td>
+                        </React.Fragment>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-            )
-          )}
+            </div>
+          ))}
         </div>
 
         {/* Applicable Events Box */}
@@ -1749,9 +1363,14 @@ export default function ToolChangeRecord() {
           <button
             type="button"
             onClick={handleSave}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer flex items-center gap-2"
+            disabled={isSaving || saveSuccess}
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer flex items-center gap-2"
           >
-            Save & Continue
+            {isSaving
+              ? "SAVING..."
+              : saveSuccess
+              ? "SAVED ✓"
+              : "Save & Continue"}
           </button>
         </div>
       </div>

@@ -97,6 +97,7 @@ export default function DailyProductionIdleTimeReport() {
   const { lineSet, setLineSet } = useLineSet();
 
   const [machineShopDetails, setMachineShopDetails] = useState([]);
+  const [lineMappings, setLineMappings] = useState([]);
   const [partQuantities, setPartQuantities] = useState([]);
   const [reportDate, setReportDate] = useState(getTodayISODate());
 
@@ -136,53 +137,48 @@ export default function DailyProductionIdleTimeReport() {
     teamLeaderSign: "",
   });
 
-  // Fetch machine shop details
+  // Fetch machine shop details + line mappings
   useEffect(() => {
-    const fetchMachineShopDetails = async () => {
+    const fetchData = async () => {
       try {
         const token = localStorage.getItem("token");
-        const response = await fetch(
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        // Fetch Machine Shop Details
+        const detailsRes = await fetch(
           `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/details`,
-          {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          }
+          { headers }
         );
 
-        if (!response.ok) {
+        if (!detailsRes.ok) {
           throw new Error("Failed to fetch machine shop details");
         }
 
-        const data = await response.json();
-        setMachineShopDetails(data);
+        const detailsData = await detailsRes.json();
+        setMachineShopDetails(detailsData);
+
+        // Fetch Line Mappings
+        const mappingRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
+          { headers }
+        );
+
+        if (!mappingRes.ok) {
+          throw new Error("Failed to fetch line mappings");
+        }
+
+        const mappingData = await mappingRes.json();
+        setLineMappings(mappingData);
+
       } catch (error) {
-        console.error("Error fetching machine shop details:", error);
+        console.error("Error fetching line & shop details:", error);
       }
     };
 
     if (shopId) {
-      fetchMachineShopDetails();
+      fetchData();
     }
   }, [shopId]);
-
-  // Sync with LineSetContext whenever it changes
-  useEffect(() => {
-    if (lineSet?.lineCode) {
-      setLineColumns((prev) => {
-        if (prev.length > 0) {
-          const next = [...prev];
-          next[0] = {
-            ...next[0],
-            lineCode: lineSet.lineCode || next[0].lineCode,
-            partName: lineSet.partName || next[0].partName,
-          };
-          return next;
-        }
-        return prev;
-      });
-    }
-  }, [lineSet]);
 
   useEffect(() => {
     const fetchPartQuantities = async () => {
@@ -230,52 +226,80 @@ export default function DailyProductionIdleTimeReport() {
     };
   };
 
+  // Sync with LineSetContext whenever it changes
+  useEffect(() => {
+    if (lineSet?.lineCode) {
+      const capacity = getPartCapacity(lineSet.partName);
+
+      setLineColumns((prev) => {
+        if (prev.length > 0) {
+          const next = [...prev];
+          next[0] = {
+            ...next[0],
+            lineCode: lineSet.lineCode || next[0].lineCode,
+            partName: lineSet.partName || next[0].partName,
+            capacity: capacity || next[0].capacity,
+          };
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [lineSet, partQuantities]);
+
+  const lineCodes =
+    lineMappings.length > 0
+      ? lineMappings.map((m) => m.lineCode)
+      : [
+          ...new Set(
+            machineShopDetails
+              .map((item) => item.lineCode)
+              .filter(Boolean)
+          )
+        ];
+
   const handleLineMetaChange = (colIdx, field, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
 
-      next[colIdx] = {
-        ...next[colIdx],
-        [field]: val,
-      };
-
       if (field === "lineCode") {
-        next[colIdx].partName = "";
-        next[colIdx].capacity = {
-          shift1: "",
-          shift2: "",
-          shift3: "",
+        const mapping = lineMappings.find((m) => m.lineCode === val);
+        const autoPartName =
+          mapping?.partSet ||
+          machineShopDetails.find((item) => item.lineCode === val)?.partName ||
+          "";
+
+        const capacity = getPartCapacity(autoPartName);
+
+        next[colIdx] = {
+          ...next[colIdx],
+          lineCode: val,
+          partName: autoPartName,
+          capacity: capacity || {
+            shift1: "",
+            shift2: "",
+            shift3: "",
+          },
         };
-      }
 
-      if (field === "partName") {
-        const capacity = getPartCapacity(val);
-
-        next[colIdx].capacity = capacity || {
-          shift1: "",
-          shift2: "",
-          shift3: "",
+        if (colIdx === 0 && setLineSet) {
+          setLineSet((prevLineSet) => ({
+            ...prevLineSet,
+            machineShop: shopId || lineSet?.machineShop || "3",
+            lineCode: val,
+            partName: autoPartName,
+            partNo: mapping?.idSet || prevLineSet?.partNo || "",
+          }));
+        }
+      } else {
+        next[colIdx] = {
+          ...next[colIdx],
+          [field]: val,
         };
       }
 
       return next;
     });
-
-    if (colIdx === 0 && setLineSet) {
-      if (field === "lineCode") {
-        setLineSet((prev) => ({
-          ...prev,
-          machineShop: shopId || lineSet?.machineShop || "3",
-          lineCode: val,
-          partName: "",
-        }));
-      } else if (field === "partName") {
-        setLineSet((prev) => ({
-          ...prev,
-          partName: val,
-        }));
-      }
-    }
   };
 
   const handleCapacityChange = (colIdx, shift, val) => {
@@ -742,13 +766,7 @@ export default function DailyProductionIdleTimeReport() {
                           >
                             <option value="">Select Line Code</option>
 
-                            {[
-                              ...new Set(
-                                machineShopDetails
-                                  .map((item) => item.lineCode)
-                                  .filter(Boolean)
-                              ),
-                            ].map((lineCode) => (
+                            {lineCodes.map((lineCode) => (
                               <option key={lineCode} value={lineCode}>
                                 {lineCode}
                               </option>
@@ -770,35 +788,15 @@ export default function DailyProductionIdleTimeReport() {
                         <th
                           key={`pn-${globalIdx}`}
                           colSpan={4}
-                          className="border border-gray-800 p-0 bg-white"
+                          className="border border-gray-800 p-0 bg-gray-100"
                         >
-                          <select
-                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
+                          <input
+                            type="text"
+                            readOnly
+                            className="w-full h-full text-center font-bold text-gray-700 outline-none bg-transparent py-1.5"
                             value={col.partName || ""}
-                            onChange={(e) =>
-                              handleLineMetaChange(
-                                globalIdx,
-                                "partName",
-                                e.target.value
-                              )
-                            }
-                            disabled={!col.lineCode}
-                          >
-                            <option value="">Select Part Name</option>
-
-                            {[
-                              ...new Set(
-                                machineShopDetails
-                                  .filter((item) => item.lineCode === col.lineCode)
-                                  .map((item) => item.partName)
-                                  .filter(Boolean)
-                              ),
-                            ].map((partName) => (
-                              <option key={partName} value={partName}>
-                                {partName}
-                              </option>
-                            ))}
-                          </select>
+                            placeholder="Auto-filled"
+                          />
                         </th>
                       ))}
                     </tr>

@@ -19,6 +19,7 @@ const MachineShopDashboard = () => {
     hof: "/hof",
     productengineer: "/product-engineer",
     gm: "/gm",
+    qc: "/qc"
   };
 
   const machineShops = [

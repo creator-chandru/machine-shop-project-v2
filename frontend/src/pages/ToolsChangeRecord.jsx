@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileDown, Save } from "lucide-react";
 import Header from "../components/Header";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const CHUNK_SIZE = 3;
 const INITIAL_SECTIONS = 1;
@@ -39,7 +41,7 @@ const createEmptySection = (
   shift: "I",
   from: "",
   to: "",
-  assignedQc: "", // QC chosen by Shift Incharge
+  assignedQc: "",
   rows: Array.from({ length: numRows }, () => ({
     nominalValue: "",
     operatorSymbol: "±",
@@ -81,9 +83,12 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
+
 export default function ToolChangeRecord() {
   const { shopId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { lineSet, setLineSet } = useLineSet();
 
   // Role extraction
@@ -91,7 +96,7 @@ export default function ToolChangeRecord() {
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
   const currentUserRole = (currentUser?.role || "").toLowerCase();
 
-  const isShiftIncharge = currentUserRole === "shiftincharge";
+  const isShiftIncharge = currentUserRole === "shiftincharge" || currentUserRole === "supervisor" || currentUserRole === "operator" || currentUserRole === "";
   const isQC = currentUserRole === "qc" || currentUserRole === "qualitycontroller";
 
   const [headerInfo, setHeaderInfo] = useState({
@@ -103,6 +108,8 @@ export default function ToolChangeRecord() {
     date: getTodayISODate(),
   });
 
+  const [recordId, setRecordId] = useState(null);
+  const [isSavedRecord, setIsSavedRecord] = useState(false);
   const [machineDetails, setMachineDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
@@ -117,6 +124,13 @@ export default function ToolChangeRecord() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "" });
+  const isSavedRecordRef = useRef(false);
+  const lookupSeqRef = useRef(0);
+  const didInitialLookupRef = useRef(false);
+
+  useEffect(() => {
+    isSavedRecordRef.current = isSavedRecord;
+  }, [isSavedRecord]);
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -125,27 +139,86 @@ export default function ToolChangeRecord() {
     }, 4000);
   };
 
+  // Helper to load record data into component state
+  const loadRecordData = (record) => {
+    if (!record) return;
+    setRecordId(record._id || record.id || null);
+    setIsSavedRecord(true);
+
+    if (record.header) {
+      setHeaderInfo({
+        lineCode: record.header.lineCode || "",
+        partName: record.header.partName || "",
+        partNo: record.header.partNo || "",
+        machineNo: record.header.machineNo || "",
+        opNo: record.header.opNo || "",
+        date: record.header.date || getTodayISODate(),
+      });
+    }
+
+    if (record.sections && record.sections.length > 0) {
+      setSections(
+        record.sections.map((s) => ({
+          ...createEmptySection("", getTodayISODate(), 0),
+          ...s,
+          rows:
+            s.rows && s.rows.length > 0
+              ? s.rows
+              : createEmptySection("", "", INITIAL_ROWS).rows,
+          toolChangedBy: { signature: s.toolChangedBy?.signature || "" },
+          verifiedByQc: { signature: s.verifiedByQc?.signature || "" },
+        }))
+      );
+    }
+  };
+
   // Fetch QC user accounts for the dropdown
   useEffect(() => {
     const fetchQcList = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/qc`, {
+        const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/incharges`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (res.ok) {
           const data = await res.json();
-          setQcUsers(data);
+          setQcUsers(data.qcList || []);
         } else {
-          setQcUsers([{ username: "qc", employeeId: "qc" }]);
+          setQcUsers([{ name: "qc", username: "qc" }, { name: "qc1", username: "qc1" }]);
         }
       } catch (err) {
-        setQcUsers([{ username: "qc", employeeId: "qc" }]);
+        setQcUsers([{ name: "qc", username: "qc" }, { name: "qc1", username: "qc1" }]);
       }
     };
     fetchQcList();
   }, []);
+
+  // Check if a record was passed via navigation state or search params
+  useEffect(() => {
+    if (location.state?.record) {
+      loadRecordData(location.state.record);
+    } else {
+      const qRecordId = searchParams.get("recordId") || location.state?.recordId;
+      if (qRecordId) {
+        const fetchRecordById = async () => {
+          try {
+            const token = localStorage.getItem("token");
+            const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/${qRecordId}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              loadRecordData(data);
+            }
+          } catch (err) {
+            console.error("Failed to fetch record by ID:", err);
+          }
+        };
+        fetchRecordById();
+      }
+    }
+  }, [location.state, searchParams]);
 
   // Fetch Part Traceability
   const fetchPartTraceability = async (lineCode, date, shift, secIdx) => {
@@ -154,7 +227,7 @@ export default function ToolChangeRecord() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
           lineCode
         )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         {
@@ -168,7 +241,7 @@ export default function ToolChangeRecord() {
       setSections((prev) =>
         prev.map((sec, idx) =>
           idx === secIdx
-            ? { ...sec, partTraceability: data.partTraceability || "" }
+            ? { ...sec, partTraceability: data.partTraceability || sec.partTraceability || "" }
             : sec
         )
       );
@@ -177,7 +250,64 @@ export default function ToolChangeRecord() {
     }
   };
 
+  // Clears a previously loaded saved record (rows, signatures, approval state)
+  const resetToEmptyForm = (lineCode, date, machineNo = "") => {
+    if (!isSavedRecordRef.current) return; // keep unsaved drafts untouched
+    isSavedRecordRef.current = false;
+    setRecordId(null);
+    setIsSavedRecord(false);
+    setSections([createEmptySection(machineNo, date, INITIAL_ROWS)]);
+    fetchPartTraceability(lineCode, date, "I", 0);
+  };
+
+  // Fetch existing submitted record for a lineCode + date + machineNo
+  const checkExistingRecord = async (lineCode, date, machineNo = "") => {
+    if (!lineCode || !date) return;
+
+    const seq = ++lookupSeqRef.current; // ignore out-of-order responses
+
+    try {
+      const token = localStorage.getItem("token");
+      let url = `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record?machineShop=${shopId || 3}&lineCode=${encodeURIComponent(
+        lineCode
+      )}&date=${encodeURIComponent(date)}`;
+
+      if (machineNo) {
+        url += `&machineNo=${encodeURIComponent(machineNo)}`;
+      }
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (seq !== lookupSeqRef.current) return;
+
+      if (res.ok) {
+        const data = await res.json();
+        if (seq !== lookupSeqRef.current) return;
+
+        const found = Array.isArray(data) && data.length > 0 ? data[0] : null;
+        if (found && found.sections && found.sections.length > 0) {
+          loadRecordData(found);
+        } else {
+          resetToEmptyForm(lineCode, date, machineNo);
+        }
+      }
+    } catch (err) {
+      console.error("Check existing record error:", err);
+    }
+  };
+
   // Sync with LineSetContext
+  useEffect(() => {
+    if (didInitialLookupRef.current || !lineSet?.lineCode) return;
+    didInitialLookupRef.current = true;
+
+    if (location.state?.record || location.state?.recordId || searchParams.get("recordId")) return;
+
+    checkExistingRecord(lineSet.lineCode, headerInfo.date, lineSet.machineNo || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineSet]);
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || headerInfo.lineCode;
@@ -224,7 +354,7 @@ export default function ToolChangeRecord() {
         const headers = { Authorization: `Bearer ${token}` };
 
         const machineRes = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`,
+          `${process.env.REACT_APP_API_URL || ""}/api/machine-shop/${shopId}/pre-operation-details`,
           { headers }
         );
         if (!machineRes.ok) throw new Error("Failed to fetch Machine Shop details");
@@ -232,7 +362,7 @@ export default function ToolChangeRecord() {
         setMachineDetails(machineData);
 
         const mappingRes = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
+          `${process.env.REACT_APP_API_URL || ""}/api/mappings/${shopId}/lines`,
           { headers }
         );
         if (!mappingRes.ok) throw new Error("Failed to fetch line mappings");
@@ -240,7 +370,6 @@ export default function ToolChangeRecord() {
         setLineMappings(mappingData);
       } catch (err) {
         console.error("Data fetch error:", err);
-        triggerToast("Failed to load required data.", "error");
       } finally {
         setLoadingMachineDetails(false);
       }
@@ -263,11 +392,12 @@ export default function ToolChangeRecord() {
   ).map((machineNo) => machineOptionsRaw.find((m) => m.machineNo === machineNo));
 
   const handleDateChange = (newDate) => {
-    if (isQC) return; // QC cannot modify form header
+    if (isQC) return;
     setHeaderInfo((prev) => ({ ...prev, date: newDate }));
     setSections((prev) => prev.map((sec) => ({ ...sec, date: newDate })));
 
     if (headerInfo.lineCode) {
+      checkExistingRecord(headerInfo.lineCode, newDate, headerInfo.machineNo);
       sections.forEach((sec, idx) => {
         fetchPartTraceability(headerInfo.lineCode, newDate, sec.shift, idx);
       });
@@ -275,7 +405,7 @@ export default function ToolChangeRecord() {
   };
 
   const handleLineChange = (lineCode) => {
-    if (isQC) return; // QC cannot modify form header
+    if (isQC) return;
     const mapping = lineMappings.find((m) => m.lineCode === lineCode);
     const autoPartName = mapping?.partSet || "";
     const autoPartNo = mapping?.idSet || "";
@@ -297,6 +427,8 @@ export default function ToolChangeRecord() {
       partNo: autoPartNo,
       machineNo: "",
     });
+
+    checkExistingRecord(lineCode, headerInfo.date, "");
 
     sections.forEach((sec, idx) => {
       fetchPartTraceability(lineCode, sec.date || headerInfo.date, sec.shift, idx);
@@ -326,20 +458,14 @@ export default function ToolChangeRecord() {
   };
 
   const handleSectionMetaChange = (secIdx, field, val) => {
-    if (isQC) return; // QC cannot edit metadata
+    if (isQC) return;
     setSections((prev) =>
       prev.map((sec, idx) => (idx === secIdx ? { ...sec, [field]: val } : sec))
     );
 
     if (field === "mcNo" && secIdx === 0) {
       setHeaderInfo((prev) => ({ ...prev, machineNo: val }));
-      setLineSet({
-        machineShop: shopId || "3",
-        lineCode: headerInfo.lineCode,
-        partName: headerInfo.partName,
-        partNo: headerInfo.partNo,
-        machineNo: val,
-      });
+      checkExistingRecord(headerInfo.lineCode, headerInfo.date, val);
     }
 
     if (field === "date" || field === "shift") {
@@ -351,7 +477,7 @@ export default function ToolChangeRecord() {
   };
 
   const handleCellChange = (secIdx, rowIdx, field, val) => {
-    if (isQC) return; // QC cannot edit table cell contents
+    if (isQC) return;
 
     setSections((prev) => {
       const next = [...prev];
@@ -385,15 +511,10 @@ export default function ToolChangeRecord() {
 
   // Shift Incharge Approves Tool Changed By
   const handleApproveToolChangedBy = (secIdx) => {
-    if (!isShiftIncharge) {
-      triggerToast("Only the Shift Incharge can sign here.", "error");
-      return;
-    }
-
     setSections((prev) =>
       prev.map((sec, idx) =>
         idx === secIdx
-          ? { ...sec, toolChangedBy: { signature: currentUsername } }
+          ? { ...sec, toolChangedBy: { signature: currentUsername || "Approved" } }
           : sec
       )
     );
@@ -454,13 +575,165 @@ export default function ToolChangeRecord() {
     });
   };
 
+  // PDF Download / Preview
+    // PDF Download / Preview (same layout the QC sees while approving)
+  const handleDownloadPdf = () => {
+    // Only available for dates/lines that already have a saved record
+    if (!isSavedRecord) {
+      triggerToast("No saved record found for this date. Submit the form first to preview.", "error");
+      return;
+    }
+
+    try {
+      const doc = new jsPDF("l", "mm", "a4");
+
+      const formatDate = (dateStr) => {
+        if (!dateStr) return "";
+        return new Date(dateStr).toLocaleDateString("en-GB");
+      };
+
+      doc.setLineWidth(0.3);
+      doc.rect(10, 10, 40, 20);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("SAKTHI", 30, 18, { align: "center" });
+      doc.text("AUTO", 30, 26, { align: "center" });
+
+      doc.rect(50, 10, 180, 20);
+      doc.setFontSize(16);
+      doc.text("TOOL CHANGE RECORD", 140, 22, { align: "center" });
+
+      doc.rect(230, 10, 57, 20);
+      doc.setFontSize(11);
+      doc.text(headerInfo.lineCode || "ALL LINES", 258.5, 16, { align: "center" });
+      doc.line(230, 20, 287, 20);
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`DATE: ${formatDate(headerInfo.date)}`, 258.5, 26, { align: "center" });
+
+      const tableHead = [
+        ["Line Code", "Part Name", "Traceability", "Tool Description", "M/C No", "Shift", "Time", "Control Spec", "Before", "After"],
+      ];
+
+      const tableBody = [];
+      sections.forEach((sec) => {
+        (sec.rows || []).forEach((row) => {
+          tableBody.push([
+            headerInfo.lineCode || "-",
+            headerInfo.partName || "-",
+            sec.partTraceability || "-",
+            sec.toolDescription || "-",
+            sec.mcNo || headerInfo.machineNo || "-",
+            sec.shift || "I",
+            sec.from || sec.to ? `${sec.from || ""} - ${sec.to || ""}` : "-",
+            row.controlSpec ||
+              (row.nominalValue
+                ? `${row.nominalValue} ${row.operatorSymbol || "±"} ${row.toleranceValue || ""}`
+                : "-"),
+            row.before || row.beforeValue || "-",
+            row.after || row.afterValue || "-",
+          ]);
+        });
+      });
+
+      if (tableBody.length === 0) {
+        tableBody.push([
+          headerInfo.lineCode || "-",
+          headerInfo.partName || "-",
+          "-",
+          "-",
+          headerInfo.machineNo || "-",
+          "I",
+          "-",
+          "-",
+          "-",
+          "-",
+        ]);
+      }
+
+      autoTable(doc, {
+        startY: 35,
+        head: tableHead,
+        body: tableBody,
+        theme: "grid",
+        styles: { fontSize: 7, cellPadding: 2, halign: "center", valign: "middle" },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" },
+      });
+
+      let finalY = doc.lastAutoTable.finalY + 12;
+      if (finalY + 25 > 200) {
+        doc.addPage();
+        finalY = 20;
+      }
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+
+      // Shift Incharge
+      doc.text("Tool Changed By (Shift Incharge)", 20, finalY);
+      doc.rect(20, finalY + 3, 60, 15);
+
+      const opSig = sections[0]?.toolChangedBy?.signature;
+      if (opSig) {
+        doc.setDrawColor(0, 128, 0);
+        doc.setLineWidth(0.5);
+        doc.line(23, finalY + 11, 26, finalY + 14);
+        doc.line(26, finalY + 14, 32, finalY + 7);
+        doc.setDrawColor(0, 0, 0);
+
+        doc.setFontSize(7);
+        doc.setTextColor(0, 128, 0);
+        doc.text(`APPROVED (${opSig})`, 35, finalY + 12);
+        doc.setTextColor(0, 0, 0);
+      } else {
+        doc.setFontSize(8);
+        doc.setTextColor(200, 0, 0);
+        doc.text("Pending", 35, finalY + 12);
+        doc.setTextColor(0, 0, 0);
+      }
+
+      // Verified by QC
+      const qcX = 180;
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text("Verified By QC", qcX, finalY);
+      doc.rect(qcX, finalY + 3, 80, 15);
+
+      const qcSig = sections[0]?.verifiedByQc?.signature;
+      const assignedQc = sections[0]?.assignedQc || "QC";
+
+      if (qcSig && qcSig !== "Pending") {
+        doc.setDrawColor(0, 128, 0);
+        doc.setLineWidth(0.5);
+        doc.line(qcX + 3, finalY + 11, qcX + 6, finalY + 14);
+        doc.line(qcX + 6, finalY + 14, qcX + 12, finalY + 7);
+        doc.setDrawColor(0, 0, 0);
+
+        doc.setFontSize(7);
+        doc.setTextColor(0, 128, 0);
+        doc.text(`APPROVED BY ${qcSig.toUpperCase()}`, qcX + 15, finalY + 12);
+        doc.setTextColor(0, 0, 0);
+      } else {
+        doc.setFontSize(8);
+        doc.setTextColor(200, 0, 0);
+        doc.text(`Pending [${assignedQc.toUpperCase()}]`, qcX + 15, finalY + 12);
+        doc.setTextColor(0, 0, 0);
+      }
+
+      doc.save(`Tool_Change_Record_${headerInfo.lineCode}_${headerInfo.date}.pdf`);
+      triggerToast("PDF generated and downloaded!", "success");
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      triggerToast("Failed to generate PDF", "error");
+    }
+  };
+
   const handleSave = async () => {
     if (!headerInfo.lineCode) {
       triggerToast("Please select Line Code.", "error");
       return;
     }
 
-    // Validation for Shift Incharge
     if (isShiftIncharge) {
       const unapprovedToolChange = sections.some((sec) => !sec.toolChangedBy?.signature);
       if (unapprovedToolChange) {
@@ -475,7 +748,6 @@ export default function ToolChangeRecord() {
       }
     }
 
-    // Validation for QC
     if (isQC) {
       const missingQcApproval = sections.some((sec) => !sec.verifiedByQc?.signature);
       if (missingQcApproval) {
@@ -510,11 +782,14 @@ export default function ToolChangeRecord() {
         date: headerInfo.date,
       },
       sections: processedSections,
+      status: isQC ? "Completed" : "Submitted",
     };
 
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/tool-change-record`, {
+      const url = `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record`;
+
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -528,18 +803,12 @@ export default function ToolChangeRecord() {
         throw new Error(errorData.error || "Save failed");
       }
 
-      setLineSet({
-        machineShop: shopId || "3",
-        lineCode: headerInfo.lineCode,
-        partName: headerInfo.partName,
-        partNo: headerInfo.partNo,
-        machineNo: headerInfo.machineNo,
-      });
-
       setIsSaving(false);
       setSaveSuccess(true);
+      setIsSavedRecord(true);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      triggerToast("Record saved and assigned successfully!", "success");
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       navigate(
         isQC
           ? `/qc/${shopId || 3}`
@@ -620,6 +889,14 @@ export default function ToolChangeRecord() {
               <span>Revision Date: {formMeta.revisionDate}</span>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors"
+          >
+            <FileDown className="w-4 h-4" /> Preview PDF
+          </button>
         </div>
 
         {/* Header Form Selector Controls */}
@@ -681,7 +958,7 @@ export default function ToolChangeRecord() {
           </div>
         </div>
 
-        {/* Action Controls for Columns and Rows (Hidden/Disabled for QC) */}
+        {/* Action Controls for Columns and Rows (Disabled for QC) */}
         {!isQC && (
           <div className="flex flex-wrap justify-between items-center px-1 gap-2">
             <div className="flex items-center gap-2">
@@ -694,7 +971,7 @@ export default function ToolChangeRecord() {
               <button
                 type="button"
                 onClick={handleAddColumn}
-                className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
+                className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
               >
                 + Add Column
               </button>
@@ -702,7 +979,7 @@ export default function ToolChangeRecord() {
                 <button
                   type="button"
                   onClick={handleRemoveColumn}
-                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
+                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
                 >
                   − Delete Column
                 </button>
@@ -716,7 +993,7 @@ export default function ToolChangeRecord() {
               <button
                 type="button"
                 onClick={handleAddRow}
-                className="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
+                className="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
               >
                 + Add Row
               </button>
@@ -724,7 +1001,7 @@ export default function ToolChangeRecord() {
                 <button
                   type="button"
                   onClick={handleRemoveRow}
-                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
+                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
                 >
                   − Delete Row
                 </button>
@@ -1085,7 +1362,7 @@ export default function ToolChangeRecord() {
                               <button
                                 type="button"
                                 onClick={() => handleApproveToolChangedBy(globalIdx)}
-                                className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider"
+                                className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
                               >
                                 Approve
                               </button>
@@ -1101,78 +1378,86 @@ export default function ToolChangeRecord() {
 
                     {/* VERIFIED BY QC (DROPDOWN + APPROVAL WORKFLOW) */}
                     <tr>
-                      {chunk.map(({ sec, globalIdx }) => (
-                        <React.Fragment key={`qc-sig-${globalIdx}`}>
-                          <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
-                            VERIFIED BY QC
-                          </td>
-                          <td
-                            colSpan={2}
-                            className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
-                          >
-                            {/* CASE 1: QC has already approved */}
-                            {sec.verifiedByQc?.signature ? (
-                              <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                                <span className="text-[10px] font-bold text-green-600 uppercase">
-                                  Approved By ✓
-                                </span>
-                                <span className="text-xs font-black text-gray-900 uppercase">
-                                  {sec.verifiedByQc.signature}
-                                </span>
-                              </div>
-                            ) : isQC ? (
-                              /* CASE 2: QC is logged in and needs to approve */
-                              <div className="flex flex-col items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleApproveQc(globalIdx)}
-                                  className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider"
-                                >
-                                  Approve QC
-                                </button>
-                                {sec.assignedQc && (
-                                  <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                                    (Assigned: {sec.assignedQc})
+                      {chunk.map(({ sec, globalIdx }) => {
+                        const isQcApproved = Boolean(
+                          sec.verifiedByQc?.signature && 
+                          sec.verifiedByQc.signature !== "Pending" && 
+                          sec.verifiedByQc.signature !== ""
+                        );
+
+                        return (
+                          <React.Fragment key={`qc-sig-${globalIdx}`}>
+                            <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                              VERIFIED BY QC
+                            </td>
+                            <td
+                              colSpan={2}
+                              className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
+                            >
+                              {/* 1. QC has already approved */}
+                              {isQcApproved ? (
+                                <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
+                                  <span className="text-[10px] font-bold text-green-600 uppercase">
+                                    Approved By ✓
                                   </span>
-                                )}
-                              </div>
-                            ) : isShiftIncharge && !sec.toolChangedBy?.signature ? (
-                              /* CASE 3: Shift Incharge is selecting the QC before signing */
-                              <div className="flex flex-col items-center gap-1 w-full">
-                                <select
-                                  className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
-                                  value={sec.assignedQc || ""}
-                                  onChange={(e) =>
-                                    handleSectionMetaChange(globalIdx, "assignedQc", e.target.value)
-                                  }
-                                >
-                                  <option value="">-- Select QC --</option>
-                                  {qcUsers.map((qc, qIdx) => {
-                                    const uname = qc.username || qc.employeeId;
-                                    return (
-                                      <option key={`${uname}-${qIdx}`} value={uname}>
-                                        {uname.toUpperCase()} {qc.name ? `(${qc.name})` : ""}
-                                      </option>
-                                    );
-                                  })}
-                                </select>
-                              </div>
-                            ) : (
-                              /* CASE 4: Form submitted by Shift Incharge, awaiting QC approval */
-                              <div className="flex flex-col items-center justify-center">
-                                <span className="text-orange-600 text-xs font-bold uppercase animate-pulse">
-                                  Pending Approval
-                                </span>
-                                {sec.assignedQc && (
-                                  <span className="text-[11px] font-extrabold text-gray-800 uppercase mt-0.5">
-                                    [{sec.assignedQc}]
+                                  <span className="text-xs font-black text-gray-900 uppercase">
+                                    approved by {sec.verifiedByQc.signature}
                                   </span>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
+                                </div>
+                              ) : isQC ? (
+                                /* 2. QC is viewing to verify */
+                                <div className="flex flex-col items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApproveQc(globalIdx)}
+                                    className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                                  >
+                                    Approve QC
+                                  </button>
+                                  {sec.assignedQc && (
+                                    <span className="text-[10px] text-gray-500 font-semibold uppercase">
+                                      (Assigned: {sec.assignedQc})
+                                    </span>
+                                  )}
+                                </div>
+                              ) : isSavedRecord ? (
+                                /* 3. Record was submitted by Shift Incharge, awaiting QC approval */
+                                <div className="flex flex-col items-center justify-center">
+                                  <span className="text-red-600 text-xs font-bold uppercase">
+                                    pending
+                                  </span>
+                                  {sec.assignedQc && (
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
+                                      (Assigned: {sec.assignedQc})
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                /* 4. Active drafting: Shift Incharge chooses QC from dropdown */
+                                <div className="flex flex-col items-center gap-1 w-full">
+                                  <select
+                                    className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
+                                    value={sec.assignedQc || ""}
+                                    onChange={(e) =>
+                                      handleSectionMetaChange(globalIdx, "assignedQc", e.target.value)
+                                    }
+                                  >
+                                    <option value="">-- Select QC --</option>
+                                    {qcUsers.map((qc, qIdx) => {
+                                      const uname = qc.username || qc.employeeId || qc.name;
+                                      return (
+                                        <option key={`${uname}-${qIdx}`} value={uname}>
+                                          {uname.toUpperCase()}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </div>
+                              )}
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
                     </tr>
                   </tbody>
                 </table>
@@ -1199,7 +1484,7 @@ export default function ToolChangeRecord() {
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer flex items-center gap-2 uppercase tracking-wider text-sm"
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg cursor-pointer flex items-center gap-2 uppercase tracking-wider text-sm"
           >
             {isSaving
               ? "SAVING..."

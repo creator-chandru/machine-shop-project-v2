@@ -98,7 +98,7 @@ const getIncharges = async (req, res) => {
     try {
         const qcRes = await sql.query`
             SELECT username AS name, username, employeeId 
-            FROM dbo.DisaUsersTable 
+            FROM dbo.MachineShopUsers 
             WHERE LOWER(role) IN ('qc', 'qualitycontroller') 
             ORDER BY username ASC
         `;

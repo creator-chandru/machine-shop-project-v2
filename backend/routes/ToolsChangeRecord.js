@@ -13,6 +13,8 @@ const {
 
 // 1. GET QC Incharges List (For Shift Incharge dropdown)
 router.get('/incharges', getIncharges);
+// Same handler under the path the frontend actually calls
+router.get('/tool-change-record/incharges', getIncharges);
 
 
 // 2. POST Save / Submit Tool Change Record

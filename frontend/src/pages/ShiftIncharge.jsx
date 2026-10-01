@@ -34,18 +34,18 @@ const ShiftIncharge = () => {
   }, [shopId]);
 
   const buttons = [
-    { name: "Pre-Operation Checklist", path:`/operator/${shopId}/pre-operation-checklist`, icon: ClipboardCheck},
-    { name: "Error-Proofing CheckSheet", path:`/operator/${shopId}/error-proofing-checksheet`, icon: ShieldCheck},
-    { name: "Air-Gap-Sensor CheckSheet", path:`/operator/${shopId}/air-gap-sensor`, icon: PenLine},
-    { name: "Four-M-Change-Monitoring CheckSheet", path:`/operator/${shopId}/four-m-change-monitoring`, icon: RefreshCw},
-    { name: "Record Of Significant Event", path:`/operator/${shopId}/significant-event-record`, icon: FileClock},
-    { name: "Tool Change Record", path:`/operator/${shopId}/tool-change-record`, icon: Wrench},
-    { name: "Daily Production Report", path:`/operator/${shopId}/daily-production-report`, icon: FileText},
-    { name: "Daily Production Idle Time Report", path:`/operator/${shopId}/daily-production-idle-time-report`, icon: Clock},
-    { name: "Breakdown Intimation / Service Report", path:`/operator/${shopId}/breakdown-intimation-service-report`, icon: AlertTriangle},
-    { name: "Skill Evaluation - Practical Production and Quantity", path:`/operator/${shopId}/skill-evaluation-practical`, icon:BadgeCheck},
-    { name: "Operator Observation Sheet", path:`/operator/${shopId}/operator-observation-sheet`,icon:SearchCheck},
-    { name: "Competency Evaluation Form", path:`/operator/${shopId}/competency-evaluation-form`,icon:ShieldCheck}
+    { name: "Pre-Operation Checklist", path: `/shift-incharge/${shopId}/pre-operation-checklist`, icon: ClipboardCheck },
+    { name: "Error-Proofing CheckSheet", path: `/shift-incharge/${shopId}/error-proofing-checksheet`, icon: ShieldCheck },
+    { name: "Air-Gap-Sensor CheckSheet", path: `/shift-incharge/${shopId}/air-gap-sensor`, icon: PenLine },
+    { name: "Four-M-Change-Monitoring CheckSheet", path: `/shift-incharge/${shopId}/four-m-change-monitoring`, icon: RefreshCw },
+    { name: "Record Of Significant Event", path: `/shift-incharge/${shopId}/significant-event-record`, icon: FileClock },
+    { name: "Tool Change Record", path: `/shift-incharge/${shopId}/tool-change-record`, icon: Wrench },
+    { name: "Daily Production Report", path: `/shift-incharge/${shopId}/daily-production-report`, icon: FileText },
+    { name: "Daily Production Idle Time Report", path: `/shift-incharge/${shopId}/daily-production-idle-time-report`, icon: Clock },
+    { name: "Breakdown Intimation / Service Report", path: `/shift-incharge/${shopId}/breakdown-intimation-service-report`, icon: AlertTriangle },
+    { name: "Skill Evaluation - Practical Production and Quantity", path: `/shift-incharge/${shopId}/skill-evaluation-practical`, icon: BadgeCheck },
+    { name: "Operator Observation Sheet", path: `/shift-incharge/${shopId}/operator-observation-sheet`, icon: SearchCheck },
+    { name: "Competency Evaluation Form", path: `/shift-incharge/${shopId}/competency-evaluation-form`, icon: ShieldCheck }
   ];
 
   return (

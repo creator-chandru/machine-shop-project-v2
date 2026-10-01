@@ -39,6 +39,7 @@ const createEmptySection = (
   shift: "I",
   from: "",
   to: "",
+  assignedQc: "", // QC chosen by Shift Incharge
   rows: Array.from({ length: numRows }, () => ({
     nominalValue: "",
     operatorSymbol: "±",
@@ -55,7 +56,6 @@ const createEmptySection = (
   },
 });
 
-// Toast notification component
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
 
@@ -71,7 +71,6 @@ const Toast = ({ message, type, onClose }) => {
       className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}
     >
       <span className="text-sm font-semibold">{message}</span>
-
       <button
         onClick={onClose}
         className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
@@ -85,8 +84,15 @@ const Toast = ({ message, type, onClose }) => {
 export default function ToolChangeRecord() {
   const { shopId } = useParams();
   const navigate = useNavigate();
-
   const { lineSet, setLineSet } = useLineSet();
+
+  // Role extraction
+  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
+  const currentUserRole = (currentUser?.role || "").toLowerCase();
+
+  const isShiftIncharge = currentUserRole === "shiftincharge";
+  const isQC = currentUserRole === "qc" || currentUserRole === "qualitycontroller";
 
   const [headerInfo, setHeaderInfo] = useState({
     lineCode: "",
@@ -100,6 +106,7 @@ export default function ToolChangeRecord() {
   const [machineDetails, setMachineDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
+  const [qcUsers, setQcUsers] = useState([]);
 
   const [sections, setSections] = useState(
     Array.from({ length: INITIAL_SECTIONS }, () =>
@@ -109,65 +116,59 @@ export default function ToolChangeRecord() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-
-  // Toast state
-  const [toast, setToast] = useState({
-    message: "",
-    type: "",
-  });
+  const [toast, setToast] = useState({ message: "", type: "" });
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
-
     setTimeout(() => {
-      setToast({
-        message: "",
-        type: "",
-      });
+      setToast({ message: "", type: "" });
     }, 4000);
   };
 
-  // Fetch Part Traceability from backend
-  const fetchPartTraceability = async (
-    lineCode,
-    date,
-    shift,
-    secIdx
-  ) => {
-    if (!lineCode || !date || !shift) {
-      return;
-    }
+  // Fetch QC user accounts for the dropdown
+  useEffect(() => {
+    const fetchQcList = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/qc`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setQcUsers(data);
+        } else {
+          setQcUsers([{ username: "qc", employeeId: "qc" }]);
+        }
+      } catch (err) {
+        setQcUsers([{ username: "qc", employeeId: "qc" }]);
+      }
+    };
+    fetchQcList();
+  }, []);
+
+  // Fetch Part Traceability
+  const fetchPartTraceability = async (lineCode, date, shift, secIdx) => {
+    if (!lineCode || !date || !shift) return;
 
     try {
       const token = localStorage.getItem("token");
-      
-
       const response = await fetch(
         `${process.env.REACT_APP_API_URL}/api/tool-change-record/traceability?lineCode=${encodeURIComponent(
           lineCode
-        )}&date=${encodeURIComponent(
-          date
-        )}&shift=${encodeURIComponent(shift)}`,
+        )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch Part Traceability");
-      }
+      if (!response.ok) throw new Error("Failed to fetch Part Traceability");
 
       const data = await response.json();
-
       setSections((prev) =>
         prev.map((sec, idx) =>
           idx === secIdx
-            ? {
-                ...sec,
-                partTraceability: data.partTraceability || "",
-              }
+            ? { ...sec, partTraceability: data.partTraceability || "" }
             : sec
         )
       );
@@ -176,7 +177,7 @@ export default function ToolChangeRecord() {
     }
   };
 
-  // Sync with LineSetContext whenever it changes
+  // Sync with LineSetContext
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || headerInfo.lineCode;
@@ -193,10 +194,7 @@ export default function ToolChangeRecord() {
         setSections((prev) => {
           if (prev.length > 0 && !prev[0].mcNo) {
             const next = [...prev];
-            next[0] = {
-              ...next[0],
-              mcNo: lineSet.machineNo,
-            };
+            next[0] = { ...next[0], mcNo: lineSet.machineNo };
             return next;
           }
           return prev;
@@ -216,7 +214,7 @@ export default function ToolChangeRecord() {
     }
   }, [lineSet]);
 
-  // Fetch machine details + line mappings
+  // Fetch machine details + mappings
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -225,29 +223,19 @@ export default function ToolChangeRecord() {
         const token = localStorage.getItem("token");
         const headers = { Authorization: `Bearer ${token}` };
 
-        // Fetch machine details
         const machineRes = await fetch(
           `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`,
           { headers }
         );
-
-        if (!machineRes.ok) {
-          throw new Error("Failed to fetch Machine Shop details");
-        }
-
+        if (!machineRes.ok) throw new Error("Failed to fetch Machine Shop details");
         const machineData = await machineRes.json();
         setMachineDetails(machineData);
 
-        // Fetch line mappings
         const mappingRes = await fetch(
           `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
           { headers }
         );
-
-        if (!mappingRes.ok) {
-          throw new Error("Failed to fetch line mappings");
-        }
-
+        if (!mappingRes.ok) throw new Error("Failed to fetch line mappings");
         const mappingData = await mappingRes.json();
         setLineMappings(mappingData);
       } catch (err) {
@@ -261,66 +249,34 @@ export default function ToolChangeRecord() {
     fetchData();
   }, [shopId]);
 
-  // Line Code options
   const lineCodes =
     lineMappings.length > 0
       ? lineMappings.map((m) => m.lineCode)
-      : [
-          ...new Set(
-            machineDetails.map((item) => item.lineCode).filter(Boolean)
-          ),
-        ];
+      : [...new Set(machineDetails.map((item) => item.lineCode).filter(Boolean))];
 
-  // Machine options depend ONLY on Line Code
   const machineOptionsRaw = machineDetails.filter(
     (item) => item.lineCode === headerInfo.lineCode
   );
 
   const machineOptions = Array.from(
-    new Set(
-      machineOptionsRaw.map((m) => m.machineNo).filter(Boolean)
-    )
-  ).map((machineNo) =>
-    machineOptionsRaw.find((m) => m.machineNo === machineNo)
-  );
+    new Set(machineOptionsRaw.map((m) => m.machineNo).filter(Boolean))
+  ).map((machineNo) => machineOptionsRaw.find((m) => m.machineNo === machineNo));
 
-  const handleHeaderChange = (field, val) => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      [field]: val,
-    }));
-  };
-
-  // Header date change handler
   const handleDateChange = (newDate) => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      date: newDate,
-    }));
-
-    setSections((prev) =>
-      prev.map((sec) => ({
-        ...sec,
-        date: newDate,
-      }))
-    );
+    if (isQC) return; // QC cannot modify form header
+    setHeaderInfo((prev) => ({ ...prev, date: newDate }));
+    setSections((prev) => prev.map((sec) => ({ ...sec, date: newDate })));
 
     if (headerInfo.lineCode) {
       sections.forEach((sec, idx) => {
-        fetchPartTraceability(
-          headerInfo.lineCode,
-          newDate,
-          sec.shift,
-          idx
-        );
+        fetchPartTraceability(headerInfo.lineCode, newDate, sec.shift, idx);
       });
     }
   };
 
-  // Line Code change handler: Auto-populates Part Name & Part No
   const handleLineChange = (lineCode) => {
+    if (isQC) return; // QC cannot modify form header
     const mapping = lineMappings.find((m) => m.lineCode === lineCode);
-
     const autoPartName = mapping?.partSet || "";
     const autoPartNo = mapping?.idSet || "";
 
@@ -332,13 +288,7 @@ export default function ToolChangeRecord() {
       machineNo: "",
     }));
 
-    // Clear M/C No from all table sections
-    setSections((prev) =>
-      prev.map((sec) => ({
-        ...sec,
-        mcNo: "",
-      }))
-    );
+    setSections((prev) => prev.map((sec) => ({ ...sec, mcNo: "" })));
 
     setLineSet({
       machineShop: shopId || "3",
@@ -349,17 +299,12 @@ export default function ToolChangeRecord() {
     });
 
     sections.forEach((sec, idx) => {
-      fetchPartTraceability(
-        lineCode,
-        sec.date || headerInfo.date,
-        sec.shift,
-        idx
-      );
+      fetchPartTraceability(lineCode, sec.date || headerInfo.date, sec.shift, idx);
     });
   };
 
-  // Add a new section / column
   const handleAddColumn = () => {
+    if (isQC) return;
     const currentNumRows = sections[0]?.rows?.length || INITIAL_ROWS;
     const defaultDate = headerInfo.date || getTodayISODate();
     const defaultShift = "I";
@@ -367,49 +312,27 @@ export default function ToolChangeRecord() {
 
     setSections((prev) => [
       ...prev,
-      createEmptySection(
-        headerInfo.machineNo,
-        defaultDate,
-        currentNumRows
-      ),
+      createEmptySection(headerInfo.machineNo, defaultDate, currentNumRows),
     ]);
 
     if (headerInfo.lineCode) {
-      fetchPartTraceability(
-        headerInfo.lineCode,
-        defaultDate,
-        defaultShift,
-        newIdx
-      );
+      fetchPartTraceability(headerInfo.lineCode, defaultDate, defaultShift, newIdx);
     }
   };
 
-  // Delete the last section / column
   const handleRemoveColumn = () => {
-    setSections((prev) =>
-      prev.length > 1 ? prev.slice(0, -1) : prev
-    );
+    if (isQC) return;
+    setSections((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   };
 
   const handleSectionMetaChange = (secIdx, field, val) => {
+    if (isQC) return; // QC cannot edit metadata
     setSections((prev) =>
-      prev.map((sec, idx) =>
-        idx === secIdx
-          ? {
-              ...sec,
-              [field]: val,
-            }
-          : sec
-      )
+      prev.map((sec, idx) => (idx === secIdx ? { ...sec, [field]: val } : sec))
     );
 
-    // Keep header machine number in sync with the first table M/C NO
     if (field === "mcNo" && secIdx === 0) {
-      setHeaderInfo((prev) => ({
-        ...prev,
-        machineNo: val,
-      }));
-
+      setHeaderInfo((prev) => ({ ...prev, machineNo: val }));
       setLineSet({
         machineShop: shopId || "3",
         lineCode: headerInfo.lineCode,
@@ -421,32 +344,20 @@ export default function ToolChangeRecord() {
 
     if (field === "date" || field === "shift") {
       const currentSection = sections[secIdx];
-      const date =
-        field === "date"
-          ? val
-          : currentSection?.date || headerInfo.date;
-
-      const shift =
-        field === "shift"
-          ? val
-          : currentSection?.shift || "I";
-
-      fetchPartTraceability(
-        headerInfo.lineCode,
-        date,
-        shift,
-        secIdx
-      );
+      const date = field === "date" ? val : currentSection?.date || headerInfo.date;
+      const shift = field === "shift" ? val : currentSection?.shift || "I";
+      fetchPartTraceability(headerInfo.lineCode, date, shift, secIdx);
     }
   };
 
   const handleCellChange = (secIdx, rowIdx, field, val) => {
+    if (isQC) return; // QC cannot edit table cell contents
+
     setSections((prev) => {
       const next = [...prev];
       const updatedRows = [...next[secIdx].rows];
       const targetRow = { ...updatedRows[rowIdx], [field]: val };
 
-      // Synchronize controlSpec whenever subparts update
       if (
         field === "nominalValue" ||
         field === "operatorSymbol" ||
@@ -467,32 +378,53 @@ export default function ToolChangeRecord() {
       }
 
       updatedRows[rowIdx] = targetRow;
-      next[secIdx] = {
-        ...next[secIdx],
-        rows: updatedRows,
-      };
-
+      next[secIdx] = { ...next[secIdx], rows: updatedRows };
       return next;
     });
   };
 
-  const handleSignatureChange = (secIdx, sigType, field, val) => {
-    setSections((prev) => {
-      const next = [...prev];
-      next[secIdx] = {
-        ...next[secIdx],
-        [sigType]: {
-          ...next[secIdx][sigType],
-          [field]: val,
-        },
-      };
+  // Shift Incharge Approves Tool Changed By
+  const handleApproveToolChangedBy = (secIdx) => {
+    if (!isShiftIncharge) {
+      triggerToast("Only the Shift Incharge can sign here.", "error");
+      return;
+    }
 
-      return next;
-    });
+    setSections((prev) =>
+      prev.map((sec, idx) =>
+        idx === secIdx
+          ? { ...sec, toolChangedBy: { signature: currentUsername } }
+          : sec
+      )
+    );
+    triggerToast("Tool change signed successfully.", "success");
   };
 
-  // Add a new row to all sections
+  // QC Approves Verified By QC
+  const handleApproveQc = (secIdx) => {
+    if (!isQC) {
+      triggerToast("Only QC can verify this record.", "error");
+      return;
+    }
+
+    const sec = sections[secIdx];
+    if (sec.assignedQc && sec.assignedQc.toLowerCase() !== currentUsername.toLowerCase()) {
+      triggerToast(`Assigned to QC: ${sec.assignedQc.toUpperCase()}`, "error");
+      return;
+    }
+
+    setSections((prev) =>
+      prev.map((s, idx) =>
+        idx === secIdx
+          ? { ...s, verifiedByQc: { signature: currentUsername } }
+          : s
+      )
+    );
+    triggerToast("QC Verification Approved!", "success");
+  };
+
   const handleAddRow = () => {
+    if (isQC) return;
     setSections((prev) =>
       prev.map((sec) => ({
         ...sec,
@@ -511,13 +443,10 @@ export default function ToolChangeRecord() {
     );
   };
 
-  // Delete the last row
   const handleRemoveRow = () => {
+    if (isQC) return;
     setSections((prev) => {
-      if (prev[0]?.rows?.length <= 1) {
-        return prev;
-      }
-
+      if (prev[0]?.rows?.length <= 1) return prev;
       return prev.map((sec) => ({
         ...sec,
         rows: sec.rows.slice(0, -1),
@@ -531,10 +460,33 @@ export default function ToolChangeRecord() {
       return;
     }
 
+    // Validation for Shift Incharge
+    if (isShiftIncharge) {
+      const unapprovedToolChange = sections.some((sec) => !sec.toolChangedBy?.signature);
+      if (unapprovedToolChange) {
+        triggerToast("Please click 'Approve' under TOOL CHANGED BY before submitting.", "error");
+        return;
+      }
+
+      const unassignedQc = sections.some((sec) => !sec.assignedQc);
+      if (unassignedQc) {
+        triggerToast("Please select a QC in 'VERIFIED BY QC' for all columns.", "error");
+        return;
+      }
+    }
+
+    // Validation for QC
+    if (isQC) {
+      const missingQcApproval = sections.some((sec) => !sec.verifiedByQc?.signature);
+      if (missingQcApproval) {
+        triggerToast("Please click 'Approve QC' before completing verification.", "error");
+        return;
+      }
+    }
+
     setIsSaving(true);
     setSaveSuccess(false);
 
-    // Format controlSpec for each row in the payload
     const processedSections = sections.map((sec) => ({
       ...sec,
       rows: sec.rows.map((row) => ({
@@ -549,10 +501,7 @@ export default function ToolChangeRecord() {
 
     const payload = {
       header: {
-        machineShop: parseInt(
-          shopId || lineSet?.machineShop || 3,
-          10
-        ),
+        machineShop: parseInt(shopId || lineSet?.machineShop || 3, 10),
         lineCode: headerInfo.lineCode,
         partName: headerInfo.partName,
         partNo: headerInfo.partNo,
@@ -565,18 +514,14 @@ export default function ToolChangeRecord() {
 
     try {
       const token = localStorage.getItem("token");
-
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/tool-change-record`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/tool-change-record`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -595,30 +540,25 @@ export default function ToolChangeRecord() {
       setSaveSuccess(true);
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
-
       navigate(
-        `/operator/${shopId || 3}/daily-production-report`
+        isQC
+          ? `/qc/${shopId || 3}`
+          : `/shift-incharge/${shopId || 3}/daily-production-report`
       );
     } catch (err) {
       console.error("Save error:", err);
       setIsSaving(false);
-      triggerToast(
-        err.message || "Failed to save tool change record.",
-        "error"
-      );
+      triggerToast(err.message || "Failed to save tool change record.", "error");
     }
   };
 
-  // Split sections into chunks of at most 3 columns
   const getSectionChunks = (allSections) => {
     const chunks = [];
     for (let i = 0; i < allSections.length; i += CHUNK_SIZE) {
-      const chunk = allSections
-        .slice(i, i + CHUNK_SIZE)
-        .map((sec, localIdx) => ({
-          sec,
-          globalIdx: i + localIdx,
-        }));
+      const chunk = allSections.slice(i, i + CHUNK_SIZE).map((sec, localIdx) => ({
+        sec,
+        globalIdx: i + localIdx,
+      }));
       chunks.push(chunk);
     }
     return chunks;
@@ -629,41 +569,23 @@ export default function ToolChangeRecord() {
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "" })} />
 
-      {/* Toast Notification */}
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        onClose={() =>
-          setToast({
-            message: "",
-            type: "",
-          })
-        }
-      />
-
-      {/* Saving and Success Modals */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
             {isSaving ? (
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  Saving Data...
-                </h2>
+                <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
                 <p className="text-gray-500 mt-2">
-                  Please wait
+                  {isShiftIncharge ? "Submitting for QC Verification" : "Completing QC Verification"}
                 </p>
               </>
             ) : (
               <>
-                <h2 className="text-xl font-bold text-green-800">
-                  Data Saved Successfully
-                </h2>
-                <p className="text-gray-500 mt-2">
-                  Loading next form...
-                </p>
+                <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
+                <p className="text-gray-500 mt-2">Redirecting...</p>
               </>
             )}
           </div>
@@ -671,30 +593,25 @@ export default function ToolChangeRecord() {
       )}
 
       <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-        {/* Top Navigation & Card Header */}
+        {/* Top Navigation */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
               <button
                 type="button"
-                onClick={() =>
-                  navigate(`/operator/${shopId || 3}`)
-                }
+                onClick={() => navigate(isQC ? `/qc/${shopId || 3}` : `/shift-incharge/${shopId || 3}`)}
                 className="p-1 text-gray-600 hover:text-orange-600 hover:bg-gray-100 rounded-full transition-colors"
-                title="Back to Operator Menu"
+                title="Back"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-
               <span className="text-xs font-bold text-orange-600 tracking-wider uppercase">
                 {formMeta.company}
               </span>
             </div>
-
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-
             <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
               <span>Form Code: {formMeta.formCode}</span>
               <span>|</span>
@@ -706,43 +623,29 @@ export default function ToolChangeRecord() {
         </div>
 
         {/* Header Form Selector Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
-          {/* LINE CODE */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
           <div>
-            <label
-              htmlFor="header-lineCode"
-              className="font-bold text-gray-700 block mb-1 text-xs uppercase"
-            >
+            <label className="font-bold text-gray-700 block mb-1 text-xs uppercase">
               Line Code
             </label>
             <select
-              id="header-lineCode"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
               value={headerInfo.lineCode}
               onChange={(e) => handleLineChange(e.target.value)}
-              disabled={loadingMachineDetails}
+              disabled={loadingMachineDetails || isQC}
             >
-              <option value="">
-                {loadingMachineDetails ? "Loading..." : "Select Line Code"}
-              </option>
+              <option value="">{loadingMachineDetails ? "Loading..." : "Select Line Code"}</option>
               {lineCodes.map((lineCode) => (
-                <option key={lineCode} value={lineCode}>
-                  {lineCode}
-                </option>
+                <option key={lineCode} value={lineCode}>{lineCode}</option>
               ))}
             </select>
           </div>
 
-          {/* PART NO - AUTO FILLED */}
           <div>
-            <label
-              htmlFor="header-partNo"
-              className="font-bold text-gray-700 block mb-1 text-xs uppercase"
-            >
+            <label className="font-bold text-gray-700 block mb-1 text-xs uppercase">
               Part No
             </label>
             <input
-              id="header-partNo"
               type="text"
               readOnly
               className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
@@ -751,16 +654,11 @@ export default function ToolChangeRecord() {
             />
           </div>
 
-          {/* PART NAME - AUTO FILLED */}
           <div>
-            <label
-              htmlFor="header-partName"
-              className="font-bold text-gray-700 block mb-1 text-xs uppercase"
-            >
+            <label className="font-bold text-gray-700 block mb-1 text-xs uppercase">
               Part Name
             </label>
             <input
-              id="header-partName"
               type="text"
               readOnly
               className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-gray-100"
@@ -769,123 +667,76 @@ export default function ToolChangeRecord() {
             />
           </div>
 
-          {/* DATE */}
           <div>
-            <label
-              htmlFor="header-date"
-              className="font-bold text-gray-700 block mb-1 text-xs uppercase"
-            >
+            <label className="font-bold text-gray-700 block mb-1 text-xs uppercase">
               Date
             </label>
             <input
-              id="header-date"
               type="date"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
               value={headerInfo.date}
               onChange={(e) => handleDateChange(e.target.value)}
+              disabled={isQC}
             />
           </div>
         </div>
 
-        {/* Top Action Bar */}
-        <div className="flex flex-wrap justify-between items-center px-1 gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
-              Tool Change Columns
-            </span>
-
-            <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
-              {sections.length}{" "}
-              {sections.length === 1 ? "Column" : "Columns"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleAddColumn}
-              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
-            >
-              <span className="text-sm font-bold leading-none">+</span>{" "}
-              Add Column
-            </button>
-
-            {sections.length > 1 && (
+        {/* Action Controls for Columns and Rows (Hidden/Disabled for QC) */}
+        {!isQC && (
+          <div className="flex flex-wrap justify-between items-center px-1 gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+                Tool Change Columns
+              </span>
+              <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
+                {sections.length} {sections.length === 1 ? "Column" : "Columns"}
+              </span>
               <button
                 type="button"
-                onClick={handleRemoveColumn}
-                className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+                onClick={handleAddColumn}
+                className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
               >
-                <span className="text-sm font-bold leading-none">−</span>{" "}
-                Delete Column
+                + Add Column
               </button>
-            )}
-          </div>
-        </div>
+              {sections.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleRemoveColumn}
+                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
+                >
+                  − Delete Column
+                </button>
+              )}
+            </div>
 
-        {/* Specification Rows Action Bar */}
-        <div className="flex flex-wrap justify-between items-center px-1 gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
-              Specification & Dimensions
-            </span>
-
-            <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
-              {sections[0]?.rows?.length || 1}{" "}
-              {(sections[0]?.rows?.length || 1) === 1
-                ? "Row"
-                : "Rows"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleAddRow}
-              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
-            >
-              <span className="text-sm font-bold leading-none">+</span>{" "}
-              Add Row
-            </button>
-
-            {(sections[0]?.rows?.length || 1) > 1 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+                Rows
+              </span>
               <button
                 type="button"
-                onClick={handleRemoveRow}
-                className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+                onClick={handleAddRow}
+                className="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
               >
-                <span className="text-sm font-bold leading-none">−</span>{" "}
-                Delete Row
+                + Add Row
               </button>
-            )}
+              {(sections[0]?.rows?.length || 1) > 1 && (
+                <button
+                  type="button"
+                  onClick={handleRemoveRow}
+                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow"
+                >
+                  − Delete Row
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* TOOL CHANGE BLOCKS */}
+        {/* Tool Change Form Block */}
         <div className="space-y-8">
           {sectionChunks.map((chunk, chunkIdx) => (
-            <div
-              key={`chunk-${chunkIdx}`}
-              className="space-y-2"
-            >
-              {sectionChunks.length > 1 && (
-                <div className="flex items-center gap-2 px-1">
-                  <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
-                    Block {chunkIdx + 1}
-                  </span>
-
-                  <span className="text-xs text-gray-500">
-                    (Columns {chunk[0].globalIdx + 1}
-                    {chunk.length > 1
-                      ? ` to ${
-                          chunk[chunk.length - 1].globalIdx + 1
-                        }`
-                      : ""}
-                    )
-                  </span>
-                </div>
-              )}
-
+            <div key={`chunk-${chunkIdx}`} className="space-y-2">
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed bg-white">
                   <tbody>
@@ -901,12 +752,12 @@ export default function ToolChangeRecord() {
                             <span className="font-bold text-gray-800 whitespace-nowrap">
                               PART TRACEABILITY :
                             </span>
-
                             <input
                               type="text"
-                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
+                              disabled={isQC}
+                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400 disabled:text-gray-700"
                               value={sec.partTraceability}
-                              placeholder="Enter / Generate Traceability"
+                              placeholder={isQC ? "-" : "Enter / Generate Traceability"}
                               onChange={(e) =>
                                 handleSectionMetaChange(
                                   globalIdx,
@@ -932,12 +783,12 @@ export default function ToolChangeRecord() {
                             <span className="font-bold text-gray-800 whitespace-nowrap">
                               TOOL DESCRIPTION :
                             </span>
-
                             <input
                               type="text"
-                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400"
+                              disabled={isQC}
+                              className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400 disabled:text-gray-700"
                               value={sec.toolDescription}
-                              placeholder="Enter Tool Description"
+                              placeholder={isQC ? "-" : "Enter Tool Description"}
                               onChange={(e) =>
                                 handleSectionMetaChange(
                                   globalIdx,
@@ -960,59 +811,39 @@ export default function ToolChangeRecord() {
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
-                            {/* M/C NO */}
                             <div className="flex items-center px-1 gap-1">
                               <span className="font-bold text-gray-800 whitespace-nowrap">
                                 M/C NO :
                               </span>
-
                               <select
-                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
+                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer disabled:text-gray-700"
                                 value={sec.mcNo}
                                 onChange={(e) =>
-                                  handleSectionMetaChange(
-                                    globalIdx,
-                                    "mcNo",
-                                    e.target.value
-                                  )
+                                  handleSectionMetaChange(globalIdx, "mcNo", e.target.value)
                                 }
-                                disabled={!headerInfo.lineCode}
+                                disabled={!headerInfo.lineCode || isQC}
                               >
-                                <option value="">
-                                  {headerInfo.lineCode
-                                    ? "Select M/C"
-                                    : "Select Line First"}
-                                </option>
-
+                                <option value="">Select M/C</option>
                                 {machineOptions.map((m, index) => (
-                                  <option
-                                    key={m.id || `${m.machineNo}-${index}`}
-                                    value={m.machineNo}
-                                  >
+                                  <option key={m.id || index} value={m.machineNo}>
                                     {m.machineNo}
                                   </option>
                                 ))}
                               </select>
                             </div>
-
-                            {/* OP NO */}
                             <div className="flex items-center px-1 gap-1">
                               <span className="font-bold text-gray-800 whitespace-nowrap">
                                 OP NO :
                               </span>
-
                               <select
-                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
+                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer disabled:text-gray-700"
                                 value={sec.opNo || headerInfo.opNo}
+                                disabled={isQC}
                                 onChange={(e) =>
-                                  handleSectionMetaChange(
-                                    globalIdx,
-                                    "opNo",
-                                    e.target.value
-                                  )
+                                  handleSectionMetaChange(globalIdx, "opNo", e.target.value)
                                 }
                               >
-                                <option value="">Select OP No</option>
+                                <option value="">Select OP</option>
                                 <option value="20">20</option>
                                 <option value="30">30</option>
                                 <option value="40">40</option>
@@ -1039,35 +870,26 @@ export default function ToolChangeRecord() {
                               <span className="font-bold text-gray-800 whitespace-nowrap">
                                 DATE :
                               </span>
-
                               <input
                                 type="date"
-                                className="w-full outline-none font-medium text-center bg-transparent"
+                                disabled={isQC}
+                                className="w-full outline-none font-medium text-center bg-transparent disabled:text-gray-700"
                                 value={sec.date}
                                 onChange={(e) =>
-                                  handleSectionMetaChange(
-                                    globalIdx,
-                                    "date",
-                                    e.target.value
-                                  )
+                                  handleSectionMetaChange(globalIdx, "date", e.target.value)
                                 }
                               />
                             </div>
-
                             <div className="flex items-center px-1 gap-1">
                               <span className="font-bold text-gray-800 whitespace-nowrap">
                                 SHIFT :
                               </span>
-
                               <select
-                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer"
+                                className="w-full outline-none font-medium text-center bg-transparent cursor-pointer disabled:text-gray-700"
                                 value={sec.shift}
+                                disabled={isQC}
                                 onChange={(e) =>
-                                  handleSectionMetaChange(
-                                    globalIdx,
-                                    "shift",
-                                    e.target.value
-                                  )
+                                  handleSectionMetaChange(globalIdx, "shift", e.target.value)
                                 }
                               >
                                 <option value="I">I</option>
@@ -1093,36 +915,27 @@ export default function ToolChangeRecord() {
                               <span className="font-bold text-gray-800 whitespace-nowrap">
                                 FROM :
                               </span>
-
                               <input
                                 type="time"
-                                className="w-full outline-none font-medium text-center bg-transparent"
+                                disabled={isQC}
+                                className="w-full outline-none font-medium text-center bg-transparent disabled:text-gray-700"
                                 value={sec.from}
                                 onChange={(e) =>
-                                  handleSectionMetaChange(
-                                    globalIdx,
-                                    "from",
-                                    e.target.value
-                                  )
+                                  handleSectionMetaChange(globalIdx, "from", e.target.value)
                                 }
                               />
                             </div>
-
                             <div className="flex items-center px-1 gap-1">
                               <span className="font-bold text-gray-800 whitespace-nowrap">
                                 TO :
                               </span>
-
                               <input
                                 type="time"
-                                className="w-full outline-none font-medium text-center bg-transparent"
+                                disabled={isQC}
+                                className="w-full outline-none font-medium text-center bg-transparent disabled:text-gray-700"
                                 value={sec.to}
                                 onChange={(e) =>
-                                  handleSectionMetaChange(
-                                    globalIdx,
-                                    "to",
-                                    e.target.value
-                                  )
+                                  handleSectionMetaChange(globalIdx, "to", e.target.value)
                                 }
                               />
                             </div>
@@ -1131,18 +944,16 @@ export default function ToolChangeRecord() {
                       ))}
                     </tr>
 
-                    {/* CONTROL SPEC / BEFORE / AFTER HEADER */}
+                    {/* COLUMN HEADERS */}
                     <tr className="bg-gray-100 text-gray-800 font-bold">
                       {chunk.map(({ globalIdx }) => (
                         <React.Fragment key={`subcols-${globalIdx}`}>
                           <th className="border border-gray-800 p-1.5 w-[14%]">
                             CONTROL SPEC
                           </th>
-
                           <th className="border border-gray-800 p-1.5 w-[5.5%]">
                             BEFORE
                           </th>
-
                           <th className="border border-gray-800 p-1.5 w-[5.5%]">
                             AFTER
                           </th>
@@ -1150,36 +961,21 @@ export default function ToolChangeRecord() {
                       ))}
                     </tr>
 
-                    {/* SPECIFICATION DATA ROWS */}
+                    {/* DATA ROWS */}
                     {sections[0]?.rows.map((_, rIdx) => (
-                      <tr
-                        key={`data-row-${chunkIdx}-${rIdx}`}
-                        className="h-8"
-                      >
+                      <tr key={`data-row-${chunkIdx}-${rIdx}`} className="h-8">
                         {chunk.map(({ sec, globalIdx }) => {
-                          const rowData = sec.rows[rIdx] || {
-                            nominalValue: "",
-                            operatorSymbol: "±",
-                            toleranceValue: "",
-                            controlSpec: "",
-                            before: "",
-                            after: "",
-                          };
-
+                          const rowData = sec.rows[rIdx] || {};
                           return (
-                            <React.Fragment
-                              key={`cell-${globalIdx}-${rIdx}`}
-                            >
-                              {/* CONTROL SPEC WITH DYNAMIC SYMBOL DROPDOWN */}
+                            <React.Fragment key={`cell-${globalIdx}-${rIdx}`}>
                               <td className="border border-gray-800 p-0.5">
                                 <div className="flex items-center justify-center gap-1 w-full h-full px-1">
-                                  {/* Numerical Value Before Symbol */}
                                   <input
                                     type="number"
                                     step="any"
-                                    className="w-[45%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500"
+                                    disabled={isQC}
+                                    className="w-[45%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
                                     placeholder="100.5"
-                                    aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Nominal Value`}
                                     value={rowData.nominalValue ?? ""}
                                     onChange={(e) =>
                                       handleCellChange(
@@ -1190,11 +986,9 @@ export default function ToolChangeRecord() {
                                       )
                                     }
                                   />
-
-                                  {/* Symbol Dropdown: ±, +, - */}
                                   <select
-                                    className="w-[25%] h-full text-center outline-none bg-gray-50 border border-gray-300 rounded cursor-pointer font-bold text-xs py-0.5"
-                                    aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Operator Symbol`}
+                                    disabled={isQC}
+                                    className="w-[25%] h-full text-center outline-none bg-gray-50 border border-gray-300 rounded cursor-pointer font-bold text-xs py-0.5 disabled:border-transparent disabled:bg-transparent disabled:text-gray-800"
                                     value={rowData.operatorSymbol || "±"}
                                     onChange={(e) =>
                                       handleCellChange(
@@ -1209,14 +1003,12 @@ export default function ToolChangeRecord() {
                                     <option value="+">+</option>
                                     <option value="-">-</option>
                                   </select>
-
-                                  {/* Numerical Tolerance Value After Symbol */}
                                   <input
                                     type="number"
                                     step="any"
-                                    className="w-[30%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500"
+                                    disabled={isQC}
+                                    className="w-[30%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
                                     placeholder="5.3"
-                                    aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Tolerance Value`}
                                     value={rowData.toleranceValue ?? ""}
                                     onChange={(e) =>
                                       handleCellChange(
@@ -1229,14 +1021,12 @@ export default function ToolChangeRecord() {
                                   />
                                 </div>
                               </td>
-
-                              {/* BEFORE */}
                               <td className="border border-gray-800 p-0">
                                 <input
                                   type="text"
-                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium"
+                                  disabled={isQC}
+                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
                                   placeholder="Before"
-                                  aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} Before`}
                                   value={rowData.before}
                                   onChange={(e) =>
                                     handleCellChange(
@@ -1248,14 +1038,12 @@ export default function ToolChangeRecord() {
                                   }
                                 />
                               </td>
-
-                              {/* AFTER */}
                               <td className="border border-gray-800 p-0">
                                 <input
                                   type="text"
-                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium"
+                                  disabled={isQC}
+                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
                                   placeholder="After"
-                                  aria-label={`Column ${globalIdx + 1} Row ${rIdx + 1} After`}
                                   value={rowData.after}
                                   onChange={(e) =>
                                     handleCellChange(
@@ -1273,67 +1061,115 @@ export default function ToolChangeRecord() {
                       </tr>
                     ))}
 
-                    {/* TOOL CHANGED BY */}
+                    {/* TOOL CHANGED BY (SHIFT INCHARGE APPROVAL) */}
                     <tr>
                       {chunk.map(({ sec, globalIdx }) => (
                         <React.Fragment key={`tc-sig-${globalIdx}`}>
-                          <td className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                          <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
                             TOOL CHANGED BY
                           </td>
-
                           <td
                             colSpan={2}
-                            className="border border-gray-800 p-0 text-left w-[11%]"
+                            className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
                           >
-                            <div className="flex items-center px-2 py-1 gap-1">
-                              <input
-                                type="text"
-                                className="w-full outline-none font-medium bg-transparent"
-                                placeholder="Signature"
-                                value={sec.toolChangedBy?.signature || ""}
-                                onChange={(e) =>
-                                  handleSignatureChange(
-                                    globalIdx,
-                                    "toolChangedBy",
-                                    "signature",
-                                    e.target.value
-                                  )
-                                }
-                              />
-                            </div>
+                            {sec.toolChangedBy?.signature ? (
+                              <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
+                                <span className="text-[10px] font-bold text-green-600 uppercase">
+                                  Approved By ✓
+                                </span>
+                                <span className="text-xs font-black text-gray-900 uppercase">
+                                  {sec.toolChangedBy.signature}
+                                </span>
+                              </div>
+                            ) : isShiftIncharge ? (
+                              <button
+                                type="button"
+                                onClick={() => handleApproveToolChangedBy(globalIdx)}
+                                className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider"
+                              >
+                                Approve
+                              </button>
+                            ) : (
+                              <span className="text-gray-400 text-xs italic">
+                                Pending Shift Incharge
+                              </span>
+                            )}
                           </td>
                         </React.Fragment>
                       ))}
                     </tr>
 
-                    {/* VERIFIED BY QC */}
+                    {/* VERIFIED BY QC (DROPDOWN + APPROVAL WORKFLOW) */}
                     <tr>
                       {chunk.map(({ sec, globalIdx }) => (
                         <React.Fragment key={`qc-sig-${globalIdx}`}>
-                          <td className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                          <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
                             VERIFIED BY QC
                           </td>
-
                           <td
                             colSpan={2}
-                            className="border border-gray-800 p-0 text-left w-[11%]"
+                            className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
                           >
-                            <div className="flex items-center px-2 py-1 gap-1">
-                              <input
-                                type="text"
-                                className="w-full outline-none font-medium bg-transparent"
-                                placeholder="Signature"
-                                value={sec.verifiedByQc?.signature || ""}
-                                onChange={(e) =>
-                                  handleSignatureChange(
-                                    globalIdx,
-                                    "verifiedByQc",
-                                    "signature",
-                                    e.target.value
-                                  )
-                                }
-                              />
-                            </div>
+                            {/* CASE 1: QC has already approved */}
+                            {sec.verifiedByQc?.signature ? (
+                              <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
+                                <span className="text-[10px] font-bold text-green-600 uppercase">
+                                  Approved By ✓
+                                </span>
+                                <span className="text-xs font-black text-gray-900 uppercase">
+                                  {sec.verifiedByQc.signature}
+                                </span>
+                              </div>
+                            ) : isQC ? (
+                              /* CASE 2: QC is logged in and needs to approve */
+                              <div className="flex flex-col items-center justify-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveQc(globalIdx)}
+                                  className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider"
+                                >
+                                  Approve QC
+                                </button>
+                                {sec.assignedQc && (
+                                  <span className="text-[10px] text-gray-500 font-semibold uppercase">
+                                    (Assigned: {sec.assignedQc})
+                                  </span>
+                                )}
+                              </div>
+                            ) : isShiftIncharge && !sec.toolChangedBy?.signature ? (
+                              /* CASE 3: Shift Incharge is selecting the QC before signing */
+                              <div className="flex flex-col items-center gap-1 w-full">
+                                <select
+                                  className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
+                                  value={sec.assignedQc || ""}
+                                  onChange={(e) =>
+                                    handleSectionMetaChange(globalIdx, "assignedQc", e.target.value)
+                                  }
+                                >
+                                  <option value="">-- Select QC --</option>
+                                  {qcUsers.map((qc, qIdx) => {
+                                    const uname = qc.username || qc.employeeId;
+                                    return (
+                                      <option key={`${uname}-${qIdx}`} value={uname}>
+                                        {uname.toUpperCase()} {qc.name ? `(${qc.name})` : ""}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              </div>
+                            ) : (
+                              /* CASE 4: Form submitted by Shift Incharge, awaiting QC approval */
+                              <div className="flex flex-col items-center justify-center">
+                                <span className="text-orange-600 text-xs font-bold uppercase animate-pulse">
+                                  Pending Approval
+                                </span>
+                                {sec.assignedQc && (
+                                  <span className="text-[11px] font-extrabold text-gray-800 uppercase mt-0.5">
+                                    [{sec.assignedQc}]
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </td>
                         </React.Fragment>
                       ))}
@@ -1351,26 +1187,27 @@ export default function ToolChangeRecord() {
             <span className="font-bold text-gray-800 whitespace-nowrap text-xs">
               Applicable Events:
             </span>
-
             <span className="text-xs text-gray-700">
               {formMeta.applicableEvents}
             </span>
           </div>
         </div>
 
-        {/* SAVE BUTTON */}
+        {/* Save / Submit Action Button */}
         <div className="flex justify-end gap-4 pt-4 border-t border-gray-300">
           <button
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer flex items-center gap-2"
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer flex items-center gap-2 uppercase tracking-wider text-sm"
           >
             {isSaving
               ? "SAVING..."
               : saveSuccess
               ? "SAVED ✓"
-              : "Save & Continue"}
+              : isQC
+              ? "Submit QC Approval"
+              : "Submit for QC Verification"}
           </button>
         </div>
       </div>

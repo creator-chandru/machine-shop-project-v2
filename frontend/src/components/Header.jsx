@@ -44,42 +44,33 @@ const Header = () => {
 
   const handleBack = () => {
     const path = location.pathname;
-
-    // FORM → OPERATOR DASHBOARD
-    // /operator/1/form
-    // /operator/2/form
-    // /operator/3/form
-    // etc.
-    const operatorFormPattern = /^\/operator\/[^/]+\/.+/;
-
-    if (operatorFormPattern.test(path)) {
-      const parts = path.split("/");
-      const shopId = parts[2];
-
-      navigate(`/operator/${shopId}`);
+    if(path === "/machine-shops"){
+      navigate("/");
       return;
     }
 
-    // OPERATOR DASHBOARD → MACHINE SHOP DASHBOARD
-    // /operator/1
-    // /operator/2
-    // /operator/3
-    // etc.
-    const operatorDashboardPattern = /^\/operator\/[^/]+$/;
+    // 1. FORM → DASHBOARD
+    // Matches: /shift-incharge/:shopId/:formName OR /operator/:shopId/:formName
+    const formPattern = /^\/(operator|shift-incharge)\/([^/]+)\/.+/;
+    const formMatch = path.match(formPattern);
 
-    if (operatorDashboardPattern.test(path)) {
+    if (formMatch) {
+      const [, roleSegment, shopId] = formMatch;
+      navigate(`/${roleSegment}/${shopId}`);
+      return;
+    }
+
+    // 2. DASHBOARD → MACHINE SHOPS
+    // Matches: /shift-incharge/:shopId OR /operator/:shopId
+    const dashboardPattern = /^\/(operator|shift-incharge)\/[^/]+$/;
+
+    if (dashboardPattern.test(path)) {
       navigate("/machine-shops");
       return;
     }
 
-    // MACHINE SHOP DASHBOARD → LOGIN
-    if (path === "/machine-shops") {
-      navigate("/operator");
-      return;
-    }
-
     // Fallback
-    navigate("/operator");
+    navigate("/machine-shops");
   };
 
   const userInitial = user.username ? user.username.charAt(0).toUpperCase() : "U";

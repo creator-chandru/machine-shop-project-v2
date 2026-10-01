@@ -11,13 +11,13 @@ import ProductEngineer from "./pages/ProductEngineer";
 import GM from "./pages/GM";
 import MachineShopDashboard from "./pages/MachineShopDashboard";
 import FormPlaceholder from "./pages/FormPlaceholder";
+import QC from "./pages/qc"; // <-- Import QC
 
 function App() {
   return (
     <BrowserRouter>
       <LineSetProvider>
         <Routes>
-
           <Route path="/" element={<Login />} />
 
           {/* Machine shop selection screen */}
@@ -33,9 +33,32 @@ function App() {
                   "productengineer",
                   "gm",
                   "admin",
+                  "qc",
+                  "QC",
+                  "qualitycontroller"
                 ]}
               >
                 <MachineShopDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* QC Route */}
+          <Route
+            path="/qc/:shopId"
+            element={
+              <ProtectedRoute allowedRoles={["qc", "QC", "qualitycontroller"]}>
+                <QC />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* QC Forms Route */}
+          <Route
+            path="/qc/:shopId/:formName"
+            element={
+              <ProtectedRoute allowedRoles={["qc", "QC", "qualitycontroller"]}>
+                <FormPlaceholder />
               </ProtectedRoute>
             }
           />
@@ -50,7 +73,17 @@ function App() {
             }
           />
 
-          {/* Operator dashboard for a specific machine shop */}
+          {/* Shift Incharge Forms Route */}
+          <Route
+            path="/shift-incharge/:shopId/:formName"
+            element={
+              <ProtectedRoute allowedRoles={["shiftincharge"]}>
+                <FormPlaceholder />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Operator dashboard */}
           <Route
             path="/operator/:shopId"
             element={
@@ -63,6 +96,8 @@ function App() {
                   "productengineer",
                   "gm",
                   "admin",
+                  "qc",
+                  "QC"
                 ]}
               >
                 <Operator />
@@ -70,7 +105,6 @@ function App() {
             }
           />
 
-          {/* All operator forms are handled centrally by FormPlaceholder */}
           <Route
             path="/operator/:shopId/:formName"
             element={
@@ -83,6 +117,8 @@ function App() {
                   "productengineer",
                   "gm",
                   "admin",
+                  "qc",
+                  "QC"
                 ]}
               >
                 <FormPlaceholder />
@@ -90,7 +126,6 @@ function App() {
             }
           />
 
-          {/* Added /:shopId to Hod */}
           <Route
             path="/hod/:shopId"
             element={
@@ -100,7 +135,6 @@ function App() {
             }
           />
 
-          {/* Added /:shopId to Hof */}
           <Route
             path="/hof/:shopId"
             element={
@@ -110,7 +144,6 @@ function App() {
             }
           />
 
-          {/* Added /:shopId to Product Engineer */}
           <Route
             path="/product-engineer/:shopId"
             element={
@@ -120,7 +153,6 @@ function App() {
             }
           />
 
-          {/* Added /:shopId to GM */}
           <Route
             path="/gm/:shopId"
             element={
@@ -136,7 +168,6 @@ function App() {
           />
 
           <Route path="*" element={<Login />} />
-
         </Routes>
       </LineSetProvider>
     </BrowserRouter>

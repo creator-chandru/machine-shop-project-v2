@@ -122,15 +122,13 @@ export default function PreOperationChecklist() {
 
         const token = localStorage.getItem('token');
         const headers = { Authorization: `Bearer ${token}` };
-        const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-
-        const machineRes = await fetch(`${baseUrl}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
+        const machineRes = await fetch(`${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
         if (machineRes.ok) {
           const machineData = await machineRes.json();
           setMachineDetails(machineData);
         }
 
-        const mappingRes = await fetch(`${baseUrl}/api/mappings/${shopId}/lines`, { headers });
+        const mappingRes = await fetch(`${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`, { headers });
         if (mappingRes.ok) {
           const mappingData = await mappingRes.json();
           setLineMappings(mappingData);
@@ -154,10 +152,9 @@ export default function PreOperationChecklist() {
 
       try {
         const token = localStorage.getItem('token');
-        const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
         
         const res = await fetch(
-          `${baseUrl}/api/machine-shop/${shopId}/latest-params?lineCode=${headerInfo.lineCode}&machineNo=${headerInfo.machineNo}`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/latest-params?lineCode=${headerInfo.lineCode}&machineNo=${headerInfo.machineNo}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -305,9 +302,8 @@ export default function PreOperationChecklist() {
 
     try {
       const token = localStorage.getItem('token');
-      const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-      const res = await fetch(`${baseUrl}/api/pre-operation-checklist`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/pre-operation-checklist`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -8,12 +8,12 @@ const MachineShopDashboard = () => {
 
   const user = JSON.parse(localStorage.getItem("user"));
   
-  // Safely convert to lowercase and remove spaces (e.g., "Product Engineer" -> "productengineer", "HOF" -> "hof")
+  // Safely convert to lowercase and remove spaces (e.g., "Shift Incharge" -> "shiftincharge", "HOF" -> "hof")
   const role = user?.role?.toLowerCase().replace(/\s+/g, '');
 
   const roleBasePath = {
     admin: "/admin",
-    supervisor: "/supervisor",
+    shiftincharge: "/shift-incharge",
     operator: "/operator",
     hod: "/hod",
     hof: "/hof",

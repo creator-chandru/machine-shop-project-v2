@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { LineSetProvider } from "./context/LineSetContext.jsx";
 
 import Login from "./pages/Login";
-import Supervisor from "./pages/Supervisor";
+import ShiftIncharge from "./pages/ShiftIncharge";
 import Operator from "./pages/Operator";
 import Hod from "./pages/Hod";
 import Hof from "./pages/Hof";
@@ -27,7 +27,7 @@ function App() {
               <ProtectedRoute
                 allowedRoles={[
                   "operator",
-                  "supervisor",
+                  "shiftincharge",
                   "hod",
                   "hof",
                   "productengineer",
@@ -40,12 +40,12 @@ function App() {
             }
           />
 
-          {/* Added /:shopId to Supervisor */}
+          {/* Shift Incharge Route */}
           <Route
-            path="/supervisor/:shopId"
+            path="/shift-incharge/:shopId"
             element={
-              <ProtectedRoute allowedRoles={["supervisor"]}>
-                <Supervisor />
+              <ProtectedRoute allowedRoles={["shiftincharge"]}>
+                <ShiftIncharge />
               </ProtectedRoute>
             }
           />
@@ -57,7 +57,7 @@ function App() {
               <ProtectedRoute
                 allowedRoles={[
                   "operator",
-                  "supervisor",
+                  "shiftincharge",
                   "hod",
                   "hof",
                   "productengineer",
@@ -77,7 +77,7 @@ function App() {
               <ProtectedRoute
                 allowedRoles={[
                   "operator",
-                  "supervisor",
+                  "shiftincharge",
                   "hod",
                   "hof",
                   "productengineer",

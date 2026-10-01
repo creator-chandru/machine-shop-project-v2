@@ -1,6 +1,5 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import EditPartQuantity from '../components/EditPartQuantity';
 import Header from '../components/Header'; // Assuming you have this
 import EditPartMapping from '../components/EditPartMapping';
 
@@ -15,9 +14,7 @@ const Hod = () => {
           HOD Dashboard
         </h1>
         <p className="text-gray-400 text-center mb-8">Managing Machine Shop - {shopId}</p>
-        
-        <EditPartQuantity shopId={shopId} />
-
+      
         {/* New Part Mapping Component */}
         <EditPartMapping shopId={shopId} />
       </div>

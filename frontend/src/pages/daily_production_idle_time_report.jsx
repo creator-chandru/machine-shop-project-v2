@@ -98,7 +98,6 @@ export default function DailyProductionIdleTimeReport() {
 
   const [machineShopDetails, setMachineShopDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
-  const [partQuantities, setPartQuantities] = useState([]);
   const [reportDate, setReportDate] = useState(getTodayISODate());
 
   const [isSaving, setIsSaving] = useState(false);
@@ -157,7 +156,7 @@ export default function DailyProductionIdleTimeReport() {
         const detailsData = await detailsRes.json();
         setMachineShopDetails(detailsData);
 
-        // Fetch Line Mappings
+        // Fetch Line Mappings (Includes capacities from M[ShopId]LineandPartMapping)
         const mappingRes = await fetch(
           `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
           { headers }
@@ -180,56 +179,25 @@ export default function DailyProductionIdleTimeReport() {
     }
   }, [shopId]);
 
-  useEffect(() => {
-    const fetchPartQuantities = async () => {
-      try {
-        const token = localStorage.getItem("token");
-
-        const response = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/part-quantities`,
-          {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch part quantities");
-        }
-
-        setPartQuantities(await response.json());
-      } catch (error) {
-        console.error("Error fetching part quantities:", error);
-        setPartQuantities([]);
-      }
-    };
-
-    if (shopId) {
-      fetchPartQuantities();
-    }
-  }, [shopId]);
-
-  const getPartCapacity = (partName) => {
-    const selectedPart = partQuantities.find(
-      (part) =>
-        part.partName?.trim().toLowerCase() ===
-        partName?.trim().toLowerCase()
+  // Helper to extract capacity directly from line mappings
+  const getLineCapacity = (targetLineCode) => {
+    const mapping = lineMappings.find(
+      (m) => m.lineCode?.trim().toLowerCase() === targetLineCode?.trim().toLowerCase()
     );
 
-    if (!selectedPart) return null;
+    if (!mapping) return null;
 
     return {
-      shift1: selectedPart.shift1Quantity ?? 0,
-      shift2: selectedPart.shift2Quantity ?? 0,
-      shift3: selectedPart.shift3Quantity ?? 0,
+      shift1: mapping.shift1Quantity ?? "",
+      shift2: mapping.shift2Quantity ?? "",
+      shift3: mapping.shift3Quantity ?? "",
     };
   };
 
-  // Sync with LineSetContext whenever it changes
+  // Sync with LineSetContext whenever it changes or mappings are loaded
   useEffect(() => {
-    if (lineSet?.lineCode) {
-      const capacity = getPartCapacity(lineSet.partName);
+    if (lineSet?.lineCode && lineMappings.length > 0) {
+      const capacity = getLineCapacity(lineSet.lineCode);
 
       setLineColumns((prev) => {
         if (prev.length > 0) {
@@ -245,7 +213,7 @@ export default function DailyProductionIdleTimeReport() {
         return prev;
       });
     }
-  }, [lineSet, partQuantities]);
+  }, [lineSet, lineMappings]);
 
   const lineCodes =
     lineMappings.length > 0
@@ -269,17 +237,22 @@ export default function DailyProductionIdleTimeReport() {
           machineShopDetails.find((item) => item.lineCode === val)?.partName ||
           "";
 
-        const capacity = getPartCapacity(autoPartName);
+        // Fetch capacities directly from mapping data
+        const capacity = mapping ? {
+          shift1: mapping.shift1Quantity ?? "",
+          shift2: mapping.shift2Quantity ?? "",
+          shift3: mapping.shift3Quantity ?? "",
+        } : {
+          shift1: "",
+          shift2: "",
+          shift3: "",
+        };
 
         next[colIdx] = {
           ...next[colIdx],
           lineCode: val,
           partName: autoPartName,
-          capacity: capacity || {
-            shift1: "",
-            shift2: "",
-            shift3: "",
-          },
+          capacity: capacity,
         };
 
         if (colIdx === 0 && setLineSet) {
@@ -623,7 +596,6 @@ export default function DailyProductionIdleTimeReport() {
           return;
         }
 
-        // --- NEW: Validate Total Loss against Capacity ---
         const totalLoss = parseFloat(calcTotalLoss(col, shift)) || 0;
         if (totalLoss > 0 && (!col.capacity[shift] || totalLoss > cap)) {
           triggerToast(

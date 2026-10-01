@@ -17,8 +17,12 @@ exports.getLineCodes = async (req, res) => {
         const { shopId } = req.params;
         const tableName = getMappingTableName(shopId);
         
-        // Added idSet to the SELECT query
-        const result = await sql.query(`SELECT id, lineCode, partSet, idSet FROM ${tableName} ORDER BY lineCode`);
+        // Fetch shift quantities along with the mapping
+        const result = await sql.query(`
+            SELECT id, lineCode, partSet, idSet, shift1Quantity, shift2Quantity, shift3Quantity 
+            FROM ${tableName} 
+            ORDER BY lineCode
+        `);
         res.status(200).json(result.recordset);
     } catch (error) {
         console.error('Error fetching line codes:', error);
@@ -42,8 +46,8 @@ exports.getPartSets = async (req, res) => {
 exports.updateMapping = async (req, res) => {
     try {
         const { shopId } = req.params;
-        // Extract idSet from the request body
-        const { lineCode, partSet, idSet } = req.body;
+        // Extract mapping and quantity data from the request body
+        const { lineCode, partSet, idSet, shift1Quantity, shift2Quantity, shift3Quantity } = req.body;
         
         const tableName = getMappingTableName(shopId);
         const request = new sql.Request();
@@ -51,15 +55,21 @@ exports.updateMapping = async (req, res) => {
         await request
             .input('lineCode', sql.NVarChar(50), lineCode)
             .input('partSet', sql.NVarChar(sql.MAX), partSet)
-            .input('idSet', sql.NVarChar(sql.MAX), idSet) // Bind idSet parameter
+            .input('idSet', sql.NVarChar(sql.MAX), idSet)
+            .input('s1', sql.Int, shift1Quantity || 0)
+            .input('s2', sql.Int, shift2Quantity || 0)
+            .input('s3', sql.Int, shift3Quantity || 0)
             .query(`
                 UPDATE ${tableName} 
                 SET partSet = @partSet,
-                    idSet = @idSet
+                    idSet = @idSet,
+                    shift1Quantity = @s1,
+                    shift2Quantity = @s2,
+                    shift3Quantity = @s3
                 WHERE lineCode = @lineCode
             `);
             
-        res.status(200).json({ message: "Part mapping updated successfully" });
+        res.status(200).json({ message: "Part mapping and quantities updated successfully" });
     } catch (error) {
         console.error('Error updating part mapping:', error);
         res.status(500).json({ message: "Error updating part mapping" });

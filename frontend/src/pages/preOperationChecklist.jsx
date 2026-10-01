@@ -34,10 +34,6 @@ const initialFormData = {
     { slNo: 12, label: "Double Hand switches, Limit switches, Safety sensors", unit: "", specification: "Good Working condition", specEditable: false, checkMethod: "Operate", hasSubRows: false }
   ],
 
-  signatures: {
-    roles: ["Operator", "Shift Incharge"]
-  },
-
   notes: [
     "Coolant TOP UP should be done ONLY in Ist shift. If there is any abnormalities or special requirement for coolant Top-up during OTHER SHIFTS, COOLANT COULD be Topped-up with proper approval and should be recorded in the respective LINE's LOG NOTE. After top-up, the coolant tank cover should be in closed condition.",
     "If any of the OIL Level is observed MINIMUM, then TOP UP the oil upto MIDDLE Level in the machine.",
@@ -66,12 +62,17 @@ export default function PreOperationChecklist() {
   
   const [headerInfo, setHeaderInfo] = useState({ ...initialFormData.header });
   const [values, setValues] = useState({});
-  const [signatures, setSignatures] = useState({});
   const [specifications, setSpecifications] = useState({});
+  
+  // State for signatures
+  const [signatures, setSignatures] = useState({});
   
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
+
+  // Get current logged in user name for auto-approval
+  const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
@@ -86,13 +87,11 @@ export default function PreOperationChecklist() {
   // DYNAMIC RENDER-TIME VALIDATION
   // ==========================================================
   const getValidationError = (slNo) => {
-    // Only validate the first 3 rows
     if (![1, 2, 3].includes(slNo)) return null;
     
     const val = values[slNo];
-    if (!val) return null; // No error if the input is empty
+    if (!val) return null;
 
-    // Get spec from state, or fallback to initial data
     const spec = specifications[slNo] !== undefined 
       ? specifications[slNo] 
       : initialFormData.parameters.find(p => p.slNo === slNo)?.specification;
@@ -102,7 +101,6 @@ export default function PreOperationChecklist() {
     const parsedVal = parseFloat(val);
     if (isNaN(parsedVal)) return null;
 
-    // Extract min and max from formats like "40-50"
     const rangeMatch = spec.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
     if (rangeMatch) {
       const min = parseFloat(rangeMatch[1]);
@@ -148,7 +146,7 @@ export default function PreOperationChecklist() {
   }, [shopId]);
 
   // ==========================================================
-  // AUTO-FILL LATEST MACHINE PARAMETERS (slNo: 1, 2, 3, 4) - SPECIFICATIONS ONLY
+  // AUTO-FILL LATEST MACHINE PARAMETERS (slNo: 1, 2, 3, 4)
   // ==========================================================
   useEffect(() => {
     const fetchLatestParams = async () => {
@@ -225,6 +223,7 @@ export default function PreOperationChecklist() {
 
     setValues({});
     setSpecifications({});
+    setSignatures({}); // Reset signatures on line change
 
     setLineSet({
       machineShop: shopId,
@@ -258,8 +257,13 @@ export default function PreOperationChecklist() {
     });
   };
 
-  const handleSignatureChange = (role, val) => {
-    setSignatures((prev) => ({ ...prev, [role]: val }));
+  // Button handler for auto-assigning the logged-in user to the signatures
+  const handleApproveSignatures = () => {
+    setSignatures({
+      "Operator": currentUser,
+      "Shift Incharge": currentUser
+    });
+    triggerToast("Form approved successfully", "success");
   };
 
   const handleSave = async () => {
@@ -268,10 +272,15 @@ export default function PreOperationChecklist() {
       return;
     }
 
-    // Block saving if there are active validation errors calculated directly
     const hasErrors = [1, 2, 3].some(slNo => getValidationError(slNo) !== null);
     if (hasErrors) {
       triggerToast("Please fix the value ranges before saving.", "error");
+      return;
+    }
+
+    // Ensure signatures are filled before saving
+    if (!signatures["Operator"] || !signatures["Shift Incharge"]) {
+      triggerToast("Please click 'Approve' to sign the form before saving.", "error");
       return;
     }
 
@@ -459,7 +468,6 @@ export default function PreOperationChecklist() {
             <tbody>
               {initialFormData.parameters.map((param) => {
                 
-                // Fetch potential dynamic validation error for this row
                 const errorMsg = getValidationError(param.slNo);
 
                 if (param.hasSubRows) {
@@ -536,7 +544,6 @@ export default function PreOperationChecklist() {
                             value={cellValue} 
                             onChange={(e) => handleValueChange(param.slNo, null, e.target.value)} 
                           />
-                          {/* Render Error Message matching your image */}
                           {errorMsg && (
                             <span className="text-red-500 text-xs font-bold w-full text-left pl-1">
                               {errorMsg}
@@ -549,14 +556,35 @@ export default function PreOperationChecklist() {
                 );
               })}
 
-              {initialFormData.signatures.roles.map((role) => (
-                <tr key={`sig-${role}`}>
-                  <td colSpan={6} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">{role} Signature</td>
-                  <td className="border border-gray-800 p-0">
-                    <input type="text" className="w-full h-full text-center outline-none bg-transparent py-2 font-medium" value={signatures[role] || ''} onChange={(e) => handleSignatureChange(role, e.target.value)} />
-                  </td>
-                </tr>
-              ))}
+              {/* Operator Signature Row */}
+              <tr>
+                <td colSpan={6} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Operator Signature
+                </td>
+                <td rowSpan={2} className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
+                  {signatures["Operator"] ? (
+                    <div className="flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
+                      <span className="text-xs font-bold text-green-600 mb-1">Approved By ✓</span>
+                      <span className="text-sm font-black text-gray-900 uppercase">{signatures["Operator"]}</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleApproveSignatures}
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest"
+                    >
+                      Approve
+                    </button>
+                  )}
+                </td>
+              </tr>
+
+              {/* Shift Incharge Signature Row */}
+              <tr>
+                <td colSpan={6} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Shift Incharge Signature
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -570,7 +598,12 @@ export default function PreOperationChecklist() {
         </div>
 
         <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
-          <button type="button" onClick={handleSave} disabled={isSaving || saveSuccess} className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer">
+          <button 
+            type="button" 
+            onClick={handleSave} 
+            disabled={isSaving || saveSuccess} 
+            className="bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer uppercase tracking-wider text-sm"
+          >
             {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & CONTINUE"}
           </button>
         </div>

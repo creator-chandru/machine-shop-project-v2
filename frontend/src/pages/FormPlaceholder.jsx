@@ -13,6 +13,7 @@ import BreakdownIntimationServiceReport from "./breakdown_intimation_service_rep
 import SkillEvaluationPractical from "./skillEvaluationPractical";
 import OperatorObservationSheet from "./operatorObservationSheet";
 import CompetencyEvaluationForm from "./competencyEvaluationForm";
+import CorrectiveActionRegister from "./corrective_action_register";
 /**
  * Central map for operator forms
  *
@@ -45,7 +46,8 @@ const formMap = {
 
    "operator-observation-sheet": <OperatorObservationSheet />,
    
-   "competency-evaluation-form": <CompetencyEvaluationForm />
+   "competency-evaluation-form": <CompetencyEvaluationForm />,
+   "corrective-action-register":<CorrectiveActionRegister />
   // Future forms:
   // "some-form": <SomeForm />,
 };

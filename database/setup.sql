@@ -421,3 +421,69 @@ CREATE TABLE BreakdownIntimationReport (
         CHECK (machineShop IN (1, 2, 3, 4, 5))
 );
 GO
+USE MachineShop;
+GO
+
+-- ============================================
+-- CorrectiveActionRegister
+-- ============================================
+
+DROP TABLE IF EXISTS CorrectiveActionRegister;
+GO
+
+CREATE TABLE CorrectiveActionRegister
+(
+    id INT IDENTITY(1,1) PRIMARY KEY,
+
+    -- Machine / Shop information
+    machineShop INT NOT NULL,
+    lineCode NVARCHAR(100) NOT NULL,
+
+    -- Register information
+    recordDate DATE NOT NULL,
+    partName NVARCHAR(200),
+    problemDescription NVARCHAR(MAX),
+
+    -- Problem category
+    problemCategory NVARCHAR(10) NOT NULL,
+
+    -- Quantity affected
+    quantity INT NOT NULL DEFAULT 1,
+
+    -- Analysis
+    rootCause NVARCHAR(MAX),
+    correctiveAction NVARCHAR(MAX),
+
+    -- Result
+    result NVARCHAR(50),
+
+    -- Approval / signature
+    operatorSignature NVARCHAR(100),
+    shiftInchargeSignature NVARCHAR(100),
+
+    -- Record information
+    createdAt DATETIME DEFAULT GETDATE(),
+    updatedAt DATETIME NULL,
+
+    CONSTRAINT CK_CorrectiveActionRegister_MachineShop
+        CHECK (machineShop IN (1, 2, 3, 4, 5)),
+
+    CONSTRAINT CK_CorrectiveActionRegister_Category
+        CHECK (problemCategory IN ('A', 'B', 'C', 'D', 'E')),
+
+    CONSTRAINT CK_CorrectiveActionRegister_Quantity
+        CHECK (quantity > 0)
+);
+GO
+
+CREATE INDEX IX_CorrectiveActionRegister_LineCode
+ON CorrectiveActionRegister(lineCode);
+GO
+
+CREATE INDEX IX_CorrectiveActionRegister_Date
+ON CorrectiveActionRegister(recordDate);
+GO
+
+CREATE INDEX IX_CorrectiveActionRegister_LineDate
+ON CorrectiveActionRegister(lineCode, recordDate);
+GO

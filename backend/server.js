@@ -18,6 +18,7 @@ const partMappingRoutes = require("./routes/partMappingRoutes.js");
 const operatorObservationSheetRoutes = require("./routes/operatorObservationSheetRouter.js");
 const skillEvaluationPracticalRoutes = require("./routes/skillEvaluationPractical.js");
 const competencyEvaluationFormRoutes = require("./routes/competencyEvaluationFormRoutes.js");
+const correctiveActionRoutes = require("./routes/correction_action_register.js");
 const app = express();
 
 app.use(cors({
@@ -46,7 +47,7 @@ app.use('/api', skillEvaluationPracticalRoutes);
 app.use('/api', competencyEvaluationFormRoutes);
 app.use('/api/parts', partQtyRoutes);
 app.use('/api/mappings', partMappingRoutes);
-
+app.use('/api/corrective-actions', correctiveActionRoutes);
 
 
 const PORT = process.env.PORT || 5000;

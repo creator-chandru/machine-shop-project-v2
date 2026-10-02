@@ -106,6 +106,9 @@ export default function AirGapSensorCheckSheet() {
   // Toast state
   const [toast, setToast] = useState({ message: '', type: '' });
 
+  // Get current logged in user name for auto-approval
+  const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
+
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
     setTimeout(() => {
@@ -813,19 +816,34 @@ export default function AirGapSensorCheckSheet() {
                     <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
                       Line Incharge Signature
                     </td>
-                    {SHIFTS.map((shift) => (
-                      <td key={`line-sign-${bIdx}-${shift}`} className="border border-gray-800 p-0">
-                        <input
-                          type="text"
-                          className="w-full h-full text-center px-2 outline-none bg-transparent py-2 font-medium"
-                          aria-label={`Block ${bIdx + 1} Line Incharge Signature Shift ${shift}`}
-                          placeholder="Sign"
-                          value={block.lineInchargeSignatures[headerInfo.date]?.[shift] || ""}
-                          onChange={(e) => handleLineInchargeSignChange(bIdx, shift, e.target.value)}
-                          disabled={lockedShifts[shift]}
-                        />
-                      </td>
-                    ))}
+                    {SHIFTS.map((shift) => {
+                      const currentSign = block.lineInchargeSignatures[headerInfo.date]?.[shift] || "";
+                      const isLocked = lockedShifts[shift];
+
+                      return (
+                        <td key={`line-sign-${bIdx}-${shift}`} className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
+                          {currentSign ? (
+                            <div className="flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
+                              <span className="text-[10px] font-bold text-green-600 mb-0.5">Approved ✓</span>
+                              <span className="text-xs font-black text-gray-900 uppercase">{currentSign}</span>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleLineInchargeSignChange(bIdx, shift, currentUser)}
+                              disabled={isLocked}
+                              className={`text-[10px] font-bold px-3 py-1.5 rounded shadow transition-all uppercase tracking-widest ${
+                                isLocked 
+                                  ? 'bg-gray-400 text-white cursor-not-allowed' 
+                                  : 'bg-orange-500 hover:bg-orange-600 text-white hover:scale-105'
+                              }`}
+                            >
+                              Approve
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 </React.Fragment>
               ))}

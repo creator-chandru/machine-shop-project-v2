@@ -44,7 +44,7 @@ const QC = () => {
     fetchPendingReports();
   }, [shopId]);
 
-  // Open Full-screen split review modal with complete data preview
+// Open Full-screen split review modal with complete data preview
   const handleOpenReviewModal = async (report) => {
     setSelectedReport(report);
     setPdfUrl(null);
@@ -77,19 +77,39 @@ const QC = () => {
       // Generate jsPDF Preview
       const doc = new jsPDF("l", "mm", "a4");
 
-      doc.setLineWidth(0.3);
-      doc.rect(10, 10, 40, 20);
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text("SAKTHI", 30, 18, { align: "center" });
-      doc.text("AUTO", 30, 26, { align: "center" });
+      // --- ASYNC LOGO LOADING ---
+      const img = new Image();
+      img.src = "/logo.jpg"; // Must be placed inside the frontend 'public' folder
+      
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve; // Continue generating PDF even if logo is missing
+      });
 
+      doc.setLineWidth(0.3);
+      doc.rect(10, 10, 40, 20); // Logo Box
+      
+      // Render Logo if loaded, otherwise fallback to text
+      if (img.width > 0) {
+        // x: 12, y: 12, w: 36, h: 16 (fits nicely with 2mm padding inside the 40x20 box)
+        doc.addImage(img, "JPEG", 12, 12, 36, 16);
+      } else {
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("SAKTHI", 30, 18, { align: "center" });
+        doc.text("AUTO", 30, 26, { align: "center" });
+      }
+
+      // Title Box
       doc.rect(50, 10, 180, 20);
       doc.setFontSize(16);
+      doc.setFont("helvetica", "bold"); // Made title bold for a better look
       doc.text("TOOL CHANGE RECORD", 140, 22, { align: "center" });
 
+      // Line Code & Date Box
       doc.rect(230, 10, 57, 20);
       doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
       doc.text(report.lineCode, 258.5, 16, { align: "center" });
       doc.line(230, 20, 287, 20);
       doc.setFontSize(10);
@@ -120,26 +140,32 @@ const QC = () => {
 
       if (tableBody.length === 0) {
         tableBody.push([
-          report.lineCode,
-          report.partName || "-",
-          "-",
-          "-",
-          report.machineNo || "-",
-          "I",
-          "-",
-          "-",
-          "-",
-          "-"
+          report.lineCode, report.partName || "-", "-", "-", report.machineNo || "-", "I", "-", "-", "-", "-"
         ]);
       }
 
+      // --- IMPROVED TEXT FORMATTING FOR TABLE ---
       autoTable(doc, {
         startY: 35,
         head: tableHead,
         body: tableBody,
         theme: "grid",
-        styles: { fontSize: 7, cellPadding: 2, halign: "center", valign: "middle" },
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" },
+        styles: { 
+          fontSize: 8, // Increased font size for readability
+          cellPadding: 3, // Increased padding so text doesn't touch borders
+          halign: "center", 
+          valign: "middle",
+          lineColor: [0, 0, 0], // Crisp black borders
+          lineWidth: 0.2
+        },
+        headStyles: { 
+          fillColor: [220, 220, 220], // Softer header gray
+          textColor: [0, 0, 0], 
+          fontStyle: "bold" 
+        },
+        alternateRowStyles: {
+          fillColor: [252, 252, 252] // Slight contrast for rows
+        }
       });
 
       const finalY = doc.lastAutoTable.finalY + 12;

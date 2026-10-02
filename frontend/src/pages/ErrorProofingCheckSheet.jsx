@@ -84,6 +84,9 @@ export default function ErrorProofingCheckSheet() {
     type: ''
   });
 
+  // Get current logged in user name for auto-approval
+  const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
+
   const triggerToast = (message, type = 'error') => {
     setToast({
       message,
@@ -248,13 +251,6 @@ export default function ErrorProofingCheckSheet() {
 
   // ==========================================================
   // LINE CODE CHANGE
-  //
-  // Line Code automatically fills:
-  // Part Name
-  // Part No
-  //
-  // Machine No is cleared from the HEADER context.
-  // Individual row machine numbers are NOT changed.
   // ==========================================================
   const handleLineChange = (lineCode) => {
     const mapping = lineMappings.find(
@@ -271,6 +267,9 @@ export default function ErrorProofingCheckSheet() {
       partNo: autoPartNo,
       machineNo: ""
     }));
+    
+    // Clear signatures when line changes
+    setSignatures({});
 
     setLineSet({
       machineShop: shopId,
@@ -282,31 +281,7 @@ export default function ErrorProofingCheckSheet() {
   };
 
   // ==========================================================
-  // HEADER MACHINE CHANGE
-  //
-  // This is only for LineSetContext/header.
-  // It does NOT control the machine number inside table rows.
-  // ==========================================================
-  const handleMachineChange = (machineNo) => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      machineNo
-    }));
-
-    setLineSet({
-      machineShop: shopId,
-      lineCode: headerInfo.lineCode,
-      partName: headerInfo.partName,
-      partNo: headerInfo.partNo,
-      machineNo
-    });
-  };
-
-  // ==========================================================
   // ROW CHANGE
-  //
-  // Each row is updated independently.
-  // Changing one row will NOT affect another row.
   // ==========================================================
   const handleRowChange = (rowIdx, field, val) => {
     setRows((prev) => {
@@ -322,13 +297,14 @@ export default function ErrorProofingCheckSheet() {
   };
 
   // ==========================================================
-  // SIGNATURE CHANGE
+  // SIGNATURE APPROVAL
   // ==========================================================
-  const handleSignatureChange = (role, val) => {
-    setSignatures((prev) => ({
-      ...prev,
-      [role]: val
-    }));
+  const handleApproveSignatures = () => {
+    setSignatures({
+      "Operator": currentUser,
+      "Shift Incharge": currentUser
+    });
+    triggerToast("Form approved successfully", "success");
   };
 
   // ==========================================================
@@ -356,6 +332,12 @@ export default function ErrorProofingCheckSheet() {
   // SAVE
   // ==========================================================
   const handleSave = async () => {
+    // Validate signatures
+    if (!signatures["Operator"] || !signatures["Shift Incharge"]) {
+      triggerToast("Please click 'Approve' to sign the form before saving.", "error");
+      return;
+    }
+
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -368,9 +350,7 @@ export default function ErrorProofingCheckSheet() {
         partNo: headerInfo.partNo,
         machineNo: headerInfo.machineNo
       },
-
       rows,
-
       signatures
     };
 
@@ -381,12 +361,10 @@ export default function ErrorProofingCheckSheet() {
         `${process.env.REACT_APP_API_URL}/api/error-proofing-checksheet`,
         {
           method: 'POST',
-
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-
           body: JSON.stringify(payload)
         }
       );
@@ -394,8 +372,6 @@ export default function ErrorProofingCheckSheet() {
       if (!res.ok) {
         throw new Error('Save failed');
       }
-
-      const data = await res.json();
 
       // Update LineSetContext with latest selection
       setLineSet({
@@ -424,7 +400,6 @@ export default function ErrorProofingCheckSheet() {
 
     } catch (err) {
       console.error('Save error:', err);
-
       setIsSaving(false);
 
       triggerToast(
@@ -695,27 +670,11 @@ export default function ErrorProofingCheckSheet() {
             <thead className="bg-gray-100 text-gray-800 font-bold">
 
               <tr>
-
-                <th className="border border-gray-800 p-2 w-16">
-                  Sl No
-                </th>
-
-                <th className="border border-gray-800 p-2 w-40">
-                  Machine No
-                </th>
-
-                <th className="border border-gray-800 p-2 w-44">
-                  Error Proof No
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3">
-                  Error Proof Name
-                </th>
-
-                <th className="border border-gray-800 p-2 w-48">
-                  Value
-                </th>
-
+                <th className="border border-gray-800 p-2 w-16">Sl No</th>
+                <th className="border border-gray-800 p-2 w-40">Machine No</th>
+                <th className="border border-gray-800 p-2 w-44">Error Proof No</th>
+                <th className="border border-gray-800 p-2 text-left px-3">Error Proof Name</th>
+                <th className="border border-gray-800 p-2 w-48">Value</th>
               </tr>
 
             </thead>
@@ -724,7 +683,6 @@ export default function ErrorProofingCheckSheet() {
 
               {/* ==================================================
                   CHECKSHEET ROWS
-                  Each row has independent machineNo
                   ================================================== */}
 
               {rows.map((row, rIdx) => (
@@ -846,42 +804,32 @@ export default function ErrorProofingCheckSheet() {
               {/* ==================================================
                   SIGNATURE ROWS
                   ================================================== */}
-
-              {initialFormData.signatures.roles.map(
-                (role) => (
-
-                  <tr key={`sig-${role}`}>
-
-                    <td
-                      colSpan={4}
-                      className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700"
+              <tr>
+                <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Operator Signature
+                </td>
+                <td rowSpan={2} className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
+                  {signatures["Operator"] ? (
+                    <div className="flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
+                      <span className="text-xs font-bold text-green-600 mb-1">Approved By ✓</span>
+                      <span className="text-sm font-black text-gray-900 uppercase">{signatures["Operator"]}</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleApproveSignatures}
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest"
                     >
-                      {role} Signature
-                    </td>
-
-                    <td className="border border-gray-800 p-0">
-
-                      <input
-                        type="text"
-                        className="w-full h-full text-center outline-none bg-transparent py-2 font-medium"
-                        aria-label={`${role} Signature`}
-                        value={
-                          signatures[role] || ''
-                        }
-                        onChange={(e) =>
-                          handleSignatureChange(
-                            role,
-                            e.target.value
-                          )
-                        }
-                      />
-
-                    </td>
-
-                  </tr>
-
-                )
-              )}
+                      Approve
+                    </button>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Shift Incharge Signature
+                </td>
+              </tr>
 
             </tbody>
 
@@ -919,7 +867,7 @@ export default function ErrorProofingCheckSheet() {
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer"
+            className="bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer uppercase tracking-wider text-sm"
           >
 
             {isSaving

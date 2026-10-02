@@ -575,9 +575,8 @@ export default function ToolChangeRecord() {
     });
   };
 
-  // PDF Download / Preview
-    // PDF Download / Preview (same layout the QC sees while approving)
-  const handleDownloadPdf = () => {
+// PDF Download / Preview (same layout the QC sees while approving)
+  const handleDownloadPdf = async () => {
     // Only available for dates/lines that already have a saved record
     if (!isSavedRecord) {
       triggerToast("No saved record found for this date. Submit the form first to preview.", "error");
@@ -592,19 +591,36 @@ export default function ToolChangeRecord() {
         return new Date(dateStr).toLocaleDateString("en-GB");
       };
 
+      // --- ASYNC LOGO LOADING ---
+      const img = new Image();
+      img.src = "/logo.jpg"; // Must be in the React 'public' folder
+      
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve; // Prevent crashing if the logo fails to load
+      });
+
       doc.setLineWidth(0.3);
       doc.rect(10, 10, 40, 20);
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text("SAKTHI", 30, 18, { align: "center" });
-      doc.text("AUTO", 30, 26, { align: "center" });
+      
+      // Render Logo if loaded, otherwise fallback to text
+      if (img.width > 0) {
+        doc.addImage(img, "JPEG", 12, 12, 36, 16);
+      } else {
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("SAKTHI", 30, 18, { align: "center" });
+        doc.text("AUTO", 30, 26, { align: "center" });
+      }
 
       doc.rect(50, 10, 180, 20);
       doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
       doc.text("TOOL CHANGE RECORD", 140, 22, { align: "center" });
 
       doc.rect(230, 10, 57, 20);
       doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
       doc.text(headerInfo.lineCode || "ALL LINES", 258.5, 16, { align: "center" });
       doc.line(230, 20, 287, 20);
       doc.setFontSize(10);
@@ -638,16 +654,7 @@ export default function ToolChangeRecord() {
 
       if (tableBody.length === 0) {
         tableBody.push([
-          headerInfo.lineCode || "-",
-          headerInfo.partName || "-",
-          "-",
-          "-",
-          headerInfo.machineNo || "-",
-          "I",
-          "-",
-          "-",
-          "-",
-          "-",
+          headerInfo.lineCode || "-", headerInfo.partName || "-", "-", "-", headerInfo.machineNo || "-", "I", "-", "-", "-", "-",
         ]);
       }
 
@@ -656,8 +663,22 @@ export default function ToolChangeRecord() {
         head: tableHead,
         body: tableBody,
         theme: "grid",
-        styles: { fontSize: 7, cellPadding: 2, halign: "center", valign: "middle" },
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" },
+        styles: { 
+          fontSize: 8, 
+          cellPadding: 3, 
+          halign: "center", 
+          valign: "middle",
+          lineColor: [0, 0, 0], 
+          lineWidth: 0.2
+        },
+        headStyles: { 
+          fillColor: [220, 220, 220], 
+          textColor: [0, 0, 0], 
+          fontStyle: "bold" 
+        },
+        alternateRowStyles: {
+          fillColor: [252, 252, 252]
+        }
       });
 
       let finalY = doc.lastAutoTable.finalY + 12;

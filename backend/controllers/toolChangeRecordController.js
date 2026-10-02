@@ -523,16 +523,25 @@ const generateReport = async (req, res) => {
         res.setHeader("Content-Disposition", "inline; filename=Tool_Change_Record.pdf");
         doc.pipe(res);
 
-        const startX = 25;
+const startX = 25;
         const headerY = 25;
         const totalWidth = doc.page.width - 50;
 
         doc.lineWidth(1);
         doc.rect(startX, headerY, 100, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
+        
+        // --- ADD LOGO FOR PDFKIT ---
+        const logoPath = path.join(__dirname, 'logo.jpg'); // Points to the logo in the controller folder
+        if (fs.existsSync(logoPath)) {
+            // Centers the image inside the 100x35 box (adjust dimensions if needed)
+            doc.image(logoPath, startX + 10, headerY + 5, { width: 80, height: 25 });
+        } else {
+            // Fallback text if logo is missing
+            doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
+        }
 
         doc.rect(startX + 100, headerY, totalWidth - 250, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(13).text("TOOL CHANGE RECORD", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("TOOL CHANGE RECORD", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });
 
         doc.rect(startX + totalWidth - 150, headerY, 150, 35).stroke();
         doc.font("Helvetica-Bold").fontSize(9).text(`Line: ${lineCode || records[0].lineCode}`, startX + totalWidth - 150, headerY + 6, { width: 150, align: "center" });

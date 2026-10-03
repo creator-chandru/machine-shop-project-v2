@@ -489,28 +489,46 @@ const generateReport = async (req, res) => {
     try {
         const { lineCode, date, machineNo, shopId } = req.query;
 
-        const request = new sql.Request();
-        let query = `SELECT * FROM ToolChangeRecord WHERE 1=1`;
+        if (!lineCode || !date) {
+            return res.status(400).send("lineCode and date are required.");
+        }
 
-        if (lineCode) {
-            request.input('lineCode', sql.NVarChar(100), lineCode);
-            query += ` AND lineCode = @lineCode`;
+        let cleanDate = String(date).split('T')[0];
+        if (cleanDate.includes('/')) {
+            const p = cleanDate.split('/');
+            cleanDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
         }
-        if (date) {
-            let cleanDate = String(date).split('T')[0];
-            if (cleanDate.includes('/')) {
-                const p = cleanDate.split('/');
-                cleanDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-            }
-            request.input('checkDate', sql.NVarChar(50), cleanDate);
-            query += ` AND (CONVERT(date, checkDate) = CONVERT(date, @checkDate) OR FORMAT(checkDate, 'yyyy-MM-dd') = @checkDate)`;
-        }
+
+        const request = new sql.Request();
+        request.input('lineCode', sql.NVarChar(100), lineCode);
+        request.input('checkDate', sql.NVarChar(50), cleanDate);
+
+        let query = `
+            SELECT
+                id, machineShop, lineCode, partName, partNo, partTraceability, toolDescription,
+                machineNo, opNo,
+                FORMAT(checkDate, 'yyyy-MM-dd') AS checkDate,
+                shift,
+                CONVERT(VARCHAR(5), fromTime, 108) AS fromTime,
+                CONVERT(VARCHAR(5), toTime, 108) AS toTime,
+                slNo, controlSpec, beforeValue, afterValue,
+                toolChangedBySignature, verifiedByQcSignature, assignedQc
+            FROM ToolChangeRecord
+            WHERE lineCode = @lineCode
+              AND CONVERT(date, checkDate) = CONVERT(date, @checkDate)
+        `;
+
         if (machineNo) {
             request.input('machineNo', sql.NVarChar(100), machineNo);
             query += ` AND machineNo = @machineNo`;
         }
+        if (shopId && !isNaN(parseInt(shopId, 10))) {
+            request.input('machineShop', sql.Int, parseInt(shopId, 10));
+            query += ` AND machineShop = @machineShop`;
+        }
 
-        query += ` ORDER BY shift ASC, slNo ASC`;
+        query += ` ORDER BY id ASC`;
+
         const result = await request.query(query);
         const records = result.recordset;
 
@@ -518,66 +536,132 @@ const generateReport = async (req, res) => {
             return res.status(404).send("No records found for the selected parameters.");
         }
 
+        const first = records[0];
+        const [yy, mm, dd] = String(first.checkDate).split('-');
+        const displayDate = `${dd}/${mm}/${yy}`;
+
         const doc = new PDFDocument({ margin: 25, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", "inline; filename=Tool_Change_Record.pdf");
         doc.pipe(res);
 
-const startX = 25;
+        const startX = 25;
         const headerY = 25;
         const totalWidth = doc.page.width - 50;
+        const pageBottom = doc.page.height - 25;
 
-        doc.lineWidth(1);
+        // ---------- Header ----------
+        doc.lineWidth(1).strokeColor('black');
         doc.rect(startX, headerY, 100, 35).stroke();
-        
-        // --- ADD LOGO FOR PDFKIT ---
-        const logoPath = path.join(__dirname, 'logo.jpg'); // Points to the logo in the controller folder
-        if (fs.existsSync(logoPath)) {
-            // Centers the image inside the 100x35 box (adjust dimensions if needed)
-            doc.image(logoPath, startX + 10, headerY + 5, { width: 80, height: 25 });
-        } else {
-            // Fallback text if logo is missing
-            doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
-        }
+        doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
 
         doc.rect(startX + 100, headerY, totalWidth - 250, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("TOOL CHANGE RECORD", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(13).text("TOOL CHANGE RECORD", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });
 
         doc.rect(startX + totalWidth - 150, headerY, 150, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(9).text(`Line: ${lineCode || records[0].lineCode}`, startX + totalWidth - 150, headerY + 6, { width: 150, align: "center" });
-        doc.font("Helvetica").fontSize(8).text(`Date: ${records[0].checkDate ? new Date(records[0].checkDate).toLocaleDateString('en-GB') : '-'}`, startX + totalWidth - 150, headerY + 20, { width: 150, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(9).text(lineCode, startX + totalWidth - 150, headerY + 6, { width: 150, align: "center" });
+        doc.font("Helvetica").fontSize(8).text(`DATE: ${displayDate}`, startX + totalWidth - 150, headerY + 20, { width: 150, align: "center" });
 
-        const sigY = doc.page.height - 70;
-        doc.font("Helvetica-Bold").fontSize(9).fillColor('black');
+        // ---------- Table ----------
+        const headers = ["Line Code", "Part Name", "Traceability", "Tool Description", "M/C No", "Shift", "Time", "Control Spec", "Before", "After"];
+        const fractions = [0.07, 0.11, 0.10, 0.15, 0.07, 0.04, 0.09, 0.13, 0.12, 0.12];
+        const colWidths = fractions.map((f) => f * totalWidth);
+        const pad = 4;
+        const fontSize = 7;
 
-        doc.text("Tool Changed By (Shift Incharge)", startX + 20, sigY);
+        const drawRow = (cells, y, isHeader) => {
+            doc.font(isHeader ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
+
+            let rowH = 0;
+            cells.forEach((c, i) => {
+                const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 });
+                if (h > rowH) rowH = h;
+            });
+            rowH += pad * 2;
+
+            if (!isHeader && y + rowH > pageBottom) {
+                doc.addPage();
+                y = 25;
+                y = drawRow(headers, y, true);
+                doc.font("Helvetica").fontSize(fontSize);
+            }
+
+            let x = startX;
+            cells.forEach((c, i) => {
+                if (isHeader) {
+                    doc.rect(x, y, colWidths[i], rowH).fillAndStroke('#f0f0f0', 'black');
+                } else {
+                    doc.rect(x, y, colWidths[i], rowH).stroke();
+                }
+                doc.fillColor('black').font(isHeader ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize)
+                    .text(String(c), x + pad, y + pad, { width: colWidths[i] - pad * 2, align: "center" });
+                x += colWidths[i];
+            });
+
+            return y + rowH;
+        };
+
+        doc.lineWidth(0.5).strokeColor('black');
+        let y = drawRow(headers, headerY + 35 + 10, true);
+
+        records.forEach((r) => {
+            const controlSpec = r.controlSpec || "-";
+            const time = (r.fromTime || r.toTime) ? `${r.fromTime || ""} - ${r.toTime || ""}` : "-";
+            y = drawRow([
+                r.lineCode || "-",
+                r.partName || "-",
+                r.partTraceability || "-",
+                r.toolDescription || "-",
+                r.machineNo || "-",
+                r.shift || "I",
+                time,
+                controlSpec,
+                r.beforeValue || "-",
+                r.afterValue || "-"
+            ], y, false);
+        });
+
+        // ---------- Signatures ----------
+        let sigY = y + 18;
+        if (sigY + 50 > pageBottom) {
+            doc.addPage();
+            sigY = 30;
+        }
+
+        doc.lineWidth(0.5).strokeColor('black');
+        doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Tool Changed By (Shift Incharge)", startX + 20, sigY, { lineBreak: false });
         doc.rect(startX + 20, sigY + 12, 180, 30).stroke();
 
-        const opSig = records[0].toolChangedBySignature;
-        if (opSig === "Approved" || opSig === "APPROVED" || (opSig && !opSig.includes('Pending'))) {
+        const opSig = first.toolChangedBySignature;
+        if (opSig && !String(opSig).includes('Pending')) {
             doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(startX + 40, sigY + 28).lineTo(startX + 44, sigY + 33).lineTo(startX + 52, sigY + 21).stroke();
-            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(10).text(`APPROVED (${opSig})`, startX + 58, sigY + 23);
+            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(9).text(`APPROVED (${opSig})`, startX + 58, sigY + 23, { lineBreak: false });
         } else {
-            doc.fillColor('red').font('Helvetica').fontSize(9).text("Pending Approval", startX + 60, sigY + 23);
+            doc.fillColor('red').font('Helvetica').fontSize(9).text("Pending", startX + 60, sigY + 23, { lineBreak: false });
         }
 
         const qcX = startX + totalWidth - 220;
-        doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Verified By QC", qcX, sigY);
+        doc.strokeColor('black').lineWidth(0.5);
+        doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Verified By QC", qcX, sigY, { lineBreak: false });
         doc.rect(qcX, sigY + 12, 180, 30).stroke();
 
-        const qcSig = records[0].verifiedByQcSignature;
-        const assignedQc = records[0].assignedQc || 'QC';
-        if (qcSig === "Approved" || qcSig === "APPROVED" || (qcSig && !qcSig.includes('Pending'))) {
+        const qcSig = first.verifiedByQcSignature;
+        const assignedQc = first.assignedQc || 'QC';
+        if (qcSig && !String(qcSig).includes('Pending')) {
             doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(qcX + 20, sigY + 28).lineTo(qcX + 24, sigY + 33).lineTo(qcX + 32, sigY + 21).stroke();
-            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(10).text(`APPROVED BY ${qcSig.toUpperCase()}`, qcX + 38, sigY + 23);
+            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(9).text(`APPROVED BY ${String(qcSig).toUpperCase()}`, qcX + 38, sigY + 23, { lineBreak: false });
         } else {
-            doc.fillColor('red').font('Helvetica-Bold').fontSize(9).text(`Pending [${assignedQc.toUpperCase()}]`, qcX + 40, sigY + 23);
+            doc.fillColor('red').font('Helvetica-Bold').fontSize(9).text(`Pending [${String(assignedQc).toUpperCase()}]`, qcX + 40, sigY + 23, { lineBreak: false });
         }
 
         doc.end();
     } catch (err) {
         console.error("PDF generation error:", err);
-        res.status(500).json({ message: "PDF generation failed" });
+        if (!res.headersSent) {
+            res.status(500).json({ message: "PDF generation failed" });
+        } else {
+            res.end();
+        }
     }
 };
 

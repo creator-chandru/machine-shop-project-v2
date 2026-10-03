@@ -44,7 +44,7 @@ const QC = () => {
     fetchPendingReports();
   }, [shopId]);
 
-// Open Full-screen split review modal with complete data preview
+  // Open Full-screen split review modal with the backend-generated PDF
   const handleOpenReviewModal = async (report) => {
     setSelectedReport(report);
     setPdfUrl(null);
@@ -63,158 +63,21 @@ const QC = () => {
       }
 
       const token = localStorage.getItem("token");
+      const params = new URLSearchParams({
+        lineCode: report.lineCode,
+        date: isoDate,
+        shopId: String(report.machineShop || shopId || 3),
+      });
+
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record?lineCode=${encodeURIComponent(
-          report.lineCode
-        )}&date=${encodeURIComponent(isoDate)}`,
+        `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/report?${params.toString()}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      const recordsData = await res.json();
-      const currentRecord = Array.isArray(recordsData) && recordsData.length > 0 ? recordsData[0] : null;
-      const sections = currentRecord?.sections || [];
+      if (!res.ok) throw new Error("Report request failed");
 
-      // Generate jsPDF Preview
-      const doc = new jsPDF("l", "mm", "a4");
-
-      // --- ASYNC LOGO LOADING ---
-      const img = new Image();
-      img.src = "/logo.jpg"; // Must be placed inside the frontend 'public' folder
-      
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve; // Continue generating PDF even if logo is missing
-      });
-
-      doc.setLineWidth(0.3);
-      doc.rect(10, 10, 40, 20); // Logo Box
-      
-      // Render Logo if loaded, otherwise fallback to text
-      if (img.width > 0) {
-        // x: 12, y: 12, w: 36, h: 16 (fits nicely with 2mm padding inside the 40x20 box)
-        doc.addImage(img, "JPEG", 12, 12, 36, 16);
-      } else {
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.text("SAKTHI", 30, 18, { align: "center" });
-        doc.text("AUTO", 30, 26, { align: "center" });
-      }
-
-      // Title Box
-      doc.rect(50, 10, 180, 20);
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold"); // Made title bold for a better look
-      doc.text("TOOL CHANGE RECORD", 140, 22, { align: "center" });
-
-      // Line Code & Date Box
-      doc.rect(230, 10, 57, 20);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text(report.lineCode, 258.5, 16, { align: "center" });
-      doc.line(230, 20, 287, 20);
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text(`DATE: ${formatDate(isoDate)}`, 258.5, 26, { align: "center" });
-
-      const tableHead = [
-        ["Line Code", "Part Name", "Traceability", "Tool Description", "M/C No", "Shift", "Time", "Control Spec", "Before", "After"]
-      ];
-
-      const tableBody = [];
-      sections.forEach((sec) => {
-        (sec.rows || []).forEach((row) => {
-          tableBody.push([
-            report.lineCode,
-            currentRecord?.header?.partName || report.partName || "-",
-            sec.partTraceability || "-",
-            sec.toolDescription || "-",
-            sec.mcNo || currentRecord?.header?.machineNo || report.machineNo || "-",
-            sec.shift || "I",
-            (sec.from || sec.to) ? `${sec.from || ""} - ${sec.to || ""}` : "-",
-            row.controlSpec || (row.nominalValue ? `${row.nominalValue} ${row.operatorSymbol || "±"} ${row.toleranceValue || ""}` : "-"),
-            row.before || row.beforeValue || "-",
-            row.after || row.afterValue || "-"
-          ]);
-        });
-      });
-
-      if (tableBody.length === 0) {
-        tableBody.push([
-          report.lineCode, report.partName || "-", "-", "-", report.machineNo || "-", "I", "-", "-", "-", "-"
-        ]);
-      }
-
-      // --- IMPROVED TEXT FORMATTING FOR TABLE ---
-      autoTable(doc, {
-        startY: 35,
-        head: tableHead,
-        body: tableBody,
-        theme: "grid",
-        styles: { 
-          fontSize: 8, // Increased font size for readability
-          cellPadding: 3, // Increased padding so text doesn't touch borders
-          halign: "center", 
-          valign: "middle",
-          lineColor: [0, 0, 0], // Crisp black borders
-          lineWidth: 0.2
-        },
-        headStyles: { 
-          fillColor: [220, 220, 220], // Softer header gray
-          textColor: [0, 0, 0], 
-          fontStyle: "bold" 
-        },
-        alternateRowStyles: {
-          fillColor: [252, 252, 252] // Slight contrast for rows
-        }
-      });
-
-      const finalY = doc.lastAutoTable.finalY + 12;
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "bold");
-
-      // Shift Incharge Sign Box
-      doc.text("Tool Changed By (Shift Incharge)", 20, finalY);
-      doc.rect(20, finalY + 3, 60, 15);
-      const opSig = sections[0]?.toolChangedBy?.signature || report.toolChangedBySignature || "Approved";
-      if (opSig) {
-        doc.setDrawColor(0, 128, 0);
-        doc.setLineWidth(0.5);
-        doc.line(23, finalY + 11, 26, finalY + 14);
-        doc.line(26, finalY + 14, 32, finalY + 7);
-        doc.setDrawColor(0, 0, 0);
-
-        doc.setFontSize(7);
-        doc.setTextColor(0, 128, 0);
-        doc.text(`APPROVED (${opSig})`, 35, finalY + 12);
-        doc.setTextColor(0, 0, 0);
-      }
-
-      // QC Sign Box
-      const qcX = 180;
-      doc.text("Verified By QC", qcX, finalY);
-      doc.rect(qcX, finalY + 3, 80, 15);
-
-      const qcSig = sections[0]?.verifiedByQc?.signature || report.verifiedByQcSignature;
-      if (qcSig && qcSig !== "Pending") {
-        doc.setDrawColor(0, 128, 0);
-        doc.setLineWidth(0.5);
-        doc.line(qcX + 3, finalY + 11, qcX + 6, finalY + 14);
-        doc.line(qcX + 6, finalY + 14, qcX + 12, finalY + 7);
-        doc.setDrawColor(0, 0, 0);
-
-        doc.setFontSize(7);
-        doc.setTextColor(0, 128, 0);
-        doc.text(`APPROVED BY ${qcSig.toUpperCase()}`, qcX + 15, finalY + 12);
-        doc.setTextColor(0, 0, 0);
-      } else {
-        doc.setFontSize(8);
-        doc.setTextColor(200, 0, 0);
-        doc.text(`Pending [${currentQC.toUpperCase()}]`, qcX + 15, finalY + 12);
-        doc.setTextColor(0, 0, 0);
-      }
-
-      const pdfBlobUrl = doc.output("bloburl");
-      setPdfUrl(pdfBlobUrl);
+      const blob = await res.blob();
+      setPdfUrl(URL.createObjectURL(blob));
     } catch (err) {
       toast.error("Failed to generate report preview.");
     }

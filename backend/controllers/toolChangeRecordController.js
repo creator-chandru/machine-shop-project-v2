@@ -553,7 +553,13 @@ const generateReport = async (req, res) => {
         // ---------- Header ----------
         doc.lineWidth(1).strokeColor('black');
         doc.rect(startX, headerY, 100, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
+        
+        const logoPath = path.join(__dirname, 'logo.jpg');
+        if (fs.existsSync(logoPath)) {
+            doc.image(logoPath, startX + 10, headerY + 5, { width: 80, height: 25 });
+        } else {
+            doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
+        }
 
         doc.rect(startX + 100, headerY, totalWidth - 250, 35).stroke();
         doc.font("Helvetica-Bold").fontSize(13).text("TOOL CHANGE RECORD", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });

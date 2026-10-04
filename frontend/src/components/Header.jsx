@@ -56,7 +56,13 @@ const Header = () => {
 
     if (formMatch) {
       const [, roleSegment, shopId] = formMatch;
-      navigate(`/${roleSegment}/${shopId}`);
+
+      // Operator dashboard has been scrapped.
+      // Redirect old operator form routes to shift-incharge dashboard.
+      const dashboardRole =
+        roleSegment === "operator" ? "shift-incharge" : roleSegment;
+
+      navigate(`/${dashboardRole}/${shopId}`);
       return;
     }
 

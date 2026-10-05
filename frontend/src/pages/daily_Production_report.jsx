@@ -87,9 +87,16 @@ export default function DailyProductionReport() {
     currentUserRole === "operator" ||
     currentUserRole === "";
   const isQC = currentUserRole === "qc" || currentUserRole === "qualitycontroller";
-  const isHOF = currentUserRole === "hof" || currentUserRole === "headfacility" || currentUserRole === "headofproduction";
+  const isPE =
+    currentUserRole === "pe" ||
+    currentUserRole === "productengineer" ||
+    currentUserRole === "productionengineer";
+  const isHOF =
+    currentUserRole === "hof" ||
+    currentUserRole === "headfacility" ||
+    currentUserRole === "headofproduction";
 
-  const isReadOnlyApprover = isQC || isHOF;
+  const isReadOnlyApprover = isQC || isPE || isHOF;
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -98,6 +105,7 @@ export default function DailyProductionReport() {
   const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
   const [qcUsers, setQcUsers] = useState([]);
+  const [peUsers, setPeUsers] = useState([]);
   const [hofUsers, setHofUsers] = useState([]);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
 
@@ -127,6 +135,7 @@ export default function DailyProductionReport() {
     partNo: "",
     partTraceabilityMachining: "",
     assignedQc: "",
+    assignedPe: "",
     assignedHof: "",
   });
 
@@ -160,6 +169,7 @@ export default function DailyProductionReport() {
         partNo: record.header.partNo || "",
         partTraceabilityMachining: record.header.partTraceabilityMachining || "",
         assignedQc: record.header.assignedQc || "",
+        assignedPe: record.header.assignedPe || "",
         assignedHof: record.header.assignedHof || "",
       });
     }
@@ -178,7 +188,7 @@ export default function DailyProductionReport() {
     }
   };
 
-  // Fetch QC and HOF list for dropdowns
+  // Fetch QC, PE, and HOF lists for dropdowns
   useEffect(() => {
     const fetchApprovers = async () => {
       try {
@@ -197,6 +207,18 @@ export default function DailyProductionReport() {
           setQcUsers([{ name: "qc", username: "qc" }, { name: "qc1", username: "qc1" }]);
         }
 
+        // PE List
+        const peRes = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/pe-incharges`,
+          { headers }
+        );
+        if (peRes.ok) {
+          const data = await peRes.json();
+          setPeUsers(data.peList || []);
+        } else {
+          setPeUsers([{ name: "pe", username: "pe" }]);
+        }
+
         // HOF List
         const hofRes = await fetch(
           `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/hof-incharges`,
@@ -210,6 +232,7 @@ export default function DailyProductionReport() {
         }
       } catch (err) {
         setQcUsers([{ name: "qc", username: "qc" }, { name: "qc1", username: "qc1" }]);
+        setPeUsers([{ name: "pe", username: "pe" }]);
         setHofUsers([{ name: "hof", username: "hof" }]);
       }
     };
@@ -444,11 +467,6 @@ export default function DailyProductionReport() {
     });
   };
 
-  const handleSignatureChange = (field, val) => {
-    if (isReadOnlyApprover) return;
-    setSignatures((prev) => ({ ...prev, [field]: val }));
-  };
-
   const currentPartNameNo =
     header.partName && header.partNo ? `${header.partName} / ${header.partNo}` : "";
 
@@ -490,6 +508,23 @@ export default function DailyProductionReport() {
       shiftSupervisorQuality: currentUsername,
     }));
     triggerToast("QC Verification Approved!", "success");
+  };
+
+  // PE Approves "Production Engineer"
+  const handleApprovePe = () => {
+    if (!isPE) {
+      triggerToast("Only Production Engineer can approve this record.", "error");
+      return;
+    }
+    if (header.assignedPe && header.assignedPe.toLowerCase() !== currentUsername.toLowerCase()) {
+      triggerToast(`Assigned to PE: ${header.assignedPe.toUpperCase()}`, "error");
+      return;
+    }
+    setSignatures((prev) => ({
+      ...prev,
+      productionEngineer: currentUsername,
+    }));
+    triggerToast("Production Engineer Approved!", "success");
   };
 
   // HOF Approves "HOF - Production"
@@ -563,6 +598,10 @@ export default function DailyProductionReport() {
         triggerToast("Please select a QC in 'SHIFT SUPERVISOR (QUALITY)'.", "error");
         return;
       }
+      if (!header.assignedPe) {
+        triggerToast("Please select a PE in 'PRODUCTION ENGINEER'.", "error");
+        return;
+      }
       if (!header.assignedHof) {
         triggerToast("Please select a HOF in 'HOF - PRODUCTION'.", "error");
         return;
@@ -571,6 +610,11 @@ export default function DailyProductionReport() {
 
     if (isQC && (!signatures.shiftSupervisorQuality || signatures.shiftSupervisorQuality === "Pending")) {
       triggerToast("Please click 'Approve QC' before completing verification.", "error");
+      return;
+    }
+
+    if (isPE && (!signatures.productionEngineer || signatures.productionEngineer === "Pending")) {
+      triggerToast("Please click 'Approve PE' before completing verification.", "error");
       return;
     }
 
@@ -598,9 +642,10 @@ export default function DailyProductionReport() {
       signatures: {
         ...signatures,
         shiftSupervisorQuality: isQC ? currentUsername : signatures.shiftSupervisorQuality || "Pending",
+        productionEngineer: isPE ? currentUsername : signatures.productionEngineer || "Pending",
         hofProduction: isHOF ? currentUsername : signatures.hofProduction || "Pending",
       },
-      status: (signatures.shiftSupervisorQuality && signatures.hofProduction) ? "Completed" : "Submitted",
+      status: (signatures.shiftSupervisorQuality && signatures.productionEngineer && signatures.hofProduction) ? "Completed" : "Submitted",
     };
 
     try {
@@ -638,6 +683,8 @@ export default function DailyProductionReport() {
       navigate(
         isQC
           ? `/qc/${shopId || 3}`
+          : isPE
+          ? `/production-engineer/${shopId || 3}`
           : isHOF
           ? `/hof/${shopId || 3}`
           : `/operator/${shopId || 3}/daily-production-idle-time-report`
@@ -661,6 +708,12 @@ export default function DailyProductionReport() {
       signatures.shiftSupervisorQuality !== ""
   );
 
+  const isPeApproved = Boolean(
+    signatures.productionEngineer &&
+      signatures.productionEngineer !== "Pending" &&
+      signatures.productionEngineer !== ""
+  );
+
   const isHofApproved = Boolean(
     signatures.hofProduction &&
       signatures.hofProduction !== "Pending" &&
@@ -682,9 +735,11 @@ export default function DailyProductionReport() {
                 <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
                 <p className="text-gray-500 mt-2">
                   {isShiftIncharge
-                    ? "Submitting for QC & HOF Verification"
+                    ? "Submitting for QC, PE & HOF Verification"
                     : isQC
                     ? "Completing QC Verification"
+                    : isPE
+                    ? "Completing PE Verification"
                     : "Completing HOF Approval"}
                 </p>
               </>
@@ -709,6 +764,8 @@ export default function DailyProductionReport() {
                   navigate(
                     isQC
                       ? `/qc/${shopId || 3}`
+                      : isPE
+                      ? `/production-engineer/${shopId || 3}`
                       : isHOF
                       ? `/hof/${shopId || 3}`
                       : `/shift-incharge/${shopId || 3}`
@@ -1146,15 +1203,61 @@ export default function DailyProductionReport() {
                 </td>
 
                 {/* 3. Production Engineer */}
-                <td className="border border-gray-800 p-2">
-                  <input
-                    type="text"
-                    disabled={isReadOnlyApprover}
-                    placeholder="Sign / Name"
-                    className="w-full h-full text-center outline-none font-medium bg-transparent px-2 disabled:text-gray-700"
-                    value={signatures.productionEngineer}
-                    onChange={(e) => handleSignatureChange("productionEngineer", e.target.value)}
-                  />
+                <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
+                  {isPeApproved ? (
+                    <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
+                      <span className="text-[10px] font-bold text-green-600 uppercase">
+                        Approved By ✓
+                      </span>
+                      <span className="text-xs font-black text-gray-900 uppercase">
+                        approved by {signatures.productionEngineer}
+                      </span>
+                    </div>
+                  ) : isPE ? (
+                    <div className="flex flex-col items-center justify-center gap-1">
+                      <button
+                        type="button"
+                        onClick={handleApprovePe}
+                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                      >
+                        Approve PE
+                      </button>
+                      {header.assignedPe && (
+                        <span className="text-[10px] text-gray-500 font-semibold uppercase">
+                          (Assigned: {header.assignedPe})
+                        </span>
+                      )}
+                    </div>
+                  ) : isSavedRecord ? (
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="text-red-600 text-xs font-bold uppercase">
+                        pending
+                      </span>
+                      {header.assignedPe && (
+                        <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
+                          (Assigned: {header.assignedPe})
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 w-full">
+                      <select
+                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
+                        value={header.assignedPe || ""}
+                        onChange={(e) => handleHeaderChange("assignedPe", e.target.value)}
+                      >
+                        <option value="">-- Select PE --</option>
+                        {peUsers.map((pe, pIdx) => {
+                          const uname = pe.username || pe.employeeId || pe.name;
+                          return (
+                            <option key={`${uname}-${pIdx}`} value={uname}>
+                              {uname.toUpperCase()}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  )}
                 </td>
 
                 {/* 4. HOF - Production */}
@@ -1233,6 +1336,8 @@ export default function DailyProductionReport() {
               ? "SAVED ✓"
               : isQC
               ? "Submit QC Approval"
+              : isPE
+              ? "Submit PE Approval"
               : isHOF
               ? "Submit HOF Approval"
               : "Submit for Verification"}

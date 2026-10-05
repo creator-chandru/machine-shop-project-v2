@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
-import { RefreshCw, Loader, X, FileText, Activity, Clock } from "lucide-react";
+import { RefreshCw, Loader, X, FileText, Activity, Clock, FileSpreadsheet } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -9,7 +9,7 @@ const ProductEngineer = () => {
   const navigate = useNavigate();
   const { shopId } = useParams();
 
-  const [activeTab, setActiveTab] = useState("airgap"); // "airgap" | "idletime"
+  const [activeTab, setActiveTab] = useState("airgap"); // "airgap" | "idletime" | "dailyproduction"
 
   // Air Gap reports
   const [pendingAirGapReports, setPendingAirGapReports] = useState([]);
@@ -17,9 +17,12 @@ const ProductEngineer = () => {
   // Idle Time reports
   const [pendingIdleTimeReports, setPendingIdleTimeReports] = useState([]);
 
+  // Daily Production reports
+  const [pendingDailyProdReports, setPendingDailyProdReports] = useState([]);
+
   // Modal review state
   const [selectedReport, setSelectedReport] = useState(null);
-  const [reviewReportType, setReviewReportType] = useState(null); // "airgap" | "idletime"
+  const [reviewReportType, setReviewReportType] = useState(null); // "airgap" | "idletime" | "dailyproduction"
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
 
@@ -65,9 +68,27 @@ const ProductEngineer = () => {
     }
   };
 
+  // Fetch pending Daily Production Reports
+  const fetchPendingDailyProdReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/pe/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingDailyProdReports(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending Daily Production Reports.");
+    }
+  };
+
   const fetchAllReports = () => {
     fetchPendingAirGapReports();
     fetchPendingIdleTimeReports();
+    fetchPendingDailyProdReports();
   };
 
   useEffect(() => {
@@ -93,14 +114,34 @@ const ProductEngineer = () => {
           shopId: String(report.machineShop || shopId || 3),
         });
         apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/report?${params.toString()}`;
-      } else {
-        // Daily Production Idle Time Report
+      } else if (type === "idletime") {
         const params = new URLSearchParams({
           lineCode: report.lineCode,
           date: report.reportDate,
           shopId: String(report.machineShop || shopId || 3),
         });
         apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/report?${params.toString()}`;
+      } else {
+        // Daily Production Report
+        const rawDate = report.reportDate || report.checkDate;
+        let isoDate = rawDate;
+        if (rawDate && rawDate.includes("/")) {
+          const parts = rawDate.split("/");
+          if (parts.length === 3) {
+            isoDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+          }
+        } else if (rawDate && rawDate.includes("T")) {
+          isoDate = rawDate.split("T")[0];
+        }
+
+        const params = new URLSearchParams({
+          lineCode: report.lineCode,
+          date: isoDate,
+          shopId: String(report.machineShop || shopId || 3),
+        });
+        if (report.shift) params.append("shift", report.shift);
+
+        apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/report?${params.toString()}`;
       }
 
       const res = await fetch(apiUrl, {
@@ -141,13 +182,32 @@ const ProductEngineer = () => {
           date: selectedReport.reportDate,
           signature: currentPE,
         };
-      } else {
+      } else if (reviewReportType === "idletime") {
         endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/pe/sign`;
         payload = {
           lineCode: selectedReport.lineCode,
           date: selectedReport.reportDate,
           machineShop: selectedReport.machineShop || shopId || 3,
           signature: currentPE,
+        };
+      } else {
+        // Daily Production Report
+        const rawDate = selectedReport.reportDate || selectedReport.checkDate;
+        let isoDate = rawDate;
+        if (rawDate && rawDate.includes("/")) {
+          const parts = rawDate.split("/");
+          if (parts.length === 3) {
+            isoDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+          }
+        }
+
+        endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-pe`;
+        payload = {
+          lineCode: selectedReport.lineCode,
+          date: isoDate,
+          shift: selectedReport.shift || "I",
+          signature: currentPE,
+          peUsername: currentPE,
         };
       }
 
@@ -165,7 +225,9 @@ const ProductEngineer = () => {
       const successMsg =
         reviewReportType === "airgap"
           ? "Air Gap Checksheet verified and approved successfully!"
-          : "Daily Production & Idle Time Report verified and approved successfully!";
+          : reviewReportType === "idletime"
+          ? "Daily Production & Idle Time Report verified and approved successfully!"
+          : "Daily Production Report verified and approved successfully!";
 
       toast.success(successMsg, { autoClose: 2000 });
 
@@ -214,7 +276,7 @@ const ProductEngineer = () => {
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex border-b border-gray-200 mb-6 gap-2">
+          <div className="flex border-b border-gray-200 mb-6 gap-2 flex-wrap">
             <button
               onClick={() => setActiveTab("airgap")}
               className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
@@ -233,6 +295,23 @@ const ProductEngineer = () => {
             </button>
 
             <button
+              onClick={() => setActiveTab("dailyproduction")}
+              className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
+                activeTab === "dailyproduction"
+                  ? "border-green-600 text-green-600 bg-green-50/50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Daily Production Reports</span>
+              {pendingDailyProdReports.length > 0 && (
+                <span className="bg-green-600 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                  {pendingDailyProdReports.length}
+                </span>
+              )}
+            </button>
+
+            <button
               onClick={() => setActiveTab("idletime")}
               className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
                 activeTab === "idletime"
@@ -241,7 +320,7 @@ const ProductEngineer = () => {
               }`}
             >
               <Clock className="w-4 h-4" />
-              <span>Daily Production & Idle Time Reports</span>
+              <span>Idle Time Reports</span>
               {pendingIdleTimeReports.length > 0 && (
                 <span className="bg-orange-500 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
                   {pendingIdleTimeReports.length}
@@ -308,7 +387,73 @@ const ProductEngineer = () => {
             </div>
           )}
 
-          {/* TAB 2: Daily Production & Idle Time Reports */}
+          {/* TAB 2: Daily Production Reports */}
+          {activeTab === "dailyproduction" && (
+            <div>
+              {pendingDailyProdReports.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                  <FileSpreadsheet className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                  <p className="text-gray-500 font-semibold">No Daily Production Reports pending your review.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300 w-16 text-center">ID</th>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Line Code</th>
+                        <th className="p-3 border border-gray-300">Shift</th>
+                        <th className="p-3 border border-gray-300">Part Details</th>
+                        <th className="p-3 border border-gray-300">Shift Incharge</th>
+                        <th className="p-3 border border-gray-300 text-center">Status</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingDailyProdReports.map((report) => (
+                        <tr key={`dp-${report.id}`} className="hover:bg-green-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
+                            #{report.id}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold text-green-700">
+                            {report.lineCode}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">
+                            {report.shift || "I"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.shiftInchargeName || "Shift Incharge"}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <span className="bg-red-100 text-red-700 px-2.5 py-1 rounded-full text-xs font-bold">
+                              Pending PE Approval
+                            </span>
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report, "dailyproduction")}
+                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Verify
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: Daily Production & Idle Time Reports */}
           {activeTab === "idletime" && (
             <div>
               {pendingIdleTimeReports.length === 0 ? (
@@ -376,12 +521,22 @@ const ProductEngineer = () => {
               <h3 className="font-bold text-lg sm:text-xl uppercase tracking-wider">
                 {reviewReportType === "airgap"
                   ? "Verify Air Gap Checksheet"
+                  : reviewReportType === "dailyproduction"
+                  ? "Verify Daily Production Report"
                   : "Verify Daily Production & Idle Time Report"}
               </h3>
               <span className={`text-[11px] font-extrabold px-3 py-1 rounded-full uppercase ${
-                reviewReportType === "airgap" ? "bg-blue-600" : "bg-orange-500"
+                reviewReportType === "airgap"
+                  ? "bg-blue-600"
+                  : reviewReportType === "dailyproduction"
+                  ? "bg-green-600"
+                  : "bg-orange-500"
               }`}>
-                {reviewReportType === "airgap" ? "Air Gap Checksheet" : "Idle Time Report"}
+                {reviewReportType === "airgap"
+                  ? "Air Gap Checksheet"
+                  : reviewReportType === "dailyproduction"
+                  ? "Daily Production Report"
+                  : "Idle Time Report"}
               </span>
             </div>
             <button
@@ -417,6 +572,8 @@ const ProductEngineer = () => {
                 <div className={`p-4 rounded-xl border mb-6 text-sm flex flex-col gap-2.5 shadow-sm ${
                   reviewReportType === "airgap"
                     ? "bg-blue-50 border-blue-200 text-blue-900"
+                    : reviewReportType === "dailyproduction"
+                    ? "bg-green-50 border-green-200 text-green-950"
                     : "bg-orange-50 border-orange-200 text-orange-950"
                 }`}>
                   <h4 className="font-black text-base uppercase border-b pb-2">
@@ -426,7 +583,7 @@ const ProductEngineer = () => {
                     <span className="font-bold">Line Code:</span> {selectedReport.lineCode}
                   </p>
                   <p>
-                    <span className="font-bold">Part Name:</span> {selectedReport.partName || "N/A"}
+                    <span className="font-bold">Part Details:</span> {selectedReport.partName || "N/A"}
                   </p>
                   {selectedReport.partNo && (
                     <p>
@@ -436,6 +593,11 @@ const ProductEngineer = () => {
                   <p>
                     <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate)}
                   </p>
+                  {selectedReport.shift && (
+                    <p>
+                      <span className="font-bold">Shift:</span> {selectedReport.shift}
+                    </p>
+                  )}
                   <p>
                     <span className="font-bold">Machine Shop:</span> MS-{selectedReport.machineShop || shopId || 3}
                   </p>

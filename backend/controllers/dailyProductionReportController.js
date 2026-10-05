@@ -115,7 +115,30 @@ const getIncharges = async (req, res) => {
 };
 
 // ============================================================
-// 3. GET HOF INCHARGES LIST
+// 3. GET PE INCHARGES LIST
+// ============================================================
+const getPeIncharges = async (req, res) => {
+  try {
+    const peRes = await sql.query`
+      SELECT username AS name, username, employeeId 
+      FROM dbo.MachineShopUsers 
+      WHERE LOWER(role) IN ('pe', 'productengineer', 'productionengineer') 
+      ORDER BY username ASC
+    `;
+
+    const list = peRes.recordset.length > 0 
+      ? peRes.recordset 
+      : [{ name: 'pe', username: 'pe', employeeId: 'pe' }];
+
+    return res.status(200).json({ peList: list });
+  } catch (err) {
+    console.error('Error fetching PE incharges:', err);
+    return res.status(500).json({ error: 'Failed to fetch PE list' });
+  }
+};
+
+// ============================================================
+// 4. GET HOF INCHARGES LIST
 // ============================================================
 const getHofIncharges = async (req, res) => {
   try {
@@ -138,7 +161,7 @@ const getHofIncharges = async (req, res) => {
 };
 
 // ============================================================
-// 4. GET MACHINE SHOP DETAILS DYNAMICALLY
+// 5. GET MACHINE SHOP DETAILS DYNAMICALLY
 // ============================================================
 const getMachineShopDetails = async (req, res) => {
   const { shopId } = req.params;
@@ -157,7 +180,7 @@ const getMachineShopDetails = async (req, res) => {
 };
 
 // ============================================================
-// 5. SAVE DAILY PRODUCTION REPORT
+// 6. SAVE DAILY PRODUCTION REPORT
 // ============================================================
 const saveDailyProductionReport = async (req, res) => {
   const { header, rows, signatures, status } = req.body;
@@ -173,6 +196,7 @@ const saveDailyProductionReport = async (req, res) => {
     const shift = header?.shift || 'I';
     const shiftInchargeName = header?.shiftInchargeName || '';
     const assignedQc = header?.assignedQc || '';
+    const assignedPe = header?.assignedPe || '';
     const assignedHof = header?.assignedHof || '';
 
     let partTraceabilityMachining = header?.partTraceabilityMachining || '';
@@ -181,6 +205,7 @@ const saveDailyProductionReport = async (req, res) => {
     }
 
     const qcSignature = signatures?.shiftSupervisorQuality || '';
+    const peSignature = signatures?.productionEngineer || '';
     const hofSignature = signatures?.hofProduction || '';
 
     // Clear previous unverified draft rows
@@ -195,8 +220,11 @@ const saveDailyProductionReport = async (req, res) => {
           AND lineCode = @lineCode
           AND CONVERT(date, ReportDate) = CONVERT(date, @ReportDate)
           AND Shift = @Shift
-          AND (Sign_SupervisorQuality IS NULL OR Sign_SupervisorQuality = '' OR Sign_SupervisorQuality = 'Pending'
-               OR Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending')
+          AND (
+            Sign_SupervisorQuality IS NULL OR Sign_SupervisorQuality = '' OR Sign_SupervisorQuality = 'Pending'
+            OR Sign_ProductionEngineer IS NULL OR Sign_ProductionEngineer = '' OR Sign_ProductionEngineer = 'Pending'
+            OR Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending'
+          )
       `);
 
     for (const row of rows) {
@@ -227,9 +255,10 @@ const saveDailyProductionReport = async (req, res) => {
 
         .input('Sign_SupervisorProduction', sql.NVarChar(100), signatures?.shiftSupervisorProduction || '')
         .input('Sign_SupervisorQuality', sql.NVarChar(100), qcSignature)
-        .input('Sign_ProductionEngineer', sql.NVarChar(100), signatures?.productionEngineer || '')
+        .input('Sign_ProductionEngineer', sql.NVarChar(100), peSignature)
         .input('Sign_HOFProduction', sql.NVarChar(100), hofSignature)
         .input('assignedQc', sql.NVarChar(100), assignedQc)
+        .input('assignedPe', sql.NVarChar(100), assignedPe)
         .input('assignedHof', sql.NVarChar(100), assignedHof)
         .query(`
           INSERT INTO DailyProductionReport (
@@ -260,7 +289,7 @@ const saveDailyProductionReport = async (req, res) => {
 };
 
 // ============================================================
-// 6. GET QC PENDING DAILY PRODUCTION REPORTS
+// 7. GET QC PENDING DAILY PRODUCTION REPORTS
 // ============================================================
 const getQcReports = async (req, res) => {
   try {
@@ -286,6 +315,7 @@ const getQcReports = async (req, res) => {
         Shift AS shift,
         MAX(ShiftInchargeName) AS shiftInchargeName,
         MAX(Sign_SupervisorQuality) AS verifiedByQcSignature,
+        MAX(Sign_ProductionEngineer) AS peSignature,
         MAX(Sign_HOFProduction) AS hofSignature,
         'Pending' AS status
       FROM DailyProductionReport
@@ -303,7 +333,51 @@ const getQcReports = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET HOF PENDING DAILY PRODUCTION REPORTS
+// 8. GET PE PENDING DAILY PRODUCTION REPORTS
+// ============================================================
+const getPeReports = async (req, res) => {
+  try {
+    const { name } = req.params;
+    const shopId = req.query.shopId;
+
+    const request = new sql.Request();
+    request.input('peName', sql.NVarChar(100), String(name || '').trim());
+
+    let shopFilter = '';
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      shopFilter = ' AND MachineShop = @machineShop';
+    }
+
+    const result = await request.query(`
+      SELECT 
+        MIN(Id) AS id,
+        MachineShop AS machineShop,
+        lineCode,
+        MAX(PartNameNo) AS partName,
+        FORMAT(ReportDate, 'yyyy-MM-dd') AS reportDate,
+        Shift AS shift,
+        MAX(ShiftInchargeName) AS shiftInchargeName,
+        MAX(Sign_SupervisorQuality) AS verifiedByQcSignature,
+        MAX(Sign_ProductionEngineer) AS peSignature,
+        MAX(Sign_HOFProduction) AS hofSignature,
+        'Pending' AS status
+      FROM DailyProductionReport
+      WHERE (Sign_ProductionEngineer IS NULL OR Sign_ProductionEngineer = '' OR Sign_ProductionEngineer = 'Pending')
+        ${shopFilter}
+      GROUP BY MachineShop, lineCode, ReportDate, Shift
+      ORDER BY ReportDate DESC, MIN(Id) DESC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error('PE Daily Production Dashboard Fetch Error:', err);
+    return res.status(500).json({ message: 'DB error' });
+  }
+};
+
+// ============================================================
+// 9. GET HOF PENDING DAILY PRODUCTION REPORTS
 // ============================================================
 const getHofReports = async (req, res) => {
   try {
@@ -329,6 +403,7 @@ const getHofReports = async (req, res) => {
         Shift AS shift,
         MAX(ShiftInchargeName) AS shiftInchargeName,
         MAX(Sign_SupervisorQuality) AS verifiedByQcSignature,
+        MAX(Sign_ProductionEngineer) AS peSignature,
         MAX(Sign_HOFProduction) AS hofSignature,
         'Pending' AS status
       FROM DailyProductionReport
@@ -346,7 +421,7 @@ const getHofReports = async (req, res) => {
 };
 
 // ============================================================
-// 8. POST QC APPROVAL SIGNATURE
+// 10. POST QC APPROVAL SIGNATURE
 // ============================================================
 const signQcApproval = async (req, res) => {
   try {
@@ -391,7 +466,52 @@ const signQcApproval = async (req, res) => {
 };
 
 // ============================================================
-// 9. POST HOF APPROVAL SIGNATURE
+// 11. POST PE APPROVAL SIGNATURE
+// ============================================================
+const signPeApproval = async (req, res) => {
+  try {
+    const { lineCode, date, shift, signature, peUsername } = req.body;
+
+    if (!lineCode || !date) {
+      return res.status(400).json({ message: 'Missing lineCode or date' });
+    }
+
+    const signVal = signature || peUsername || 'Approved';
+    let cleanDate = String(date).split('T')[0];
+
+    const request = new sql.Request();
+    request.input('lineCode', sql.NVarChar(50), lineCode);
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('signature', sql.NVarChar(100), signVal);
+
+    let shiftFilter = '';
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      shiftFilter = ' AND Shift = @shift';
+    }
+
+    const result = await request.query(`
+      UPDATE DailyProductionReport 
+      SET Sign_ProductionEngineer = @signature
+      WHERE lineCode = @lineCode 
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+        AND (Sign_ProductionEngineer IS NULL OR Sign_ProductionEngineer = '' OR Sign_ProductionEngineer = 'Pending')
+        ${shiftFilter}
+    `);
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: 'No pending records found for PE approval' });
+    }
+
+    return res.status(200).json({ success: true, message: 'Daily Production Report approved by PE successfully!' });
+  } catch (err) {
+    console.error('Sign PE Error:', err);
+    return res.status(500).json({ message: 'Failed to approve report' });
+  }
+};
+
+// ============================================================
+// 12. POST HOF APPROVAL SIGNATURE
 // ============================================================
 const signHofApproval = async (req, res) => {
   try {
@@ -436,7 +556,7 @@ const signHofApproval = async (req, res) => {
 };
 
 // ============================================================
-// 10. GET DAILY PRODUCTION RECORDS (AUTO LOAD EXISTING)
+// 13. GET DAILY PRODUCTION RECORDS (AUTO LOAD EXISTING)
 // ============================================================
 const getDailyProductionRecords = async (req, res) => {
   const { machineShop, lineCode, date, shift } = req.query;
@@ -541,6 +661,7 @@ const getDailyProductionRecords = async (req, res) => {
         shiftInchargeName: first.ShiftInchargeName || "",
         partTraceabilityMachining: first.PartTraceabilityMachining || "",
         assignedQc: "",
+        assignedPe: "",
         assignedHof: "",
       },
       rows: structuredRows,
@@ -550,7 +671,14 @@ const getDailyProductionRecords = async (req, res) => {
         productionEngineer: first.Sign_ProductionEngineer || "",
         hofProduction: first.Sign_HOFProduction || "",
       },
-      status: (first.Sign_SupervisorQuality && first.Sign_HOFProduction && first.Sign_SupervisorQuality !== "Pending" && first.Sign_HOFProduction !== "Pending") ? "Completed" : "Pending",
+      status: (
+        first.Sign_SupervisorQuality &&
+        first.Sign_ProductionEngineer &&
+        first.Sign_HOFProduction &&
+        first.Sign_SupervisorQuality !== "Pending" &&
+        first.Sign_ProductionEngineer !== "Pending" &&
+        first.Sign_HOFProduction !== "Pending"
+      ) ? "Completed" : "Pending",
     };
 
     return res.status(200).json([structuredRecord]);
@@ -561,7 +689,7 @@ const getDailyProductionRecords = async (req, res) => {
 };
 
 // ============================================================
-// 11. PDF REPORT GENERATOR
+// 14. PDF REPORT GENERATOR
 // ============================================================
 const generateReport = async (req, res) => {
   try {
@@ -740,7 +868,10 @@ const generateReport = async (req, res) => {
     doc.rect(peX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
     const peSig = first.Sign_ProductionEngineer;
     if (peSig && !String(peSig).includes('Pending')) {
-      doc.fillColor('black').font('Helvetica').fontSize(8).text(String(peSig), peX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
+      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(peX + 20, sigY + 26).lineTo(peX + 24, sigY + 31).lineTo(peX + 30, sigY + 20).stroke();
+      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(peSig).toUpperCase()})`, peX + 34, sigY + 22, { lineBreak: false });
+    } else {
+      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", peX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
     }
 
     // 4. HOF - Production
@@ -772,11 +903,14 @@ module.exports = {
   saveDailyProductionReport,
   getDailyProductionRecords,
   getQcReports,
+  getPeReports,
   getHofReports,
   signQcApproval,
+  signPeApproval,
   signHofApproval,
   generateReport,
   getPartTraceability,
   getIncharges,
+  getPeIncharges,
   getHofIncharges
 };

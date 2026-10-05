@@ -76,7 +76,7 @@ const getPEUsers = async (req, res) => {
         const peRes = await sql.query`
             SELECT username AS name, username, employeeId 
             FROM dbo.MachineShopUsers 
-            WHERE LOWER(role) IN ('pe', 'productengineer', 'shiftincharge', 'supervisor') 
+            WHERE role = 'productengineer'
             ORDER BY username ASC
         `;
         const list = peRes.recordset.length > 0 ? peRes.recordset : [];

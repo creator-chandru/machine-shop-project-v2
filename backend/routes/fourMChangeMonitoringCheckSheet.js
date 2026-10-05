@@ -4,41 +4,29 @@ const router = express.Router();
 const {
     getFourMChangeMonitoringDetails,
     getFourMChangeMonitoringLineDetails,
-    saveFourMChangeMonitoring
+    getHODUsers,
+    saveFourMChangeMonitoring,
+    getPendingHODReports,
+    signHODApproval,
+    generate4MReport
 } = require('../controllers/fourMChangeMonitoringCheckSheetController.js');
 
+router.get('/four-m-change-monitoring/:shopId/details', getFourMChangeMonitoringDetails);
+router.get('/four-m-change-monitoring/:shopId/line-details', getFourMChangeMonitoringLineDetails);
 
-// ============================================================
-// GET ALL DETAILS FOR SELECTED MACHINE SHOP
-// Example:
-// GET /api/four-m-change-monitoring/3/details
-// ============================================================
-router.get(
-    '/four-m-change-monitoring/:shopId/details',
-    getFourMChangeMonitoringDetails
-);
+// HOD User Dropdown
+router.get('/four-m-change-monitoring/hods', getHODUsers);
 
+// Save logic
+router.post('/four-m-change-monitoring', saveFourMChangeMonitoring);
 
-// ============================================================
-// GET DETAILS FOR SELECTED LINE CODE
-// Example:
-// GET /api/four-m-change-monitoring/3/line-details?lineCode=L01
-// ============================================================
-router.get(
-    '/four-m-change-monitoring/:shopId/line-details',
-    getFourMChangeMonitoringLineDetails
-);
+// HOD Pending Dashboard Route
+router.get('/four-m-change-monitoring/hod/pending/:name', getPendingHODReports);
 
+// HOD Sign Approval
+router.post('/four-m-change-monitoring/hod/sign', signHODApproval);
 
-// ============================================================
-// SAVE FOUR M CHANGE MONITORING
-// Example:
-// POST /api/four-m-change-monitoring
-// ============================================================
-router.post(
-    '/four-m-change-monitoring',
-    saveFourMChangeMonitoring
-);
-
+// HOD Report Download
+router.get('/four-m-change-monitoring/report', generate4MReport);
 
 module.exports = router;

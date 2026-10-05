@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLineSet } from "../context/LineSetContext.jsx";
+import { FileDown } from 'lucide-react';
 import Header from '../components/Header';
 
 const INITIAL_ROWS = 1;
@@ -84,6 +85,9 @@ export default function ErrorProofingCheckSheet() {
     type: ''
   });
 
+  const [isSavedRecord, setIsSavedRecord] = useState(false);
+  const lookupSeqRef = useRef(0);
+
   // Get current logged in user name for auto-approval
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
@@ -139,10 +143,8 @@ export default function ErrorProofingCheckSheet() {
 
         // Fetch machine details
         const machineRes = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`,
-          {
-            headers
-          }
+          `${process.env.REACT_APP_API_URL || ""}/api/machine-shop/${shopId}/pre-operation-details`,
+          { headers }
         );
 
         if (!machineRes.ok) {
@@ -150,15 +152,12 @@ export default function ErrorProofingCheckSheet() {
         }
 
         const machineData = await machineRes.json();
-
         setMachineDetails(machineData);
 
         // Fetch line mappings
         const mappingRes = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
-          {
-            headers
-          }
+          `${process.env.REACT_APP_API_URL || ""}/api/mappings/${shopId}/lines`,
+          { headers }
         );
 
         if (!mappingRes.ok) {
@@ -166,16 +165,11 @@ export default function ErrorProofingCheckSheet() {
         }
 
         const mappingData = await mappingRes.json();
-
         setLineMappings(mappingData);
 
       } catch (err) {
         console.error("Data fetch error:", err);
-
-        triggerToast(
-          "Failed to load required data.",
-          "error"
-        );
+        triggerToast("Failed to load required data.", "error");
       } finally {
         setLoadingMachineDetails(false);
       }
@@ -183,6 +177,56 @@ export default function ErrorProofingCheckSheet() {
 
     fetchData();
   }, [shopId]);
+
+  // ==========================================================
+  // FETCH EXISTING DATA BY SELECTED DATE & LINE CODE
+  // ==========================================================
+  useEffect(() => {
+    const checkExistingRecord = async () => {
+      if (!headerInfo.lineCode || !headerInfo.date) {
+        return;
+      }
+
+      const seq = ++lookupSeqRef.current;
+      try {
+        const token = localStorage.getItem("token");
+        const params = new URLSearchParams({
+          machineShop: shopId || '3',
+          lineCode: headerInfo.lineCode,
+          date: headerInfo.date
+        });
+
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/error-proofing-checksheet/record?${params.toString()}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (seq !== lookupSeqRef.current) return;
+
+        if (res.ok) {
+          const record = await res.json();
+          if (seq !== lookupSeqRef.current) return;
+
+          if (record && record.rows && record.rows.length > 0) {
+            setIsSavedRecord(true);
+            setRows(record.rows);
+            if (record.signatures) {
+              setSignatures(record.signatures);
+            }
+            triggerToast("Existing record loaded for this date.", "success");
+          } else {
+            setIsSavedRecord(false);
+            setRows(Array.from({ length: INITIAL_ROWS }, () => emptyRow()));
+            setSignatures({});
+          }
+        }
+      } catch (err) {
+        console.error("Check existing error-proofing record error:", err);
+      }
+    };
+
+    checkExistingRecord();
+  }, [shopId, headerInfo.lineCode, headerInfo.date]);
 
   // ==========================================================
   // LINE CODE OPTIONS
@@ -200,14 +244,11 @@ export default function ErrorProofingCheckSheet() {
 
   // ==========================================================
   // MACHINE OPTIONS
-  // IMPORTANT:
-  // Machine options depend ONLY on Line Code.
   // ==========================================================
   const machineOptionsRaw = machineDetails.filter(
     (item) => item.lineCode === headerInfo.lineCode
   );
 
-  // Remove duplicate machine numbers
   const machineOptions = Array.from(
     new Set(
       machineOptionsRaw
@@ -222,7 +263,6 @@ export default function ErrorProofingCheckSheet() {
 
   // ==========================================================
   // ROWS
-  // Each row maintains its own machineNo.
   // ==========================================================
   const [rows, setRows] = useState(
     Array.from(
@@ -243,10 +283,6 @@ export default function ErrorProofingCheckSheet() {
       ...prev,
       [field]: val
     }));
-
-    if (field === "date") {
-      return;
-    }
   };
 
   // ==========================================================
@@ -268,8 +304,10 @@ export default function ErrorProofingCheckSheet() {
       machineNo: ""
     }));
     
-    // Clear signatures when line changes
+    // Clear signatures & reset rows when line changes
     setSignatures({});
+    setRows(Array.from({ length: INITIAL_ROWS }, () => emptyRow()));
+    setIsSavedRecord(false);
 
     setLineSet({
       machineShop: shopId,
@@ -286,12 +324,10 @@ export default function ErrorProofingCheckSheet() {
   const handleRowChange = (rowIdx, field, val) => {
     setRows((prev) => {
       const next = [...prev];
-
       next[rowIdx] = {
         ...next[rowIdx],
         [field]: val
       };
-
       return next;
     });
   };
@@ -305,6 +341,52 @@ export default function ErrorProofingCheckSheet() {
       "Shift Incharge": currentUser
     });
     triggerToast("Form approved successfully", "success");
+  };
+
+  // ==========================================================
+  // DIRECT PDF DOWNLOAD
+  // ==========================================================
+  const handleDownloadPdf = async () => {
+    if (!headerInfo.lineCode || !headerInfo.date) {
+      triggerToast("Please select Line Code and Date first.", "error");
+      return;
+    }
+
+    if (!isSavedRecord) {
+      triggerToast("No saved record found for this date. Save before downloading.", "error");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      const params = new URLSearchParams({
+        lineCode: headerInfo.lineCode,
+        date: headerInfo.date,
+        shopId: String(shopId || 3)
+      });
+
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/error-proofing-checksheet/report?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!res.ok) throw new Error("Report request failed");
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `ErrorProofing_Checksheet_${headerInfo.lineCode}_${headerInfo.date}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+
+      triggerToast("PDF generated and downloaded!", "success");
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      triggerToast(err.message || "Failed to generate PDF", "error");
+    }
   };
 
   // ==========================================================
@@ -358,7 +440,7 @@ export default function ErrorProofingCheckSheet() {
       const token = localStorage.getItem('token');
 
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/error-proofing-checksheet`,
+        `${process.env.REACT_APP_API_URL || ""}/api/error-proofing-checksheet`,
         {
           method: 'POST',
           headers: {
@@ -382,18 +464,14 @@ export default function ErrorProofingCheckSheet() {
         machineNo: headerInfo.machineNo
       });
 
-      // Hide Saving
       setIsSaving(false);
-
-      // Show success
       setSaveSuccess(true);
+      setIsSavedRecord(true);
 
-      // Keep success message visible for 2 seconds
       await new Promise(
         resolve => setTimeout(resolve, 2000)
       );
 
-      // Go to Form 3
       navigate(
         `/operator/${shopId}/air-gap-sensor`
       );
@@ -465,7 +543,7 @@ export default function ErrorProofingCheckSheet() {
       <div className="bg-white w-full max-w-[90rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
 
         {/* Card Header */}
-        <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-gray-200 pb-4 gap-4">
 
           <div>
 
@@ -498,6 +576,14 @@ export default function ErrorProofingCheckSheet() {
             </div>
 
           </div>
+
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+          >
+            <FileDown className="w-4 h-4" /> Download PDF
+          </button>
 
         </div>
 
@@ -681,10 +767,6 @@ export default function ErrorProofingCheckSheet() {
 
             <tbody>
 
-              {/* ==================================================
-                  CHECKSHEET ROWS
-                  ================================================== */}
-
               {rows.map((row, rIdx) => (
 
                 <tr key={`row-${rIdx}`}>
@@ -801,9 +883,7 @@ export default function ErrorProofingCheckSheet() {
 
               ))}
 
-              {/* ==================================================
-                  SIGNATURE ROWS
-                  ================================================== */}
+              {/* SIGNATURE ROWS */}
               <tr>
                 <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
                   Operator Signature
@@ -818,7 +898,7 @@ export default function ErrorProofingCheckSheet() {
                     <button
                       type="button"
                       onClick={handleApproveSignatures}
-                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest"
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer"
                     >
                       Approve
                     </button>

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLineSet } from '../context/LineSetContext';
+import { FileDown } from 'lucide-react';
 import Header from '../components/Header';
 
 const initialFormData = {
@@ -71,6 +72,9 @@ export default function PreOperationChecklist() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
 
+  const [isSavedRecord, setIsSavedRecord] = useState(false);
+  const lookupSeqRef = useRef(0);
+
   // Get current logged in user name for auto-approval
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
@@ -122,13 +126,13 @@ export default function PreOperationChecklist() {
 
         const token = localStorage.getItem('token');
         const headers = { Authorization: `Bearer ${token}` };
-        const machineRes = await fetch(`${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
+        const machineRes = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
         if (machineRes.ok) {
           const machineData = await machineRes.json();
           setMachineDetails(machineData);
         }
 
-        const mappingRes = await fetch(`${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`, { headers });
+        const mappingRes = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/mappings/${shopId}/lines`, { headers });
         if (mappingRes.ok) {
           const mappingData = await mappingRes.json();
           setLineMappings(mappingData);
@@ -154,7 +158,7 @@ export default function PreOperationChecklist() {
         const token = localStorage.getItem('token');
         
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/latest-params?lineCode=${headerInfo.lineCode}&machineNo=${headerInfo.machineNo}`,
+          `${process.env.REACT_APP_API_URL || ""}/api/machine-shop/${shopId}/latest-params?lineCode=${headerInfo.lineCode}&machineNo=${headerInfo.machineNo}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -169,8 +173,6 @@ export default function PreOperationChecklist() {
               });
               return newSpecs;
             });
-
-            triggerToast("Latest specifications loaded.", "success");
           }
         }
       } catch (err) {
@@ -180,6 +182,63 @@ export default function PreOperationChecklist() {
 
     fetchLatestParams();
   }, [shopId, headerInfo.lineCode, headerInfo.machineNo]);
+
+  // ==========================================================
+  // FETCH EXISTING DATA BY SELECTED DATE, LINE & MACHINE
+  // ==========================================================
+  useEffect(() => {
+    const checkExistingRecord = async () => {
+      if (!headerInfo.lineCode || !headerInfo.machineNo || !headerInfo.date) {
+        return;
+      }
+
+      const seq = ++lookupSeqRef.current;
+      try {
+        const token = localStorage.getItem('token');
+        const params = new URLSearchParams({
+          machineShop: shopId || '3',
+          lineCode: headerInfo.lineCode,
+          machineNo: headerInfo.machineNo,
+          date: headerInfo.date
+        });
+
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/pre-operation-checklist/record?${params.toString()}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (seq !== lookupSeqRef.current) return;
+
+        if (res.ok) {
+          const record = await res.json();
+          if (seq !== lookupSeqRef.current) return;
+
+          if (record && record.values && Object.keys(record.values).length > 0) {
+            setIsSavedRecord(true);
+            setValues(record.values || {});
+            if (record.specifications) {
+              setSpecifications(prev => ({ ...prev, ...record.specifications }));
+            }
+            if (record.signatures) {
+              setSignatures(record.signatures || {});
+            }
+            if (record.header?.opNo) {
+              setHeaderInfo(prev => ({ ...prev, opNo: record.header.opNo }));
+            }
+            triggerToast("Existing record loaded for this date.", "success");
+          } else {
+            setIsSavedRecord(false);
+            setValues({});
+            setSignatures({});
+          }
+        }
+      } catch (err) {
+        console.error('Check existing checklist record error:', err);
+      }
+    };
+
+    checkExistingRecord();
+  }, [shopId, headerInfo.lineCode, headerInfo.machineNo, headerInfo.date]);
 
   // ==========================================================
   // SYNC SHARED LINE SET
@@ -220,7 +279,8 @@ export default function PreOperationChecklist() {
 
     setValues({});
     setSpecifications({});
-    setSignatures({}); // Reset signatures on line change
+    setSignatures({});
+    setIsSavedRecord(false);
 
     setLineSet({
       machineShop: shopId,
@@ -232,6 +292,10 @@ export default function PreOperationChecklist() {
   };
 
   const handleMachineChange = (machineNo) => {
+    setValues({});
+    setSignatures({});
+    setIsSavedRecord(false);
+
     setLineSet({
       machineShop: shopId,
       lineCode: headerInfo.lineCode,
@@ -261,6 +325,51 @@ export default function PreOperationChecklist() {
       "Shift Incharge": currentUser
     });
     triggerToast("Form approved successfully", "success");
+  };
+
+  // Direct PDF Download Handler
+  const handleDownloadPdf = async () => {
+    if (!headerInfo.lineCode || !headerInfo.machineNo || !headerInfo.date) {
+      triggerToast("Please select Line Code, Machine No, and Date first.", "error");
+      return;
+    }
+
+    if (!isSavedRecord) {
+      triggerToast("No saved record found for this date. Save before downloading.", "error");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      const params = new URLSearchParams({
+        lineCode: headerInfo.lineCode,
+        machineNo: headerInfo.machineNo,
+        date: headerInfo.date,
+        shopId: String(shopId || 3),
+      });
+
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/pre-operation-checklist/report?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!res.ok) throw new Error("Report request failed");
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `PreOperation_Checklist_${headerInfo.lineCode}_${headerInfo.machineNo}_${headerInfo.date}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+
+      triggerToast("PDF generated and downloaded!", "success");
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      triggerToast(err.message || "Failed to generate PDF", "error");
+    }
   };
 
   const handleSave = async () => {
@@ -303,7 +412,7 @@ export default function PreOperationChecklist() {
     try {
       const token = localStorage.getItem('token');
 
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/pre-operation-checklist`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/pre-operation-checklist`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -316,6 +425,7 @@ export default function PreOperationChecklist() {
 
       setLineSet({ ...lineSet, machineShop: shopId });
 
+      setIsSavedRecord(true);
       setSaveSuccess(true);
       await new Promise(resolve => setTimeout(resolve, 2000));
       navigate(`/operator/${shopId}/error-proofing-checksheet`);
@@ -351,7 +461,7 @@ export default function PreOperationChecklist() {
       <div className="bg-white w-full max-w-[90rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
         
         {/* HEADER AREA */}
-        <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-gray-200 pb-4 gap-4">
           <div>
             <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">{initialFormData.company}</span>
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">{initialFormData.title}</h2>
@@ -361,6 +471,14 @@ export default function PreOperationChecklist() {
               <span>Revision Date: {initialFormData.revisionDate}</span>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+          >
+            <FileDown className="w-4 h-4" /> Download PDF
+          </button>
         </div>
 
         {/* CONTROLS */}
@@ -567,7 +685,7 @@ export default function PreOperationChecklist() {
                     <button
                       type="button"
                       onClick={handleApproveSignatures}
-                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest"
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer"
                     >
                       Approve
                     </button>

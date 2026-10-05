@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { FileDown } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
@@ -48,7 +48,9 @@ export default function FourMChangeMonitoringCheckSheet() {
   const [rows, setRows] = useState([emptyRow()]);
   const [hodSign, setHodSign] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavedRecord, setIsSavedRecord] = useState(false);
 
+  const lookupSeqRef = useRef(0);
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
   const triggerToast = (message, type = 'error') => {
@@ -64,15 +66,15 @@ export default function FourMChangeMonitoringCheckSheet() {
         const headers = { Authorization: `Bearer ${token}` };
 
         // Fetch Machine Details
-        const machineRes = await fetch(`${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
+        const machineRes = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/machine-shop/${shopId}/pre-operation-details`, { headers });
         if (machineRes.ok) setMachineDetails(await machineRes.json());
 
         // Fetch Line Mappings
-        const mappingRes = await fetch(`${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`, { headers });
+        const mappingRes = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/mappings/${shopId}/lines`, { headers });
         if (mappingRes.ok) setLineMappings(await mappingRes.json());
 
         // Fetch HOD Users
-        const hodRes = await fetch(`${process.env.REACT_APP_API_URL}/api/four-m-change-monitoring/hods`, { headers });
+        const hodRes = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring/hods`, { headers });
         if (hodRes.ok) {
             const hodData = await hodRes.json();
             setHodUsers(hodData.hodList || []);
@@ -85,6 +87,58 @@ export default function FourMChangeMonitoringCheckSheet() {
     };
     fetchData();
   }, [shopId]);
+
+  // ==========================================================
+  // FETCH EXISTING RECORD BY LINE CODE, MACHINE NO & DATE
+  // ==========================================================
+  const firstRowDate = rows[0]?.date || "";
+  const selectedMachineNo = rows.find(r => r.mcNo)?.mcNo || headerInfo.machineNo || "";
+
+  useEffect(() => {
+    const checkExistingRecord = async () => {
+      if (!headerInfo.lineCode || !selectedMachineNo || !firstRowDate) {
+        return;
+      }
+
+      const seq = ++lookupSeqRef.current;
+      try {
+        const token = localStorage.getItem("token");
+        const params = new URLSearchParams({
+          machineShop: shopId || "3",
+          lineCode: headerInfo.lineCode,
+          machineNo: selectedMachineNo,
+          date: firstRowDate
+        });
+
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring/record?${params.toString()}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (seq !== lookupSeqRef.current) return;
+
+        if (res.ok) {
+          const record = await res.json();
+          if (seq !== lookupSeqRef.current) return;
+
+          if (record && record.rows && record.rows.length > 0) {
+            setIsSavedRecord(true);
+            setRows(record.rows);
+            if (record.hodSign) {
+              setHodSign(record.hodSign);
+            }
+            triggerToast("Existing 4M record loaded for this date & machine.", "success");
+          } else {
+            setIsSavedRecord(false);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching existing 4M record:", err);
+      }
+    };
+
+    checkExistingRecord();
+  }, [shopId, headerInfo.lineCode, selectedMachineNo, firstRowDate]);
 
   const lineCodes = lineMappings.length > 0
     ? lineMappings.map((m) => m.lineCode)
@@ -100,6 +154,7 @@ export default function FourMChangeMonitoringCheckSheet() {
     }));
 
     setRows((prev) => prev.map((row) => ({ ...row, mcNo: "" })));
+    setIsSavedRecord(false);
   };
 
   const handleMachineNoChange = (rowIdx, machineNo) => {
@@ -130,12 +185,12 @@ export default function FourMChangeMonitoringCheckSheet() {
         lineCode: headerInfo.lineCode,
         partName: headerInfo.partName,
         shopId: shopId || 3,
-        // Optional: Include hodSign if looking up a specifically assigned report
+        ...(firstRowDate ? { date: firstRowDate } : {}),
+        ...(selectedMachineNo ? { machineNo: selectedMachineNo } : {}),
         ...(hodSign ? { hodSign: `Pending [${hodSign}]` } : {})
       });
 
       const url = `${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring/report?${queryParams.toString()}`;
-      triggerToast("Downloading PDF from server...", "success");
 
       const response = await fetch(url, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
 
@@ -153,6 +208,8 @@ export default function FourMChangeMonitoringCheckSheet() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
+
+      triggerToast("PDF generated and downloaded!", "success");
     } catch (err) {
       triggerToast(err.message || "Failed to download PDF", "error");
     }
@@ -163,7 +220,6 @@ export default function FourMChangeMonitoringCheckSheet() {
     if (!headerInfo.lineCode) return triggerToast("Please select a Line Code.", "error");
     if (!headerInfo.partName) return triggerToast("Part Name is missing.", "error");
     
-    const selectedMachineNo = rows.find((row) => row.mcNo)?.mcNo || "";
     if (!selectedMachineNo) return triggerToast("Please select a Machine No in the table.", "error");
     if (!hodSign) return triggerToast("Please assign an HOD for verification.", "error");
 
@@ -187,7 +243,7 @@ export default function FourMChangeMonitoringCheckSheet() {
 
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/four-m-change-monitoring`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload)
@@ -198,6 +254,7 @@ export default function FourMChangeMonitoringCheckSheet() {
         throw new Error(errorData?.message || "Save failed");
       }
 
+      setIsSavedRecord(true);
       triggerToast("4M CheckSheet saved successfully!", "success");
     } catch (err) {
       triggerToast(err.message || "Failed to save checksheet.", "error");
@@ -224,7 +281,7 @@ export default function FourMChangeMonitoringCheckSheet() {
           <button
             type="button"
             onClick={handleDownloadPdf}
-            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors"
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
           >
             <FileDown className="w-4 h-4" /> Download Report
           </button>
@@ -287,7 +344,6 @@ export default function FourMChangeMonitoringCheckSheet() {
             </thead>
             <tbody>
               {rows.map((row, rIdx) => {
-                // Dynamically fetch machine options based on header selected line code
                 const machineOptionsRaw = machineDetails.filter((item) => item.lineCode === headerInfo.lineCode);
                 const machineOptions = Array.from(new Set(machineOptionsRaw.map((m) => m.machineNo).filter(Boolean))).map((mc) => machineOptionsRaw.find((m) => m.machineNo === mc));
                 

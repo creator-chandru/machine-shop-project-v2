@@ -5,6 +5,7 @@ const {
     getFourMChangeMonitoringDetails,
     getFourMChangeMonitoringLineDetails,
     getHODUsers,
+    getFourMRecord,
     saveFourMChangeMonitoring,
     getPendingHODReports,
     signHODApproval,
@@ -16,6 +17,9 @@ router.get('/four-m-change-monitoring/:shopId/line-details', getFourMChangeMonit
 
 // HOD User Dropdown
 router.get('/four-m-change-monitoring/hods', getHODUsers);
+
+// Fetch existing record by lineCode, machineNo, and date
+router.get('/four-m-change-monitoring/record', getFourMRecord);
 
 // Save logic
 router.post('/four-m-change-monitoring', saveFourMChangeMonitoring);

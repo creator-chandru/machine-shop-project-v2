@@ -1,5 +1,5 @@
 const sql = require("../db");
-const PDFDocument = require("pdfkit"); // Switched back to pure pdfkit for manual, flawless grid drawing
+const PDFDocument = require("pdfkit");
 const fs = require('fs');
 const path = require('path');
 
@@ -56,12 +56,96 @@ const getHODUsers = async (req, res) => {
 };
 
 // ============================================================
+// FETCH EXISTING 4M RECORD (BY LINE, MACHINE, AND DATE)
+// ============================================================
+const getFourMRecord = async (req, res) => {
+    const { machineShop, lineCode, machineNo, date } = req.query;
+
+    if (!lineCode || !machineNo || !date) {
+        return res.status(400).json({ error: "lineCode, machineNo, and date are required" });
+    }
+
+    try {
+        const cleanDate = String(date).split('T')[0];
+        const request = new sql.Request();
+        request.input("lineCode", sql.NVarChar(100), lineCode);
+        request.input("mcNo", sql.NVarChar(100), machineNo);
+        request.input("datePrefix", sql.NVarChar(100), `${cleanDate}%`);
+
+        let shopFilter = "";
+        if (machineShop) {
+            request.input("machineShop", sql.Int, parseInt(machineShop, 10));
+            shopFilter = " AND machineShop = @machineShop";
+        }
+
+        const query = `
+            SELECT * FROM FourMChangeMonitoring
+            WHERE lineCode = @lineCode
+              AND mcNo = @mcNo
+              AND dateShift LIKE @datePrefix
+              ${shopFilter}
+            ORDER BY slNo ASC, id ASC
+        `;
+
+        const result = await request.query(query);
+        const records = result.recordset;
+
+        if (!records || records.length === 0) {
+            return res.status(200).json(null);
+        }
+
+        const first = records[0];
+        const rows = records.map((r) => {
+            const dateParts = String(r.dateShift || "").trim().split(" ");
+            const rowDate = dateParts[0] || cleanDate;
+            const rowShift = dateParts[1] || "I";
+
+            return {
+                date: rowDate,
+                shift: rowShift,
+                dateShift: r.dateShift || `${rowDate} ${rowShift}`,
+                mcNo: r.mcNo || machineNo,
+                typeOf4M: r.typeOf4M || "",
+                description: r.description || "",
+                firstPart: r.firstPart || "",
+                lastPart: r.lastPart || "",
+                inspectionFrequency: r.inspectionFrequency || "",
+                retroChecking: r.retroChecking || "",
+                quarantine: r.quarantine || "",
+                partIdentification: r.partIdentification || "",
+                internalCommunication: r.internalCommunication || "",
+                inchargeSign: r.inchargeSign || ""
+            };
+        });
+
+        return res.status(200).json({
+            headerInfo: {
+                machineShop: first.machineShop,
+                lineCode: first.lineCode,
+                partName: first.partName || "",
+                partNo: first.partNo || "",
+                machineNo: first.mcNo || machineNo
+            },
+            rows,
+            hodSign: first.hodSign || "" // Retain original full signature string: "Approved (name)" or "Pending [name]"
+        });
+    } catch (err) {
+        console.error("Error fetching 4M record:", err);
+        return res.status(500).json({ error: "Failed to fetch 4M record" });
+    }
+};
+
+// ============================================================
 // SAVE FOUR M CHANGE MONITORING
 // ============================================================
 const saveFourMChangeMonitoring = async (req, res) => {
     const { headerInfo, rows, hodSign } = req.body;
-    if (!headerInfo || !headerInfo.machineShop || !headerInfo.lineCode || !headerInfo.partName) return res.status(400).json({ message: "Header information missing" });
-    if (!rows || rows.length === 0) return res.status(400).json({ message: "At least one row is required" });
+    if (!headerInfo || !headerInfo.machineShop || !headerInfo.lineCode || !headerInfo.partName) {
+        return res.status(400).json({ message: "Header information missing" });
+    }
+    if (!rows || rows.length === 0) {
+        return res.status(400).json({ message: "At least one row is required" });
+    }
 
     const transaction = new sql.Transaction();
     try {
@@ -70,6 +154,25 @@ const saveFourMChangeMonitoring = async (req, res) => {
         let finalHodSign = hodSign || '';
         if (finalHodSign && !finalHodSign.startsWith('Pending [') && !finalHodSign.startsWith('Approved (')) {
             finalHodSign = `Pending [${finalHodSign}]`;
+        }
+
+        const targetDate = rows[0]?.date ? String(rows[0].date).split('T')[0] : '';
+        const targetMc = rows.find(r => r.mcNo)?.mcNo || headerInfo.machineNo || '';
+
+        // Clean purge for safe re-submission of existing day/machine log
+        if (targetDate && targetMc) {
+            await transaction.request()
+                .input("machineShop", sql.Int, Number(headerInfo.machineShop))
+                .input("lineCode", sql.NVarChar(100), headerInfo.lineCode)
+                .input("mcNo", sql.NVarChar(100), targetMc)
+                .input("datePrefix", sql.NVarChar(100), `${targetDate}%`)
+                .query(`
+                    DELETE FROM FourMChangeMonitoring
+                    WHERE machineShop = @machineShop
+                      AND lineCode = @lineCode
+                      AND mcNo = @mcNo
+                      AND dateShift LIKE @datePrefix
+                `);
         }
 
         for (let index = 0; index < rows.length; index++) {
@@ -106,6 +209,7 @@ const saveFourMChangeMonitoring = async (req, res) => {
                 )
             `);
         }
+
         await transaction.commit();
         return res.status(201).json({ message: "4M Change Monitoring data saved successfully" });
     } catch (error) {
@@ -174,42 +278,58 @@ const signHODApproval = async (req, res) => {
 };
 
 // ============================================================
-// GENERATE PDF USING MANUAL GRID (Exact Match to Air Gap Aesthetic)
+// GENERATE PDF (Fixes HOD Stamp & Vector Checkmarks)
 // ============================================================
 const generate4MReport = async (req, res) => {
     try {
-        const { lineCode, partName, hodSign } = req.query;
+        const { lineCode, partName, date, machineNo, shopId } = req.query;
 
-        if (!lineCode || !partName) return res.status(400).json({ error: "lineCode and partName required" });
+        if (!lineCode) return res.status(400).json({ error: "lineCode is required" });
 
         const request = new sql.Request();
         request.input('lineCode', sql.NVarChar(50), lineCode);
-        request.input('partName', sql.NVarChar(255), partName);
-        
-        let query = `SELECT * FROM FourMChangeMonitoring WHERE lineCode = @lineCode AND partName = @partName`;
-        if (hodSign) {
-            query += ` AND hodSign = @hodSign`;
-            request.input('hodSign', sql.NVarChar(255), hodSign);
+
+        let query = `SELECT * FROM FourMChangeMonitoring WHERE lineCode = @lineCode`;
+
+        if (partName) {
+            query += ` AND partName = @partName`;
+            request.input('partName', sql.NVarChar(255), partName);
         }
+        if (date) {
+            const cleanDate = String(date).split('T')[0];
+            query += ` AND dateShift LIKE @dateFilter`;
+            request.input('dateFilter', sql.NVarChar(100), `${cleanDate}%`);
+        }
+        if (machineNo) {
+            query += ` AND mcNo = @mcFilter`;
+            request.input('mcFilter', sql.NVarChar(100), machineNo);
+        }
+        if (shopId) {
+            query += ` AND machineShop = @shopFilter`;
+            request.input('shopFilter', sql.Int, parseInt(shopId, 10));
+        }
+
+        query += ` ORDER BY slNo ASC, id ASC`;
 
         const result = await request.query(query);
         const records = result.recordset;
 
-        if (records.length === 0) return res.status(404).json({ error: "No records found" });
+        if (!records || records.length === 0) {
+            return res.status(404).json({ error: "No records found" });
+        }
 
-        // Initialize PDF Document (A4 Landscape)
-        const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true });
+        const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename=4M_${lineCode}.pdf`);
+        res.setHeader("Content-Disposition", `attachment; filename=4M_Change_Record_${lineCode}.pdf`);
         doc.pipe(res);
 
         const startX = 20;
         let startY = 20;
-        const totalWidth = 800; // Optimal fixed width for A4 landscape
+        const totalWidth = 800;
         
         doc.lineWidth(0.5).strokeColor('black');
 
-        // --- DRAW HEADER (BEAUTIFUL 3-BOX LAYOUT) ---
+        // Header Boxes
         const metaBoxWidth = 350; 
         const titleBoxWidth = totalWidth - 150 - metaBoxWidth;
         const headerTotalH = 60; 
@@ -223,22 +343,22 @@ const generate4MReport = async (req, res) => {
         }
 
         doc.rect(startX + 150, startY, titleBoxWidth, headerTotalH).stroke();
-        doc.font("Helvetica-Bold").fontSize(16).fillColor('black').text("4M CHANGE MONITORING CHECK SHEET", startX + 150, startY + 22, { width: titleBoxWidth, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(15).fillColor('black').text("4M CHANGE MONITORING CHECK SHEET", startX + 150, startY + 22, { width: titleBoxWidth, align: "center" });
 
         const metaX = startX + 150 + titleBoxWidth;
         doc.rect(metaX, startY, metaBoxWidth, headerTotalH).stroke();
         doc.moveTo(metaX, startY + 30).lineTo(metaX + metaBoxWidth, startY + 30).stroke();
 
-        doc.font("Helvetica-Bold").fontSize(10);
-        doc.text("LINE NAME", metaX + 5, startY + 10);  doc.text(`:   ${lineCode || ''}`, metaX + 80, startY + 10);
-        doc.text("PART NAME", metaX + 5, startY + 40); 
+        doc.font("Helvetica-Bold").fontSize(9.5);
+        doc.text("LINE NAME", metaX + 8, startY + 10);
+        doc.text(`:   ${lineCode || ''}`, metaX + 80, startY + 10);
+        doc.text("PART NAME", metaX + 8, startY + 40); 
         
-        // Wrap Part Name perfectly
-        doc.font("Helvetica").fontSize(9).text(`:   ${records[0]?.partName || ''}`, metaX + 80, startY + 36, { width: metaBoxWidth - 85, height: 22 });
+        doc.font("Helvetica").fontSize(8.5).text(`:   ${records[0]?.partName || ''}`, metaX + 80, startY + 37, { width: metaBoxWidth - 90, height: 20 });
 
         startY += headerTotalH + 10;
 
-        // --- MANUAL TABLE DRAWING ---
+        // Table Header
         const headers = [
             { label: "Date /\nShift", w: 65 },
             { label: "M/c. No", w: 45 },
@@ -260,7 +380,6 @@ const generate4MReport = async (req, res) => {
             doc.font("Helvetica-Bold").fontSize(7).fillColor('black');
             headers.forEach(h => {
                 doc.rect(curX, yPos, h.w, 35).stroke();
-                // Vertically center text in header
                 doc.text(h.label, curX, yPos + 4, { width: h.w, align: "center" });
                 curX += h.w;
             });
@@ -268,8 +387,7 @@ const generate4MReport = async (req, res) => {
         };
 
         let currentY = drawHeaders(startY);
-
-        const checkCols = [4, 5, 7, 8, 9, 10]; // Columns needing green tick / red cross
+        const checkCols = [4, 5, 7, 8, 9, 10];
 
         records.forEach(r => {
             const rowData = [
@@ -287,14 +405,12 @@ const generate4MReport = async (req, res) => {
                 r.inchargeSign || "-"
             ];
 
-            // Dynamic Row Height Calculation
-            let rowH = 25;
+            let rowH = 26;
             doc.font("Helvetica").fontSize(7);
-            const descH = doc.heightOfString(rowData[3], { width: headers[3].w - 4 });
-            if (descH + 10 > rowH) rowH = descH + 10;
+            const descH = doc.heightOfString(rowData[3], { width: headers[3].w - 6 });
+            if (descH + 12 > rowH) rowH = descH + 12;
 
-            // Page Break Check
-            if (currentY + rowH > doc.page.height - 50) {
+            if (currentY + rowH > doc.page.height - 65) {
                 doc.addPage();
                 currentY = 20;
                 currentY = drawHeaders(currentY);
@@ -305,36 +421,59 @@ const generate4MReport = async (req, res) => {
                 doc.rect(cX, currentY, headers[i].w, rowH).stroke();
 
                 if (checkCols.includes(i)) {
-                    if (val === '✓') {
-                        // Natively draw the exact green ZapfDingbats checkmark
-                        doc.font("ZapfDingbats").fontSize(12).fillColor('green').text("3", cX, currentY + (rowH/2) - 6, { width: headers[i].w, align: "center" });
+                    const colCenter = cX + (headers[i].w / 2);
+                    const rowCenter = currentY + (rowH / 2);
+
+                    if (val === '✓' || val === '3') {
+                        doc.save();
+                        doc.lineWidth(1.6).strokeColor('#16a34a').lineCap('round').lineJoin('round');
+                        doc.moveTo(colCenter - 5, rowCenter)
+                           .lineTo(colCenter - 1.5, rowCenter + 4.5)
+                           .lineTo(colCenter + 6, rowCenter - 4.5)
+                           .stroke();
+                        doc.restore();
                     } else if (val === 'X') {
-                        doc.font("Helvetica-Bold").fontSize(10).fillColor('red').text("X", cX, currentY + (rowH/2) - 5, { width: headers[i].w, align: "center" });
+                        doc.save();
+                        doc.lineWidth(1.6).strokeColor('#dc2626').lineCap('round');
+                        doc.moveTo(colCenter - 4, rowCenter - 4)
+                           .lineTo(colCenter + 4, rowCenter + 4)
+                           .stroke();
+                        doc.moveTo(colCenter + 4, rowCenter - 4)
+                           .lineTo(colCenter - 4, rowCenter + 4)
+                           .stroke();
+                        doc.restore();
                     } else {
-                        doc.font("Helvetica").fontSize(7).fillColor('black').text(val, cX, currentY + (rowH/2) - 4, { width: headers[i].w, align: "center" });
+                        doc.font("Helvetica").fontSize(7.5).fillColor('black');
+                        doc.text(val || "-", cX, rowCenter - 4, { width: headers[i].w, align: "center" });
                     }
-                } else if (i === 11) { // Incharge Sign
+                } else if (i === 11) {
                     if (val && val !== '-') {
-                        doc.font("Helvetica-Bold").fontSize(6).fillColor('#16a34a').text("Approved", cX, currentY + (rowH/2) - 8, { width: headers[i].w, align: "center" });
-                        doc.font("Helvetica-Bold").fontSize(6).fillColor('black').text(val.substring(0, 12), cX, currentY + (rowH/2) + 1, { width: headers[i].w, align: "center" });
+                        const midRow = currentY + (rowH / 2);
+                        doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#16a34a')
+                           .text("Approved ✓", cX, midRow - 7, { width: headers[i].w, align: "center" });
+                        doc.font("Helvetica-Bold").fontSize(6.5).fillColor('black')
+                           .text(String(val).toUpperCase().substring(0, 12), cX, midRow + 2, { width: headers[i].w, align: "center" });
                     } else {
-                        doc.font("Helvetica").fontSize(7).fillColor('black').text("-", cX, currentY + (rowH/2) - 4, { width: headers[i].w, align: "center" });
+                        doc.font("Helvetica").fontSize(7.5).fillColor('black')
+                           .text("-", cX, currentY + (rowH / 2) - 4, { width: headers[i].w, align: "center" });
                     }
                 } else {
-                    // Regular Text Centering
                     doc.font("Helvetica").fontSize(7).fillColor('black');
-                    const textH = doc.heightOfString(val, { width: headers[i].w - 4 });
-                    doc.text(val, cX + 2, currentY + (rowH/2) - (textH/2), { width: headers[i].w - 4, align: "center" });
+                    const textH = doc.heightOfString(val, { width: headers[i].w - 6 });
+                    doc.text(val, cX + 3, currentY + (rowH / 2) - (textH / 2), { 
+                        width: headers[i].w - 6, 
+                        align: i === 3 ? "left" : "center" 
+                    });
                 }
                 
-                doc.fillColor('black'); // Reset
+                doc.fillColor('black');
                 cX += headers[i].w;
             });
 
             currentY += rowH;
         });
 
-        // --- FOOTER SECTION ---
+        // --- FOOTER & HOD SIGNATURE VERIFICATION BLOCK ---
         currentY += 10;
         if (currentY + 45 > doc.page.height - 20) {
             doc.addPage();
@@ -348,15 +487,25 @@ const generate4MReport = async (req, res) => {
         // HOD Sign Box
         const hodX = startX + totalWidth - 250;
         doc.rect(hodX, currentY, 250, 40).stroke();
-        doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("HOD Sign: ", hodX + 10, currentY + 15);
+        doc.font("Helvetica-Bold").fontSize(9.5).fillColor('black').text("HOD Sign: ", hodX + 10, currentY + 15);
 
-        const currentHodSign = records[0].hodSign || '';
-        if (currentHodSign.startsWith('Approved (')) {
-            const name = currentHodSign.replace('Approved (', '').replace(')', '');
-            doc.fillColor('#16a34a').text(`Verified by ${name.toUpperCase()}`, hodX + 70, currentY + 15);
-        } else if (currentHodSign.startsWith('Pending [')) {
-            const name = currentHodSign.replace('Pending [', '').replace(']', '');
-            doc.fillColor('#dc2626').text(`Pending [${name}]`, hodX + 70, currentY + 15);
+        // Find true HOD status from actual record rows
+        const currentHodSign = String(records[0]?.hodSign || '').trim();
+        if (currentHodSign.toLowerCase().startsWith('approved')) {
+            const cleanName = currentHodSign.replace(/approved\s*\(/i, '').replace(')', '').trim();
+            doc.save();
+            doc.lineWidth(1.6).strokeColor('#16a34a').lineCap('round').lineJoin('round');
+            doc.moveTo(hodX + 70, currentY + 20).lineTo(hodX + 74, currentY + 24).lineTo(hodX + 80, currentY + 15).stroke();
+            doc.restore();
+
+            doc.fillColor('#16a34a').font("Helvetica-Bold").fontSize(9)
+               .text(`APPROVED (${cleanName.toUpperCase()})`, hodX + 85, currentY + 15);
+        } else if (currentHodSign.toLowerCase().startsWith('pending')) {
+            const cleanName = currentHodSign.replace(/pending\s*\[/i, '').replace(']', '').trim();
+            doc.fillColor('#dc2626').font("Helvetica-Bold").fontSize(9)
+               .text(`Pending [${cleanName.toUpperCase()}]`, hodX + 70, currentY + 15);
+        } else {
+            doc.fillColor('red').font("Helvetica").fontSize(9).text("Pending Review", hodX + 70, currentY + 15);
         }
 
         doc.end();
@@ -370,6 +519,7 @@ module.exports = {
     getFourMChangeMonitoringDetails,
     getFourMChangeMonitoringLineDetails,
     getHODUsers,
+    getFourMRecord,
     saveFourMChangeMonitoring,
     getPendingHODReports,
     signHODApproval,

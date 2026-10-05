@@ -15,32 +15,22 @@ const sanitizeTime = (timeStr) => {
 // HELPER: GENERATE PART TRACEABILITY CODE
 // ============================================================
 const generatePartTraceability = async (transaction, lineCode, checkDate, shift) => {
-  if (!lineCode || !checkDate || !shift) {
-    return '';
-  }
+  if (!lineCode || !checkDate || !shift) return '';
 
   const lineMatch = String(lineCode).match(/(\d+)([A-Za-z]*)$/);
-  if (!lineMatch) {
-    return '';
-  }
+  if (!lineMatch) return '';
 
   const digits = parseInt(lineMatch[1], 10);
   const suffix = lineMatch[2] ? lineMatch[2].toUpperCase() : '';
   const lineIdentifier = `${digits}${suffix}`;
 
   const shiftMap = {
-    I: 1,
-    II: 2,
-    III: 3,
-    '1': 1,
-    '2': 2,
-    '3': 3,
+    I: 1, II: 2, III: 3,
+    '1': 1, '2': 2, '3': 3,
   };
 
   const shiftNumber = shiftMap[String(shift).trim().toUpperCase()];
-  if (!shiftNumber) {
-    return '';
-  }
+  if (!shiftNumber) return '';
 
   let year, month, day;
   if (typeof checkDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(checkDate)) {
@@ -50,9 +40,7 @@ const generatePartTraceability = async (transaction, lineCode, checkDate, shift)
     day = parseInt(parts[2], 10);
   } else {
     const dateObj = new Date(checkDate);
-    if (isNaN(dateObj.getTime())) {
-      return '';
-    }
+    if (isNaN(dateObj.getTime())) return '';
     year = dateObj.getFullYear();
     month = dateObj.getMonth() + 1;
     day = dateObj.getDate();
@@ -98,7 +86,7 @@ const getPartTraceability = async (req, res) => {
     return res.status(200).json({ partTraceability: partTraceability || '' });
   } catch (err) {
     console.error('Error generating Part Traceability:', err);
-    try { await transaction.rollback(); } catch (rollbackErr) {}
+    try { await transaction.rollback(); } catch (e) {}
     return res.status(500).json({ error: 'Failed to generate Part Traceability' });
   }
 };
@@ -127,7 +115,30 @@ const getIncharges = async (req, res) => {
 };
 
 // ============================================================
-// 3. GET MACHINE SHOP DETAILS DYNAMICALLY
+// 3. GET HOF INCHARGES LIST
+// ============================================================
+const getHofIncharges = async (req, res) => {
+  try {
+    const hofRes = await sql.query`
+      SELECT username AS name, username, employeeId 
+      FROM dbo.MachineShopUsers 
+      WHERE LOWER(role) IN ('hof', 'headfacility', 'headofproduction') 
+      ORDER BY username ASC
+    `;
+
+    const list = hofRes.recordset.length > 0 
+      ? hofRes.recordset 
+      : [{ name: 'hof', username: 'hof', employeeId: 'hof' }];
+
+    return res.status(200).json({ hofList: list });
+  } catch (err) {
+    console.error('Error fetching HOF incharges:', err);
+    return res.status(500).json({ error: 'Failed to fetch HOF list' });
+  }
+};
+
+// ============================================================
+// 4. GET MACHINE SHOP DETAILS DYNAMICALLY
 // ============================================================
 const getMachineShopDetails = async (req, res) => {
   const { shopId } = req.params;
@@ -146,7 +157,7 @@ const getMachineShopDetails = async (req, res) => {
 };
 
 // ============================================================
-// 4. SAVE DAILY PRODUCTION REPORT
+// 5. SAVE DAILY PRODUCTION REPORT
 // ============================================================
 const saveDailyProductionReport = async (req, res) => {
   const { header, rows, signatures, status } = req.body;
@@ -162,6 +173,7 @@ const saveDailyProductionReport = async (req, res) => {
     const shift = header?.shift || 'I';
     const shiftInchargeName = header?.shiftInchargeName || '';
     const assignedQc = header?.assignedQc || '';
+    const assignedHof = header?.assignedHof || '';
 
     let partTraceabilityMachining = header?.partTraceabilityMachining || '';
     if (!partTraceabilityMachining.trim()) {
@@ -169,9 +181,9 @@ const saveDailyProductionReport = async (req, res) => {
     }
 
     const qcSignature = signatures?.shiftSupervisorQuality || '';
-    const recordStatus = (qcSignature && qcSignature !== 'Pending') ? 'Completed' : (status || 'Pending');
+    const hofSignature = signatures?.hofProduction || '';
 
-    // Remove draft rows for this Line, Date, and Shift if pending
+    // Clear previous unverified draft rows
     await transaction.request()
       .input('MachineShop', sql.NVarChar(50), machineShop)
       .input('lineCode', sql.NVarChar(50), lineCode)
@@ -183,7 +195,8 @@ const saveDailyProductionReport = async (req, res) => {
           AND lineCode = @lineCode
           AND CONVERT(date, ReportDate) = CONVERT(date, @ReportDate)
           AND Shift = @Shift
-          AND (Sign_SupervisorQuality IS NULL OR Sign_SupervisorQuality = '' OR Sign_SupervisorQuality = 'Pending')
+          AND (Sign_SupervisorQuality IS NULL OR Sign_SupervisorQuality = '' OR Sign_SupervisorQuality = 'Pending'
+               OR Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending')
       `);
 
     for (const row of rows) {
@@ -215,8 +228,9 @@ const saveDailyProductionReport = async (req, res) => {
         .input('Sign_SupervisorProduction', sql.NVarChar(100), signatures?.shiftSupervisorProduction || '')
         .input('Sign_SupervisorQuality', sql.NVarChar(100), qcSignature)
         .input('Sign_ProductionEngineer', sql.NVarChar(100), signatures?.productionEngineer || '')
-        .input('Sign_HOFProduction', sql.NVarChar(100), signatures?.hofProduction || '')
+        .input('Sign_HOFProduction', sql.NVarChar(100), hofSignature)
         .input('assignedQc', sql.NVarChar(100), assignedQc)
+        .input('assignedHof', sql.NVarChar(100), assignedHof)
         .query(`
           INSERT INTO DailyProductionReport (
             MachineShop, lineCode, PartTraceabilityMachining, ReportDate, Shift, ShiftInchargeName, 
@@ -246,7 +260,7 @@ const saveDailyProductionReport = async (req, res) => {
 };
 
 // ============================================================
-// 5. GET QC PENDING DAILY PRODUCTION REPORTS
+// 6. GET QC PENDING DAILY PRODUCTION REPORTS
 // ============================================================
 const getQcReports = async (req, res) => {
   try {
@@ -272,6 +286,7 @@ const getQcReports = async (req, res) => {
         Shift AS shift,
         MAX(ShiftInchargeName) AS shiftInchargeName,
         MAX(Sign_SupervisorQuality) AS verifiedByQcSignature,
+        MAX(Sign_HOFProduction) AS hofSignature,
         'Pending' AS status
       FROM DailyProductionReport
       WHERE (Sign_SupervisorQuality IS NULL OR Sign_SupervisorQuality = '' OR Sign_SupervisorQuality = 'Pending')
@@ -288,7 +303,50 @@ const getQcReports = async (req, res) => {
 };
 
 // ============================================================
-// 6. POST QC APPROVAL SIGNATURE
+// 7. GET HOF PENDING DAILY PRODUCTION REPORTS
+// ============================================================
+const getHofReports = async (req, res) => {
+  try {
+    const { name } = req.params;
+    const shopId = req.query.shopId;
+
+    const request = new sql.Request();
+    request.input('hofName', sql.NVarChar(100), String(name || '').trim());
+
+    let shopFilter = '';
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      shopFilter = ' AND MachineShop = @machineShop';
+    }
+
+    const result = await request.query(`
+      SELECT 
+        MIN(Id) AS id,
+        MachineShop AS machineShop,
+        lineCode,
+        MAX(PartNameNo) AS partName,
+        FORMAT(ReportDate, 'yyyy-MM-dd') AS reportDate,
+        Shift AS shift,
+        MAX(ShiftInchargeName) AS shiftInchargeName,
+        MAX(Sign_SupervisorQuality) AS verifiedByQcSignature,
+        MAX(Sign_HOFProduction) AS hofSignature,
+        'Pending' AS status
+      FROM DailyProductionReport
+      WHERE (Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending')
+        ${shopFilter}
+      GROUP BY MachineShop, lineCode, ReportDate, Shift
+      ORDER BY ReportDate DESC, MIN(Id) DESC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error('HOF Daily Production Dashboard Fetch Error:', err);
+    return res.status(500).json({ message: 'DB error' });
+  }
+};
+
+// ============================================================
+// 8. POST QC APPROVAL SIGNATURE
 // ============================================================
 const signQcApproval = async (req, res) => {
   try {
@@ -325,7 +383,7 @@ const signQcApproval = async (req, res) => {
       return res.status(404).json({ message: 'No pending records found to approve' });
     }
 
-    return res.status(200).json({ success: true, message: 'Daily Production Report approved successfully!' });
+    return res.status(200).json({ success: true, message: 'Daily Production Report approved by QC successfully!' });
   } catch (err) {
     console.error('Sign QC Error:', err);
     return res.status(500).json({ message: 'Failed to approve report' });
@@ -333,7 +391,52 @@ const signQcApproval = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET DAILY PRODUCTION RECORDS (AUTO LOAD EXISTING)
+// 9. POST HOF APPROVAL SIGNATURE
+// ============================================================
+const signHofApproval = async (req, res) => {
+  try {
+    const { lineCode, date, shift, signature, hofUsername } = req.body;
+
+    if (!lineCode || !date) {
+      return res.status(400).json({ message: 'Missing lineCode or date' });
+    }
+
+    const signVal = signature || hofUsername || 'Approved';
+    let cleanDate = String(date).split('T')[0];
+
+    const request = new sql.Request();
+    request.input('lineCode', sql.NVarChar(50), lineCode);
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('signature', sql.NVarChar(100), signVal);
+
+    let shiftFilter = '';
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      shiftFilter = ' AND Shift = @shift';
+    }
+
+    const result = await request.query(`
+      UPDATE DailyProductionReport 
+      SET Sign_HOFProduction = @signature
+      WHERE lineCode = @lineCode 
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+        AND (Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending')
+        ${shiftFilter}
+    `);
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: 'No pending records found for HOF approval' });
+    }
+
+    return res.status(200).json({ success: true, message: 'Daily Production Report approved by HOF successfully!' });
+  } catch (err) {
+    console.error('Sign HOF Error:', err);
+    return res.status(500).json({ message: 'Failed to approve report' });
+  }
+};
+
+// ============================================================
+// 10. GET DAILY PRODUCTION RECORDS (AUTO LOAD EXISTING)
 // ============================================================
 const getDailyProductionRecords = async (req, res) => {
   const { machineShop, lineCode, date, shift } = req.query;
@@ -438,6 +541,7 @@ const getDailyProductionRecords = async (req, res) => {
         shiftInchargeName: first.ShiftInchargeName || "",
         partTraceabilityMachining: first.PartTraceabilityMachining || "",
         assignedQc: "",
+        assignedHof: "",
       },
       rows: structuredRows,
       signatures: {
@@ -446,7 +550,7 @@ const getDailyProductionRecords = async (req, res) => {
         productionEngineer: first.Sign_ProductionEngineer || "",
         hofProduction: first.Sign_HOFProduction || "",
       },
-      status: (first.Sign_SupervisorQuality && first.Sign_SupervisorQuality !== "Pending") ? "Completed" : "Pending",
+      status: (first.Sign_SupervisorQuality && first.Sign_HOFProduction && first.Sign_SupervisorQuality !== "Pending" && first.Sign_HOFProduction !== "Pending") ? "Completed" : "Pending",
     };
 
     return res.status(200).json([structuredRecord]);
@@ -457,7 +561,7 @@ const getDailyProductionRecords = async (req, res) => {
 };
 
 // ============================================================
-// 8. PDF REPORT GENERATOR
+// 11. PDF REPORT GENERATOR
 // ============================================================
 const generateReport = async (req, res) => {
   try {
@@ -606,26 +710,50 @@ const generateReport = async (req, res) => {
       sigY = 30;
     }
 
-    doc.lineWidth(0.5).strokeColor('black');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Shift Supervisor (Production)", startX + 20, sigY, { lineBreak: false });
-    doc.rect(startX + 20, sigY + 12, 180, 30).stroke();
+    const sigColWidth = totalWidth / 4;
 
+    // 1. Shift Supervisor (Production)
+    doc.lineWidth(0.5).strokeColor('black');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Supervisor (Production)", startX, sigY, { width: sigColWidth - 10, align: "center" });
+    doc.rect(startX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
     const opSig = first.Sign_SupervisorProduction;
     if (opSig && !String(opSig).includes('Pending')) {
-      doc.fillColor('black').font('Helvetica').fontSize(9).text(String(opSig), startX + 40, sigY + 23, { lineBreak: false });
+      doc.fillColor('black').font('Helvetica').fontSize(8).text(String(opSig), startX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
     }
 
-    const qcX = startX + totalWidth - 220;
-    doc.strokeColor('black').lineWidth(0.5);
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Verified By QC", qcX, sigY, { lineBreak: false });
-    doc.rect(qcX, sigY + 12, 180, 30).stroke();
-
+    // 2. Shift Supervisor (Quality)
+    const qcX = startX + sigColWidth;
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Supervisor (Quality)", qcX, sigY, { width: sigColWidth - 10, align: "center" });
+    doc.rect(qcX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
     const qcSig = first.Sign_SupervisorQuality;
     if (qcSig && !String(qcSig).includes('Pending')) {
-      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(qcX + 20, sigY + 28).lineTo(qcX + 24, sigY + 33).lineTo(qcX + 32, sigY + 21).stroke();
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(9).text(`APPROVED BY ${String(qcSig).toUpperCase()}`, qcX + 38, sigY + 23, { lineBreak: false });
+      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(qcX + 20, sigY + 26).lineTo(qcX + 24, sigY + 31).lineTo(qcX + 30, sigY + 20).stroke();
+      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(qcSig).toUpperCase()})`, qcX + 34, sigY + 22, { lineBreak: false });
     } else {
-      doc.fillColor('red').font('Helvetica-Bold').fontSize(9).text("Pending Review", qcX + 40, sigY + 23, { lineBreak: false });
+      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", qcX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
+    }
+
+    // 3. Production Engineer
+    const peX = startX + sigColWidth * 2;
+    doc.strokeColor('black').lineWidth(0.5);
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Production Engineer", peX, sigY, { width: sigColWidth - 10, align: "center" });
+    doc.rect(peX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
+    const peSig = first.Sign_ProductionEngineer;
+    if (peSig && !String(peSig).includes('Pending')) {
+      doc.fillColor('black').font('Helvetica').fontSize(8).text(String(peSig), peX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
+    }
+
+    // 4. HOF - Production
+    const hofX = startX + sigColWidth * 3;
+    doc.strokeColor('black').lineWidth(0.5);
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("HOF - Production", hofX, sigY, { width: sigColWidth - 10, align: "center" });
+    doc.rect(hofX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
+    const hofSig = first.Sign_HOFProduction;
+    if (hofSig && !String(hofSig).includes('Pending')) {
+      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(hofX + 20, sigY + 26).lineTo(hofX + 24, sigY + 31).lineTo(hofX + 30, sigY + 20).stroke();
+      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(hofSig).toUpperCase()})`, hofX + 34, sigY + 22, { lineBreak: false });
+    } else {
+      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", hofX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
     }
 
     doc.end();
@@ -644,8 +772,11 @@ module.exports = {
   saveDailyProductionReport,
   getDailyProductionRecords,
   getQcReports,
+  getHofReports,
   signQcApproval,
+  signHofApproval,
   generateReport,
   getPartTraceability,
-  getIncharges
+  getIncharges,
+  getHofIncharges
 };

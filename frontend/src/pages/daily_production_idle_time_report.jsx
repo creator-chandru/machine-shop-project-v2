@@ -2,6 +2,15 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
 import Header from '../components/Header';
+import { FileDown } from "lucide-react";
+
+const initialFormData = {
+  formCode: "QF/07/MPD-10",
+  revision: "00",
+  revisionDate: "01.07.2021",
+  title: "DAILY PRODUCTION & IDLE TIME REPORT",
+  company: "SAKTHI AUTO",
+};
 
 const LOSS_REASONS = [
   { id: 1, category: "MAN", name: "Want of Man power", rowSpan: 2, isFirst: true },
@@ -72,21 +81,14 @@ const createEmptyLineColumn = (
   }, {}),
 });
 
-// Toast notification component
+// Toast notification component (styled exactly as preOperationChecklist)
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
-
   const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
-
   return (
     <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
       <span className="text-sm font-semibold">{message}</span>
-      <button 
-        onClick={onClose}
-        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
-      >
-        ×
-      </button>
+      <button onClick={onClose} className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none">×</button>
     </div>
   );
 };
@@ -98,19 +100,19 @@ export default function DailyProductionIdleTimeReport() {
 
   const [machineShopDetails, setMachineShopDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
+  const [inchargeUsers, setInchargeUsers] = useState([]);
+  const [peUsers, setPeUsers] = useState([]);
   const [reportDate, setReportDate] = useState(getTodayISODate());
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-
-  // Toast state
   const [toast, setToast] = useState({ message: '', type: '' });
+
+  const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
-    setTimeout(() => {
-      setToast({ message: '', type: '' });
-    }, 4000);
+    setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
 
   const [lineColumns, setLineColumns] = useState([
@@ -126,17 +128,14 @@ export default function DailyProductionIdleTimeReport() {
       shift2: "",
       shift3: "",
     },
-
     shiftOfficerSign: {
       shift1: "",
       shift2: "",
       shift3: "",
     },
-
-    teamLeaderSign: "",
   });
 
-  // Fetch machine shop details + line mappings
+  // Fetch machine shop details + line mappings + users
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -149,25 +148,33 @@ export default function DailyProductionIdleTimeReport() {
           { headers }
         );
 
-        if (!detailsRes.ok) {
-          throw new Error("Failed to fetch machine shop details");
+        if (detailsRes.ok) {
+          const detailsData = await detailsRes.json();
+          setMachineShopDetails(detailsData);
         }
 
-        const detailsData = await detailsRes.json();
-        setMachineShopDetails(detailsData);
-
-        // Fetch Line Mappings (Includes capacities from M[ShopId]LineandPartMapping)
+        // Fetch Line Mappings
         const mappingRes = await fetch(
           `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
           { headers }
         );
 
-        if (!mappingRes.ok) {
-          throw new Error("Failed to fetch line mappings");
+        if (mappingRes.ok) {
+          const mappingData = await mappingRes.json();
+          setLineMappings(mappingData);
         }
 
-        const mappingData = await mappingRes.json();
-        setLineMappings(mappingData);
+        // Fetch Users for Section Incharge & Product Engineer
+        const usersRes = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/daily-production-idle-time/pe/users`,
+          { headers }
+        );
+
+        if (usersRes.ok) {
+          const uData = await usersRes.json();
+          setInchargeUsers(uData.inchargeList || uData.allUsers || []);
+          setPeUsers(uData.peList || uData.allUsers || []);
+        }
 
       } catch (error) {
         console.error("Error fetching line & shop details:", error);
@@ -178,6 +185,83 @@ export default function DailyProductionIdleTimeReport() {
       fetchData();
     }
   }, [shopId]);
+
+  // Fetch saved report data whenever shopId or reportDate changes
+  useEffect(() => {
+    const fetchSavedReport = async () => {
+      if (!shopId || !reportDate) return;
+      try {
+        const token = localStorage.getItem("token");
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/daily-production-idle-time?shopId=${shopId}&date=${reportDate}`,
+          { headers }
+        );
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.exists && Array.isArray(data.lineColumns) && data.lineColumns.length > 0) {
+            setLineColumns(data.lineColumns);
+            if (data.signatures) {
+              setSignatures({
+                sectionInchargeSign: data.signatures.sectionInchargeSign || { shift1: "", shift2: "", shift3: "" },
+                shiftOfficerSign: data.signatures.shiftOfficerSign || { shift1: "", shift2: "", shift3: "" },
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error loading saved idle time report:", err);
+      }
+    };
+
+    fetchSavedReport();
+  }, [shopId, reportDate]);
+
+  // Download PDF Report (Pre-operation / Air Gap style server PDF generation)
+  const handleDownloadPdf = async () => {
+    if (!reportDate) {
+      triggerToast("Please ensure date is selected.", "error");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      const queryParams = new URLSearchParams({
+        date: reportDate,
+        shopId: shopId || 3,
+        lineCode: lineColumns[0]?.lineCode || "",
+      });
+
+      const url = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/report?${queryParams.toString()}`;
+      triggerToast("Downloading PDF from server...", "success");
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error("No data recorded for this specific date.");
+        }
+        throw new Error("Failed to generate PDF from the server.");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `Idle_Time_Report_${lineColumns[0]?.lineCode || 'ALL'}_${reportDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      triggerToast(err.message || "Failed to download PDF", "error");
+    }
+  };
 
   // Helper to extract capacity directly from line mappings
   const getLineCapacity = (targetLineCode) => {
@@ -200,7 +284,7 @@ export default function DailyProductionIdleTimeReport() {
       const capacity = getLineCapacity(lineSet.lineCode);
 
       setLineColumns((prev) => {
-        if (prev.length > 0) {
+        if (prev.length > 0 && (!prev[0].lineCode || prev[0].lineCode === lineSet.lineCode)) {
           const next = [...prev];
           next[0] = {
             ...next[0],
@@ -219,12 +303,12 @@ export default function DailyProductionIdleTimeReport() {
     lineMappings.length > 0
       ? lineMappings.map((m) => m.lineCode)
       : [
-          ...new Set(
-            machineShopDetails
-              .map((item) => item.lineCode)
-              .filter(Boolean)
-          )
-        ];
+        ...new Set(
+          machineShopDetails
+            .map((item) => item.lineCode)
+            .filter(Boolean)
+        )
+      ];
 
   const handleLineMetaChange = (colIdx, field, val) => {
     setLineColumns((prev) => {
@@ -237,7 +321,6 @@ export default function DailyProductionIdleTimeReport() {
           machineShopDetails.find((item) => item.lineCode === val)?.partName ||
           "";
 
-        // Fetch capacities directly from mapping data
         const capacity = mapping ? {
           shift1: mapping.shift1Quantity ?? "",
           shift2: mapping.shift2Quantity ?? "",
@@ -275,107 +358,41 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-  const handleCapacityChange = (colIdx, shift, val) => {
-    const newCap = parseFloat(val);
-
-    if (val !== "" && !isNaN(newCap)) {
-      const currentLh = parseFloat(
-        lineColumns[colIdx]?.actualProd?.lh?.[shift]
-      );
-
-      const currentRh = parseFloat(
-        lineColumns[colIdx]?.actualProd?.rh?.[shift]
-      );
-
-      if (
-        (!isNaN(currentLh) && currentLh > newCap) ||
-        (!isNaN(currentRh) && currentRh > newCap)
-      ) {
-        triggerToast(
-          `Capacity cannot be less than the already entered Actual Production Quantity for Shift ${
-            shift === "shift1"
-              ? "I"
-              : shift === "shift2"
-              ? "II"
-              : "III"
-          }!`,
-          "error"
-        );
-
-        return;
-      }
-    }
-
-    setLineColumns((prev) => {
-      const next = [...prev];
-
-      next[colIdx] = {
-        ...next[colIdx],
-
-        capacity: {
-          ...next[colIdx].capacity,
-          [shift]: val,
-        },
-      };
-
-      return next;
-    });
-  };
-
   const handleActualProdChange = (colIdx, arm, shift, val) => {
     if (val !== "") {
       const capVal = lineColumns[colIdx]?.capacity?.[shift];
-
       const capNum = parseFloat(capVal);
       const enteredVal = parseFloat(val);
 
       if (capVal === "" || isNaN(capNum) || capNum <= 0) {
         triggerToast(
-          `Please enter the Capacity for Shift ${
-            shift === "shift1"
-              ? "I"
-              : shift === "shift2"
-              ? "II"
-              : "III"
-          } first before entering Actual Production Quantity.`,
+          `Please enter the Capacity for Shift ${shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III"} first.`,
           "error"
         );
-
         return;
       }
 
       if (!isNaN(enteredVal) && enteredVal > capNum) {
         triggerToast(
-          `Actual production quantity (${enteredVal}) cannot exceed the capacity (${capNum}) for Shift ${
-            shift === "shift1"
-              ? "I"
-              : shift === "shift2"
-              ? "II"
-              : "III"
-          }!`,
+          `Actual production (${enteredVal}) cannot exceed capacity (${capNum}) for Shift ${shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III"}!`,
           "error"
         );
-
         return;
       }
     }
 
     setLineColumns((prev) => {
       const next = [...prev];
-
       next[colIdx] = {
         ...next[colIdx],
-
         actualProd: {
           ...next[colIdx].actualProd,
-
           [arm]: {
             ...next[colIdx].actualProd[arm],
             [shift]: val,
           },
         },
       };
-
       return next;
     });
   };
@@ -383,16 +400,13 @@ export default function DailyProductionIdleTimeReport() {
   const handleManpowerChange = (colIdx, shift, val) => {
     setLineColumns((prev) => {
       const next = [...prev];
-
       next[colIdx] = {
         ...next[colIdx],
-
         manpower: {
           ...next[colIdx].manpower,
           [shift]: val,
         },
       };
-
       return next;
     });
   };
@@ -401,19 +415,15 @@ export default function DailyProductionIdleTimeReport() {
     if (val !== "") {
       const enteredVal = parseFloat(val);
 
-      // 1. Prevent negative numbers
       if (isNaN(enteredVal) || enteredVal < 0) {
         triggerToast("Loss value cannot be negative!", "error");
         return;
       }
 
-      const shiftName =
-        shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III";
-
+      const shiftName = shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III";
       const capVal = lineColumns[colIdx]?.capacity?.[shift];
       const capNum = parseFloat(capVal);
 
-      // 2. Require valid capacity first
       if (capVal === "" || isNaN(capNum) || capNum <= 0) {
         triggerToast(
           `Please enter the Capacity for Shift ${shiftName} first before entering Loss values.`,
@@ -422,20 +432,17 @@ export default function DailyProductionIdleTimeReport() {
         return;
       }
 
-      // 3. Individual loss cannot exceed capacity
       if (enteredVal > capNum) {
         triggerToast(
-          `Loss value (${enteredVal}) cannot exceed the capacity (${capNum}) for Shift ${shiftName}!`,
+          `Loss value (${enteredVal}) cannot exceed capacity (${capNum}) for Shift ${shiftName}!`,
           "error"
         );
         return;
       }
 
-      // 4. Calculate total loss if this value is applied
       const otherLossesTotal = LOSS_REASONS.reduce((acc, loss) => {
         if (loss.id === lossId) return acc;
-        const currentVal =
-          parseFloat(lineColumns[colIdx]?.losses?.[`loss_${loss.id}`]?.[shift]) || 0;
+        const currentVal = parseFloat(lineColumns[colIdx]?.losses?.[`loss_${loss.id}`]?.[shift]) || 0;
         return acc + currentVal;
       }, 0);
 
@@ -443,7 +450,7 @@ export default function DailyProductionIdleTimeReport() {
 
       if (projectedTotal > capNum) {
         triggerToast(
-          `Total Loss (${projectedTotal}) cannot exceed the capacity (${capNum}) for Shift ${shiftName}!`,
+          `Total Loss (${projectedTotal}) cannot exceed capacity (${capNum}) for Shift ${shiftName}!`,
           "error"
         );
         return;
@@ -452,42 +459,33 @@ export default function DailyProductionIdleTimeReport() {
 
     setLineColumns((prev) => {
       const next = [...prev];
-
       next[colIdx] = {
         ...next[colIdx],
-
         losses: {
           ...next[colIdx].losses,
-
           [`loss_${lossId}`]: {
             ...next[colIdx].losses[`loss_${lossId}`],
             [shift]: val,
           },
         },
       };
-
       return next;
     });
   };
 
   const handleSignatureChange = (field, subField, val) => {
-    setSignatures((prev) => {
-      if (subField) {
-        return {
-          ...prev,
+    setSignatures((prev) => ({
+      ...prev,
+      [field]: {
+        ...prev[field],
+        [subField]: val,
+      },
+    }));
+  };
 
-          [field]: {
-            ...prev[field],
-            [subField]: val,
-          },
-        };
-      }
-
-      return {
-        ...prev,
-        [field]: val,
-      };
-    });
+  const handleShiftOfficerApprove = (shift) => {
+    handleSignatureChange("shiftOfficerSign", shift, currentUser);
+    triggerToast("Form approved by Shift Officer", "success");
   };
 
   const handleAddColumn = () => {
@@ -503,108 +501,57 @@ export default function DailyProductionIdleTimeReport() {
     );
   };
 
-  const CHUNK_SIZE = 5;
-
-  const getColumnChunks = (allCols) => {
-    const chunks = [];
-
-    for (let i = 0; i < allCols.length; i += CHUNK_SIZE) {
-      const chunk = allCols
-        .slice(i, i + CHUNK_SIZE)
-        .map((col, localIdx) => ({
-          col,
-          globalIdx: i + localIdx,
-        }));
-
-      chunks.push(chunk);
-    }
-
-    return chunks;
-  };
-
-  const columnChunks = getColumnChunks(lineColumns);
-
   const sumValues = (...vals) =>
-    vals.reduce(
-      (sum, v) => sum + (parseFloat(v) || 0),
-      0
-    ) || "";
+    vals.reduce((sum, v) => sum + (parseFloat(v) || 0), 0) || "";
 
   const calcTotalLoss = (col, shift) => {
     return (
       LOSS_REASONS.reduce((acc, loss) => {
-        const val =
-          parseFloat(
-            col.losses[`loss_${loss.id}`]?.[shift]
-          ) || 0;
-
+        const val = parseFloat(col.losses[`loss_${loss.id}`]?.[shift]) || 0;
         return acc + val;
       }, 0) || ""
     );
   };
 
   const handleSave = async () => {
+    if (!lineColumns[0]?.lineCode) {
+      triggerToast("Please select Line code.", "error");
+      return;
+    }
+
     for (let i = 0; i < lineColumns.length; i++) {
       const col = lineColumns[i];
 
-      for (const shift of [
-        "shift1",
-        "shift2",
-        "shift3",
-      ]) {
-        const shiftName =
-          shift === "shift1"
-            ? "I"
-            : shift === "shift2"
-            ? "II"
-            : "III";
+      for (const shift of ["shift1", "shift2", "shift3"]) {
+        const shiftName = shift === "shift1" ? "I" : shift === "shift2" ? "II" : "III";
+        const cap = parseFloat(col.capacity[shift]) || 0;
+        const lh = parseFloat(col.actualProd.lh[shift]) || 0;
+        const rh = parseFloat(col.actualProd.rh[shift]) || 0;
 
-        const cap =
-          parseFloat(col.capacity[shift]) || 0;
-
-        const lh =
-          parseFloat(
-            col.actualProd.lh[shift]
-          ) || 0;
-
-        const rh =
-          parseFloat(
-            col.actualProd.rh[shift]
-          ) || 0;
-
-        if (
-          lh > 0 &&
-          (!col.capacity[shift] || lh > cap)
-        ) {
-          triggerToast(
-            `Line ${i + 1} (Shift ${shiftName}): Actual LH production (${lh}) cannot exceed capacity (${cap})!`,
-            "error"
-          );
-
+        if (lh > 0 && (!col.capacity[shift] || lh > cap)) {
+          triggerToast(`Line ${i + 1} (Shift ${shiftName}): Actual LH production cannot exceed capacity.`, "error");
           return;
         }
 
-        if (
-          rh > 0 &&
-          (!col.capacity[shift] || rh > cap)
-        ) {
-          triggerToast(
-            `Line ${i + 1} (Shift ${shiftName}): Actual RH production (${rh}) cannot exceed capacity (${cap})!`,
-            "error"
-          );
-
+        if (rh > 0 && (!col.capacity[shift] || rh > cap)) {
+          triggerToast(`Line ${i + 1} (Shift ${shiftName}): Actual RH production cannot exceed capacity.`, "error");
           return;
         }
 
         const totalLoss = parseFloat(calcTotalLoss(col, shift)) || 0;
         if (totalLoss > 0 && (!col.capacity[shift] || totalLoss > cap)) {
-          triggerToast(
-            `Line ${i + 1} (Shift ${shiftName}): Total Loss (${totalLoss}) cannot exceed capacity (${cap})!`,
-            "error"
-          );
+          triggerToast(`Line ${i + 1} (Shift ${shiftName}): Total Loss cannot exceed capacity.`, "error");
           return;
         }
       }
+    }
+
+    const hasSecInchargeSign = Object.values(signatures.sectionInchargeSign).some(Boolean);
+    const hasShiftOfficerSign = Object.values(signatures.shiftOfficerSign).some(Boolean);
+
+    if (!hasSecInchargeSign && !hasShiftOfficerSign) {
+      triggerToast("Please assign a Product Engineer or click 'Approve' to sign before saving.", "error");
+      return;
     }
 
     setIsSaving(true);
@@ -635,7 +582,6 @@ export default function DailyProductionIdleTimeReport() {
         throw new Error("Save failed");
       }
 
-      // Update LineSetContext
       if (setLineSet && lineColumns[0]?.lineCode) {
         setLineSet((prev) => ({
           ...prev,
@@ -648,30 +594,21 @@ export default function DailyProductionIdleTimeReport() {
       setIsSaving(false);
       setSaveSuccess(true);
 
-      // Keep success message visible for 2 seconds
       await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Navigate to Operator home
       navigate(`/operator/${shopId || 3}`);
     } catch (err) {
       console.error("Save error:", err);
       setIsSaving(false);
-      triggerToast("Failed to save report. Check console for details.", "error");
+      triggerToast("Failed to save report.", "error");
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-4 pt-0 sm:p-6 pb-20">
+    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header />
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: '' })} />
 
-      {/* Toast Notification */}
-      <Toast 
-        message={toast.message} 
-        type={toast.type} 
-        onClose={() => setToast({ message: '', type: '' })} 
-      />
-
-      {/* Saving and Success Modals */}
+      {/* SAVING MODAL */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
@@ -679,578 +616,442 @@ export default function DailyProductionIdleTimeReport() {
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
                 <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
-                <p className="text-gray-500 mt-2">Please wait</p>
               </>
             ) : (
-              <>
-                <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
-                <p className="text-gray-500 mt-2">Returning to Operator Menu...</p>
-              </>
+              <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
             )}
           </div>
         </div>
       )}
 
-      <div className="bg-white w-full max-w-[99rem] rounded-xl p-6 sm:p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b-2 border-gray-300 pb-5 gap-4">
+      {/* MAIN CONTAINER */}
+      <div className="bg-white w-full max-w-[92rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
+
+        {/* HEADER AREA */}
+        <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
           <div>
-            <div className="flex items-center gap-3 mb-1">
-              <span className="text-sm font-extrabold text-orange-600 tracking-widest uppercase bg-orange-50 px-2.5 py-0.5 rounded border border-orange-200">
-                SAKTHI AUTO
-              </span>
-
-              <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
-                OUTPUT ONLY
-              </span>
+            <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
+              {initialFormData.company}
+            </span>
+            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
+              {initialFormData.title}
+            </h2>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
+              <span>Form Code: {initialFormData.formCode}</span> |
+              <span>Revision: {initialFormData.revision}</span> |
+              <span>Revision Date: {initialFormData.revisionDate}</span>
             </div>
-
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-gray-900 tracking-tight uppercase leading-tight">
-              DAILY PRODUCTION & IDLE TIME REPORT
-            </h1>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-gray-50 border-2 border-gray-800 p-2.5 rounded shadow-sm">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-black text-gray-800 uppercase tracking-wide">
-                DATE :
-              </label>
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+          >
+            <FileDown className="w-4 h-4" /> Download Report
+          </button>
+        </div>
 
+        {/* CONTROLS */}
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-4">
+            <div>
+              <label className="font-bold text-gray-700 block mb-1 text-sm">Date</label>
               <input
                 type="date"
-                className="bg-white border border-gray-300 rounded px-2 py-1 text-xs font-bold text-gray-800 outline-none focus:border-orange-500"
+                className="border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
                 value={reportDate}
                 onChange={(e) => setReportDate(e.target.value)}
               />
             </div>
           </div>
-        </div>
-
-        <div className="flex justify-between items-center px-1">
-          <div className="flex items-center gap-2"></div>
 
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleAddColumn}
-              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+              className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2 rounded shadow transition-all uppercase tracking-wider"
             >
-              <span className="text-sm font-bold leading-none">+</span>
-              Add Line Column
+              + Add Column
             </button>
 
             {lineColumns.length > 1 && (
               <button
                 type="button"
                 onClick={handleRemoveColumn}
-                className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+                className="bg-gray-700 hover:bg-gray-800 text-white text-xs font-bold px-3 py-2 rounded shadow transition-all uppercase"
               >
-                <span className="text-sm font-bold leading-none">−</span>
-                Delete Column
+                − Remove Column
               </button>
             )}
           </div>
         </div>
 
-        <div className="space-y-8">
-          {columnChunks.map((chunk, chunkIdx) => (
-            <div key={`chunk-${chunkIdx}`} className="space-y-2">
-              {columnChunks.length > 1 && (
-                <div className="flex items-center gap-2 px-1">
-                  <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">
-                    Table {chunkIdx + 1}
-                  </span>
+        {/* TABLE */}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-800 text-sm text-center">
 
-                  <span className="text-xs text-gray-500 font-semibold">
-                    (Production Lines {chunk[0].globalIdx + 1}
-                    {chunk.length > 1
-                      ? ` to ${chunk[chunk.length - 1].globalIdx + 1}`
-                      : ""}
-                    )
-                  </span>
-                </div>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
-                  <thead>
-                    <tr>
-                      <th
-                        colSpan={3}
-                        className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold w-64"
-                      >
-                        LINE CODE
-                      </th>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <th
-                          key={`lc-${globalIdx}`}
-                          colSpan={4}
-                          className="border border-gray-800 p-0 bg-white"
-                        >
-                          <select
-                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
-                            value={col.lineCode || ""}
-                            onChange={(e) => {
-                              handleLineMetaChange(
-                                globalIdx,
-                                "lineCode",
-                                e.target.value
-                              );
-                            }}
-                          >
-                            <option value="">Select Line Code</option>
-
-                            {lineCodes.map((lineCode) => (
-                              <option key={lineCode} value={lineCode}>
-                                {lineCode}
-                              </option>
-                            ))}
-                          </select>
-                        </th>
-                      ))}
-                    </tr>
-
-                    <tr>
-                      <th
-                        colSpan={3}
-                        className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold"
-                      >
-                        PART NAME
-                      </th>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <th
-                          key={`pn-${globalIdx}`}
-                          colSpan={4}
-                          className="border border-gray-800 p-0 bg-gray-100"
-                        >
-                          <input
-                            type="text"
-                            readOnly
-                            className="w-full h-full text-center font-bold text-gray-700 outline-none bg-transparent py-1.5"
-                            value={col.partName || ""}
-                            placeholder="Auto-filled"
-                          />
-                        </th>
-                      ))}
-                    </tr>
-
-                    <tr>
-                      <th
-                        colSpan={3}
-                        className="border border-gray-800 p-1.5 bg-gray-100 text-left font-bold"
-                      >
-                        ABS / NABS
-                      </th>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <th
-                          key={`bt-${globalIdx}`}
-                          colSpan={4}
-                          className="border border-gray-800 p-0 bg-white"
-                        >
-                          <select
-                            className="w-full h-full text-center font-bold text-gray-800 outline-none bg-transparent py-1.5 focus:bg-orange-50/50 cursor-pointer"
-                            value={col.brakeType || ""}
-                            onChange={(e) =>
-                              handleLineMetaChange(
-                                globalIdx,
-                                "brakeType",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="">Select</option>
-                            <option value="ABS">ABS</option>
-                            <option value="NABS">NABS</option>
-                          </select>
-                        </th>
-                      ))}
-                    </tr>
-
-                    <tr className="bg-gray-100 font-bold text-[11px]">
-                      <th className="border border-gray-800 p-1 w-10">S.No.</th>
-
-                      <th
-                        colSpan={2}
-                        className="border border-gray-800 p-1 text-left px-2"
-                      >
-                        SHIFT
-                      </th>
-
-                      {chunk.map(({ globalIdx }) => (
-                        <React.Fragment key={`sh-hdr-${globalIdx}`}>
-                          <th className="border border-gray-800 p-1 w-14">I</th>
-                          <th className="border border-gray-800 p-1 w-14">II</th>
-                          <th className="border border-gray-800 p-1 w-14">III</th>
-                          <th className="border border-gray-800 p-1 w-16 bg-gray-200">
-                            T
-                          </th>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    <tr className="bg-white">
-                      <td
-                        colSpan={3}
-                        className="border border-gray-800 p-1 text-left font-bold bg-gray-50 px-2"
-                      >
-                        CAPACITY QTY IN SETS
-                      </td>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`cap-${globalIdx}`}>
-                          {["shift1", "shift2", "shift3"].map((shift) => (
-                            <td key={shift} className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="0"
-                                className="w-full h-full text-center font-semibold outline-none py-1"
-                                value={col.capacity[shift]}
-                                readOnly
-                              />
-                            </td>
-                          ))}
-
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
-                            {sumValues(
-                              col.capacity.shift1,
-                              col.capacity.shift2,
-                              col.capacity.shift3
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    <tr>
-                      <td
-                        rowSpan={2}
-                        colSpan={2}
-                        className="border border-gray-800 p-1 font-bold text-left bg-gray-50 px-2 align-middle"
-                      >
-                        ACTUAL PROD QTY
-                      </td>
-
-                      <td className="border border-gray-800 p-1 font-bold bg-gray-100 w-10">
-                        LH
-                      </td>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`lh-${globalIdx}`}>
-                          {["shift1", "shift2", "shift3"].map((shift) => (
-                            <td key={shift} className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                max={col.capacity[shift] || undefined}
-                                placeholder="0"
-                                className="w-full h-full text-center outline-none py-1 font-medium"
-                                value={col.actualProd.lh[shift]}
-                                onChange={(e) =>
-                                  handleActualProdChange(
-                                    globalIdx,
-                                    "lh",
-                                    shift,
-                                    e.target.value
-                                  )
-                                }
-                              />
-                            </td>
-                          ))}
-
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-100">
-                            {sumValues(
-                              col.actualProd.lh.shift1,
-                              col.actualProd.lh.shift2,
-                              col.actualProd.lh.shift3
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    <tr>
-                      <td className="border border-gray-800 p-1 font-bold bg-gray-100 w-10">
-                        RH
-                      </td>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`rh-${globalIdx}`}>
-                          {["shift1", "shift2", "shift3"].map((shift) => (
-                            <td key={shift} className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                max={col.capacity[shift] || undefined}
-                                placeholder="0"
-                                className="w-full h-full text-center outline-none py-1 font-medium"
-                                value={col.actualProd.rh[shift]}
-                                onChange={(e) =>
-                                  handleActualProdChange(
-                                    globalIdx,
-                                    "rh",
-                                    shift,
-                                    e.target.value
-                                  )
-                                }
-                              />
-                            </td>
-                          ))}
-
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-100">
-                            {sumValues(
-                              col.actualProd.rh.shift1,
-                              col.actualProd.rh.shift2,
-                              col.actualProd.rh.shift3
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    <tr className="bg-gray-50">
-                      <td
-                        colSpan={3}
-                        className="border border-gray-800 p-1 font-bold text-left px-2"
-                      >
-                        NO OF MANPOWER (UTILIZED)
-                      </td>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`mp-${globalIdx}`}>
-                          {["shift1", "shift2", "shift3"].map((shift) => (
-                            <td key={shift} className="border border-gray-800 p-0">
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="0"
-                                className="w-full h-full text-center outline-none py-1 font-medium bg-transparent"
-                                value={col.manpower[shift]}
-                                onChange={(e) =>
-                                  handleManpowerChange(
-                                    globalIdx,
-                                    shift,
-                                    e.target.value
-                                  )
-                                }
-                              />
-                            </td>
-                          ))}
-
-                          <td className="border border-gray-800 p-1 font-bold bg-gray-200">
-                            {sumValues(
-                              col.manpower.shift1,
-                              col.manpower.shift2,
-                              col.manpower.shift3
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-
-                    {LOSS_REASONS.map((loss) => (
-                      <tr
-                        key={`loss-row-${loss.id}`}
-                        className="hover:bg-gray-50/50"
-                      >
-                        <td className="border border-gray-800 p-1 font-bold text-gray-700">
-                          {loss.id}
-                        </td>
-
-                        {loss.isFirst && (
-                          <td
-                            rowSpan={loss.rowSpan}
-                            className="border border-gray-800 p-1 font-bold text-gray-800 bg-gray-100 align-middle text-[11px] tracking-wider"
-                          >
-                            {loss.category}
-                          </td>
-                        )}
-
-                        <td className="border border-gray-800 p-1 text-left px-2 font-medium text-gray-800">
-                          {loss.name}
-                        </td>
-
-                        {chunk.map(({ col, globalIdx }) => (
-                          <React.Fragment key={`l-${loss.id}-${globalIdx}`}>
-                            {["shift1", "shift2", "shift3"].map((shift) => (
-                              <td key={shift} className="border border-gray-800 p-0">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  className="w-full h-full text-center outline-none py-1 bg-transparent"
-                                  value={col.losses[`loss_${loss.id}`]?.[shift]}
-                                  onChange={(e) =>
-                                    handleLossChange(
-                                      globalIdx,
-                                      loss.id,
-                                      shift,
-                                      e.target.value
-                                    )
-                                  }
-                                />
-                              </td>
-                            ))}
-
-                            <td className="border border-gray-800 p-1 font-bold bg-gray-100 text-gray-800">
-                              {sumValues(
-                                col.losses[`loss_${loss.id}`]?.shift1,
-                                col.losses[`loss_${loss.id}`]?.shift2,
-                                col.losses[`loss_${loss.id}`]?.shift3
-                              )}
-                            </td>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    ))}
-
-                    <tr className="bg-gray-200 font-extrabold text-gray-900">
-                      <td
-                        colSpan={3}
-                        className="border border-gray-800 p-1.5 text-left px-2"
-                      >
-                        Total Loss (mins)
-                      </td>
-
-                      {chunk.map(({ col, globalIdx }) => (
-                        <React.Fragment key={`tot-loss-${globalIdx}`}>
-                          <td className="border border-gray-800 p-1">
-                            {calcTotalLoss(col, "shift1")}
-                          </td>
-
-                          <td className="border border-gray-800 p-1">
-                            {calcTotalLoss(col, "shift2")}
-                          </td>
-
-                          <td className="border border-gray-800 p-1">
-                            {calcTotalLoss(col, "shift3")}
-                          </td>
-
-                          <td className="border border-gray-800 p-1 bg-gray-300">
-                            {sumValues(
-                              calcTotalLoss(col, "shift1"),
-                              calcTotalLoss(col, "shift2"),
-                              calcTotalLoss(col, "shift3")
-                            )}
-                          </td>
-                        </React.Fragment>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="overflow-x-auto pt-2">
-          <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
-            <tbody>
+            <thead className="bg-gray-100 text-gray-800 font-bold">
+              {/* LINE CODE ROW */}
               <tr>
-                <td className="border border-gray-800 p-1.5 font-bold bg-gray-100 text-left w-48">
-                  SECTION INCHARGE SIGN
-                </td>
-
-                {["shift1", "shift2", "shift3"].map((s, idx) => (
-                  <td key={`sis-${s}`} className="border border-gray-800 p-0">
-                    <div className="flex items-center px-2 py-1">
-                      <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
-                        SHIFT-{["I", "II", "III"][idx]}:
-                      </span>
-
-                      <input
-                        type="text"
-                        placeholder="Signature"
-                        className="w-full outline-none font-medium bg-transparent text-center"
-                        value={signatures.sectionInchargeSign[s]}
-                        onChange={(e) =>
-                          handleSignatureChange(
-                            "sectionInchargeSign",
-                            s,
-                            e.target.value
-                          )
-                        }
-                      />
-                    </div>
-                  </td>
+                <th colSpan={3} className="border border-gray-800 p-2 text-left px-3 w-[420px] min-w-[420px]">
+                  Line Code
+                </th>
+                {lineColumns.map((col, globalIdx) => (
+                  <th key={`lc-${globalIdx}`} colSpan={4} className="border border-gray-800 p-0 bg-white min-w-[340px]">
+                    <select
+                      className="w-full h-full text-center outline-none bg-transparent py-2 font-bold cursor-pointer"
+                      value={col.lineCode || ""}
+                      onChange={(e) => handleLineMetaChange(globalIdx, "lineCode", e.target.value)}
+                    >
+                      <option value="">Select Line Code</option>
+                      {lineCodes.map((lineCode) => (
+                        <option key={lineCode} value={lineCode}>{lineCode}</option>
+                      ))}
+                    </select>
+                  </th>
                 ))}
+              </tr>
 
-                <td
-                  className="border border-gray-800 p-0 w-80 text-left align-middle"
-                  rowSpan={2}
-                >
-                  <div className="flex items-center px-3 py-2 gap-2">
-                    <span className="font-bold text-gray-800 whitespace-nowrap">
-                      TEAM LEADER SIGN :
-                    </span>
-
+              {/* PART NAME ROW */}
+              <tr>
+                <th colSpan={3} className="border border-gray-800 p-2 text-left px-3">
+                  Part Name
+                </th>
+                {lineColumns.map((col, globalIdx) => (
+                  <th key={`pn-${globalIdx}`} colSpan={4} className="border border-gray-800 p-0 bg-gray-50">
                     <input
                       type="text"
-                      placeholder="Signature"
-                      className="w-full outline-none font-medium bg-transparent border-b border-gray-300 focus:border-orange-500 py-1"
-                      value={signatures.teamLeaderSign}
-                      onChange={(e) =>
-                        handleSignatureChange(
-                          "teamLeaderSign",
-                          null,
-                          e.target.value
-                        )
-                      }
+                      readOnly
+                      className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold text-gray-700"
+                      value={col.partName || ""}
+                      placeholder="Auto-filled"
                     />
-                  </div>
-                </td>
-              </tr>
-
-              <tr>
-                <td className="border border-gray-800 p-1.5 font-bold bg-gray-100 text-left">
-                  SHIFT OFFICER SIGN
-                </td>
-
-                {["shift1", "shift2", "shift3"].map((s, idx) => (
-                  <td key={`sos-${s}`} className="border border-gray-800 p-0">
-                    <div className="flex items-center px-2 py-1">
-                      <span className="font-bold text-gray-600 text-[11px] mr-1 whitespace-nowrap">
-                        SHIFT-{["I", "II", "III"][idx]}:
-                      </span>
-
-                      <input
-                        type="text"
-                        placeholder="Signature"
-                        className="w-full outline-none font-medium bg-transparent text-center"
-                        value={signatures.shiftOfficerSign[s]}
-                        onChange={(e) =>
-                          handleSignatureChange(
-                            "shiftOfficerSign",
-                            s,
-                            e.target.value
-                          )
-                        }
-                      />
-                    </div>
-                  </td>
+                  </th>
                 ))}
               </tr>
+
+              {/* ABS / NABS ROW */}
+              <tr>
+                <th colSpan={3} className="border border-gray-800 p-2 text-left px-3">
+                  ABS / NABS
+                </th>
+                {lineColumns.map((col, globalIdx) => (
+                  <th key={`bt-${globalIdx}`} colSpan={4} className="border border-gray-800 p-0 bg-white">
+                    <select
+                      className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold cursor-pointer"
+                      value={col.brakeType || ""}
+                      onChange={(e) => handleLineMetaChange(globalIdx, "brakeType", e.target.value)}
+                    >
+                      <option value="">Select</option>
+                      <option value="ABS">ABS</option>
+                      <option value="NABS">NABS</option>
+                    </select>
+                  </th>
+                ))}
+              </tr>
+
+              {/* SHIFT HEADERS */}
+              <tr>
+                <th className="border border-gray-800 p-2 w-14">Sl No</th>
+                <th className="border border-gray-800 p-2 w-32">Category</th>
+                <th className="border border-gray-800 p-2 text-left px-3 w-72">Parameters / Loss Description</th>
+
+                {lineColumns.map((_, globalIdx) => (
+                  <React.Fragment key={`sh-${globalIdx}`}>
+                    <th className="border border-gray-800 p-2 w-24">Shift I</th>
+                    <th className="border border-gray-800 p-2 w-24">Shift II</th>
+                    <th className="border border-gray-800 p-2 w-24">Shift III</th>
+                    <th className="border border-gray-800 p-2 w-24 bg-gray-200">Total (T)</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+
+              {/* CAPACITY QTY ROW */}
+              <tr className="bg-white">
+                <td colSpan={3} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-800">
+                  CAPACITY QTY IN SETS
+                </td>
+                {lineColumns.map((col, globalIdx) => (
+                  <React.Fragment key={`cap-${globalIdx}`}>
+                    {["shift1", "shift2", "shift3"].map((shift) => (
+                      <td key={shift} className="border border-gray-800 p-0">
+                        <input
+                          type="number"
+                          className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold"
+                          value={col.capacity[shift]}
+                          readOnly
+                          placeholder="0"
+                        />
+                      </td>
+                    ))}
+                    <td className="border border-gray-800 p-2 font-bold bg-gray-100 text-gray-800">
+                      {sumValues(col.capacity.shift1, col.capacity.shift2, col.capacity.shift3)}
+                    </td>
+                  </React.Fragment>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {/* ACTUAL PROD QTY: LH */}
+              <tr>
+                <td rowSpan={2} colSpan={2} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 align-middle">
+                  ACTUAL PROD QTY
+                </td>
+                <td className="border border-gray-800 p-2 text-left px-3 font-medium bg-gray-50">
+                  LH
+                </td>
+
+                {lineColumns.map((col, globalIdx) => (
+                  <React.Fragment key={`lh-${globalIdx}`}>
+                    {["shift1", "shift2", "shift3"].map((shift) => (
+                      <td key={shift} className="border border-gray-800 p-0">
+                        <input
+                          type="number"
+                          min="0"
+                          max={col.capacity[shift] || undefined}
+                          className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold"
+                          value={col.actualProd.lh[shift]}
+                          onChange={(e) => handleActualProdChange(globalIdx, "lh", shift, e.target.value)}
+                        />
+                      </td>
+                    ))}
+                    <td className="border border-gray-800 p-2 font-bold bg-gray-100">
+                      {sumValues(col.actualProd.lh.shift1, col.actualProd.lh.shift2, col.actualProd.lh.shift3)}
+                    </td>
+                  </React.Fragment>
+                ))}
+              </tr>
+
+              {/* ACTUAL PROD QTY: RH */}
+              <tr>
+                <td className="border border-gray-800 p-2 text-left px-3 font-medium bg-gray-50">
+                  RH
+                </td>
+
+                {lineColumns.map((col, globalIdx) => (
+                  <React.Fragment key={`rh-${globalIdx}`}>
+                    {["shift1", "shift2", "shift3"].map((shift) => (
+                      <td key={shift} className="border border-gray-800 p-0">
+                        <input
+                          type="number"
+                          min="0"
+                          max={col.capacity[shift] || undefined}
+                          className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold"
+                          value={col.actualProd.rh[shift]}
+                          onChange={(e) => handleActualProdChange(globalIdx, "rh", shift, e.target.value)}
+                        />
+                      </td>
+                    ))}
+                    <td className="border border-gray-800 p-2 font-bold bg-gray-100">
+                      {sumValues(col.actualProd.rh.shift1, col.actualProd.rh.shift2, col.actualProd.rh.shift3)}
+                    </td>
+                  </React.Fragment>
+                ))}
+              </tr>
+
+              {/* NO OF MANPOWER */}
+              <tr>
+                <td colSpan={3} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50">
+                  NO OF MANPOWER (UTILIZED)
+                </td>
+
+                {lineColumns.map((col, globalIdx) => (
+                  <React.Fragment key={`mp-${globalIdx}`}>
+                    {["shift1", "shift2", "shift3"].map((shift) => (
+                      <td key={shift} className="border border-gray-800 p-0">
+                        <input
+                          type="number"
+                          min="0"
+                          className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold"
+                          value={col.manpower[shift]}
+                          onChange={(e) => handleManpowerChange(globalIdx, shift, e.target.value)}
+                        />
+                      </td>
+                    ))}
+                    <td className="border border-gray-800 p-2 font-bold bg-gray-100">
+                      {sumValues(col.manpower.shift1, col.manpower.shift2, col.manpower.shift3)}
+                    </td>
+                  </React.Fragment>
+                ))}
+              </tr>
+
+              {/* LOSS REASONS 1 - 13 */}
+              {LOSS_REASONS.map((loss) => (
+                <tr key={`loss-row-${loss.id}`}>
+                  <td className="border border-gray-800 p-2 font-medium">{loss.id}</td>
+
+                  {loss.isFirst && (
+                    <td rowSpan={loss.rowSpan} className="border border-gray-800 p-2 font-bold bg-gray-100 text-gray-800 align-middle">
+                      {loss.category}
+                    </td>
+                  )}
+
+                  <td className="border border-gray-800 p-2 text-left px-3 text-gray-900 font-medium">
+                    {loss.name}
+                  </td>
+
+                  {lineColumns.map((col, globalIdx) => (
+                    <React.Fragment key={`l-${loss.id}-${globalIdx}`}>
+                      {["shift1", "shift2", "shift3"].map((shift) => (
+                        <td key={shift} className="border border-gray-800 p-0">
+                          <input
+                            type="number"
+                            min="0"
+                            className="w-full h-full text-center outline-none bg-transparent py-2 font-semibold"
+                            value={col.losses[`loss_${loss.id}`]?.[shift]}
+                            onChange={(e) => handleLossChange(globalIdx, loss.id, shift, e.target.value)}
+                          />
+                        </td>
+                      ))}
+                      <td className="border border-gray-800 p-2 font-bold bg-gray-100">
+                        {sumValues(
+                          col.losses[`loss_${loss.id}`]?.shift1,
+                          col.losses[`loss_${loss.id}`]?.shift2,
+                          col.losses[`loss_${loss.id}`]?.shift3
+                        )}
+                      </td>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              ))}
+
+              {/* TOTAL LOSS ROW */}
+              <tr className="font-bold bg-gray-100 text-gray-900">
+                <td colSpan={3} className="border border-gray-800 p-2 text-left px-3">
+                  Total Loss (mins)
+                </td>
+
+                {lineColumns.map((col, globalIdx) => (
+                  <React.Fragment key={`tot-loss-${globalIdx}`}>
+                    <td className="border border-gray-800 p-2">
+                      {calcTotalLoss(col, "shift1") || 0}
+                    </td>
+                    <td className="border border-gray-800 p-2">
+                      {calcTotalLoss(col, "shift2") || 0}
+                    </td>
+                    <td className="border border-gray-800 p-2">
+                      {calcTotalLoss(col, "shift3") || 0}
+                    </td>
+                    <td className="border border-gray-800 p-2 bg-gray-200 font-extrabold">
+                      {sumValues(
+                        calcTotalLoss(col, "shift1"),
+                        calcTotalLoss(col, "shift2"),
+                        calcTotalLoss(col, "shift3")
+                      ) || 0}
+                    </td>
+                  </React.Fragment>
+                ))}
+              </tr>
+
+              {/* 1. SECTION INCHARGE SIGNATURE ROW (SEND TO PRODUCT ENGINEER FLOW) */}
+              <tr>
+                <td colSpan={3} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Section Incharge Signature (Send to PE)
+                </td>
+
+                {["shift1", "shift2", "shift3"].map((s, idx) => {
+                  const peSign = signatures.sectionInchargeSign[s] || "";
+                  const isApproved = peSign.startsWith("Approved (");
+
+                  return (
+                    <td key={`sis-${s}`} colSpan={Math.max(1, Math.floor((lineColumns.length * 4) / 3))} className="border border-gray-800 p-0 h-10 bg-gray-50/40">
+                      <div className="flex items-center justify-between px-2 py-1">
+                        <span className="font-bold text-gray-600 text-xs whitespace-nowrap mr-2">
+                          Shift {["I", "II", "III"][idx]}:
+                        </span>
+                        {isApproved ? (
+                          <div className="flex flex-col items-center justify-center py-1">
+                            <span className="text-[10px] font-bold text-green-600 mb-0.5">Approved By PE ✓</span>
+                            <span className="text-xs font-black uppercase text-gray-800">
+                              {peSign.replace("Approved (", "").replace(")", "")}
+                            </span>
+                          </div>
+                        ) : (
+                          <select
+                            className="w-full h-full text-center px-1 outline-none bg-transparent font-medium cursor-pointer text-xs"
+                            value={peSign.startsWith("Pending [") ? peSign.replace("Pending [", "").replace("]", "") : peSign}
+                            onChange={(e) => handleSignatureChange("sectionInchargeSign", s, e.target.value)}
+                          >
+                            <option value="">-- Send to Product Engineer --</option>
+                            {peUsers.map((pe, pIdx) => {
+                              const uname = pe.username || pe.employeeId || pe.name;
+                              return (
+                                <option key={pIdx} value={uname}>
+                                  {uname.toUpperCase()}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* 2. SHIFT OFFICER SIGNATURE ROW (APPROVE BUTTON FLOW) */}
+              <tr>
+                <td colSpan={3} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Shift Officer Signature
+                </td>
+
+                {["shift1", "shift2", "shift3"].map((s, idx) => {
+                  const signVal = signatures.shiftOfficerSign[s] || "";
+                  return (
+                    <td key={`sos-${s}`} colSpan={Math.max(1, Math.floor((lineColumns.length * 4) / 3))} className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
+                      <div className="flex items-center justify-between px-2">
+                        <span className="font-bold text-gray-600 text-xs whitespace-nowrap mr-2">
+                          Shift {["I", "II", "III"][idx]}:
+                        </span>
+                        {signVal ? (
+                          <div className="flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
+                            <span className="text-xs font-bold text-green-600 mb-0.5">Approved By ✓</span>
+                            <span className="text-sm font-black text-gray-900 uppercase">
+                              {signVal.replace("Pending [", "").replace("]", "").replace("Approved (", "").replace(")", "")}
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleShiftOfficerApprove(s)}
+                            className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer"
+                          >
+                            Approve
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+
             </tbody>
           </table>
         </div>
 
-        <div className="border border-gray-800 p-2 bg-yellow-50 text-[11px] font-bold text-gray-800 flex items-center justify-center">
-          NOTE : TOOL CHANGE LOSSES TIME ABOVE 20 MINS ONLY MENTION THE LOSS
+        {/* NOTES & INSTRUCTIONS */}
+        <div className="border-2 border-gray-800 flex flex-col mt-4">
+          <div className="px-2 py-1 font-bold text-gray-800 text-sm border-b border-gray-800 bg-gray-100">Notes / Instructions:</div>
+          <ol className="list-decimal list-inside p-3 text-xs text-gray-700 space-y-1.5 leading-relaxed bg-white">
+            <li>TOOL CHANGE LOSSES TIME ABOVE 20 MINS ONLY MENTION THE LOSS.</li>
+            <li>During set-up change, the production and idle time parameters should be verified and recorded.</li>
+          </ol>
         </div>
 
-        <div className="flex justify-end gap-4 pt-4 border-t border-gray-300">
+        {/* SAVE BUTTON */}
+        <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
           <button
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer text-sm tracking-wider uppercase"
+            className="bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer uppercase tracking-wider text-sm"
           >
-            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE REPORT"}
+            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & CONTINUE"}
           </button>
         </div>
+
       </div>
     </div>
   );

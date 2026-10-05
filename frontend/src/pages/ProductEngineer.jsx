@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
-import { RefreshCw, Loader, X } from "lucide-react";
+import { RefreshCw, Loader, X, FileText, Activity, Clock } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -9,8 +9,17 @@ const ProductEngineer = () => {
   const navigate = useNavigate();
   const { shopId } = useParams();
 
-  const [pendingReports, setPendingReports] = useState([]);
+  const [activeTab, setActiveTab] = useState("airgap"); // "airgap" | "idletime"
+
+  // Air Gap reports
+  const [pendingAirGapReports, setPendingAirGapReports] = useState([]);
+  
+  // Idle Time reports
+  const [pendingIdleTimeReports, setPendingIdleTimeReports] = useState([]);
+
+  // Modal review state
   const [selectedReport, setSelectedReport] = useState(null);
+  const [reviewReportType, setReviewReportType] = useState(null); // "airgap" | "idletime"
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
 
@@ -22,7 +31,8 @@ const ProductEngineer = () => {
     return new Date(dateStr).toLocaleDateString("en-GB");
   };
 
-  const fetchPendingReports = async () => {
+  // Fetch pending Air Gap Checksheets
+  const fetchPendingAirGapReports = async () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
@@ -31,40 +41,75 @@ const ProductEngineer = () => {
       );
       if (res.ok) {
         const data = await res.json();
-        setPendingReports(Array.isArray(data) ? data : []);
+        setPendingAirGapReports(Array.isArray(data) ? data : []);
       }
     } catch (err) {
       toast.error("Failed to load Pending Air Gap Reports.");
     }
   };
 
+  // Fetch pending Idle Time Reports
+  const fetchPendingIdleTimeReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL}/api/daily-production-idle-time/pe/pending/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingIdleTimeReports(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending Idle Time Reports.");
+    }
+  };
+
+  const fetchAllReports = () => {
+    fetchPendingAirGapReports();
+    fetchPendingIdleTimeReports();
+  };
+
   useEffect(() => {
-    fetchPendingReports();
+    fetchAllReports();
   }, [shopId, currentPE]);
 
-  // Open Full-screen split review modal with single-day PDF
-  const handleOpenReviewModal = async (report) => {
+  // Open Full-screen split review modal with PDF
+  const handleOpenReviewModal = async (report, type) => {
     setSelectedReport(report);
+    setReviewReportType(type);
     setPdfUrl(null);
     setIsPdfLoading(true);
 
     try {
       const token = localStorage.getItem("token");
-      const params = new URLSearchParams({
-        lineCode: report.lineCode,
-        partNo: report.partNo,
-        date: report.reportDate,
-        shopId: String(report.machineShop || shopId || 3),
-      });
+      let apiUrl = "";
 
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/report?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      if (type === "airgap") {
+        const params = new URLSearchParams({
+          lineCode: report.lineCode,
+          partNo: report.partNo,
+          date: report.reportDate,
+          shopId: String(report.machineShop || shopId || 3),
+        });
+        apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/report?${params.toString()}`;
+      } else {
+        // Daily Production Idle Time Report
+        const params = new URLSearchParams({
+          lineCode: report.lineCode,
+          date: report.reportDate,
+          shopId: String(report.machineShop || shopId || 3),
+        });
+        apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/report?${params.toString()}`;
+      }
+
+      const res = await fetch(apiUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (!res.ok) {
         if (res.status === 404) {
-           throw new Error("No data recorded for this specific date.");
+          throw new Error("No data recorded for this specific date.");
         }
         throw new Error("Report request failed");
       }
@@ -73,37 +118,62 @@ const ProductEngineer = () => {
       setPdfUrl(URL.createObjectURL(blob));
     } catch (err) {
       toast.error(err.message || "Failed to generate PDF preview.");
-      setSelectedReport(null); // Close modal if no data
+      setSelectedReport(null);
+      setReviewReportType(null);
     }
     setIsPdfLoading(false);
   };
 
+  // Submit PE Signature Approval
   const submitPESignature = async () => {
+    if (!selectedReport || !reviewReportType) return;
+
     try {
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/pe/sign`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-          body: JSON.stringify({
-            lineCode: selectedReport.lineCode,
-            partNo: selectedReport.partNo,
-            date: selectedReport.reportDate,
-            signature: currentPE
-          }),
-        }
-      );
+      const token = localStorage.getItem("token");
+      let endpoint = "";
+      let payload = {};
+
+      if (reviewReportType === "airgap") {
+        endpoint = `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/pe/sign`;
+        payload = {
+          lineCode: selectedReport.lineCode,
+          partNo: selectedReport.partNo,
+          date: selectedReport.reportDate,
+          signature: currentPE,
+        };
+      } else {
+        endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/pe/sign`;
+        payload = {
+          lineCode: selectedReport.lineCode,
+          date: selectedReport.reportDate,
+          machineShop: selectedReport.machineShop || shopId || 3,
+          signature: currentPE,
+        };
+      }
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
       if (!res.ok) throw new Error("Approval failed");
 
-      toast.success("Air Gap Checksheet verified successfully!", { autoClose: 2000 });
+      const successMsg =
+        reviewReportType === "airgap"
+          ? "Air Gap Checksheet verified and approved successfully!"
+          : "Daily Production & Idle Time Report verified and approved successfully!";
+
+      toast.success(successMsg, { autoClose: 2000 });
 
       setTimeout(() => {
         setSelectedReport(null);
-        fetchPendingReports();
+        setReviewReportType(null);
+        setPdfUrl(null);
+        fetchAllReports();
       }, 1500);
     } catch (err) {
       toast.error("Failed to save PE verification.");
@@ -115,102 +185,219 @@ const ProductEngineer = () => {
       <Header />
       <ToastContainer position="top-right" autoClose={2000} />
 
-      <div className="min-h-screen bg-[#2d2d2d] p-10 space-y-10">
-        <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-2xl p-8 border-t-4 border-blue-500">
-          <div className="flex justify-between items-center mb-6 border-b pb-4">
+      <div className="min-h-screen bg-[#2d2d2d] p-6 sm:p-10 space-y-6">
+        <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-2xl p-6 sm:p-8 border-t-4 border-blue-500">
+          
+          {/* Top Bar */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b pb-4 gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-800">
-                Air Gap Checksheet Approvals
+              <h1 className="text-2xl sm:text-3xl font-black text-gray-800 uppercase tracking-tight">
+                Product Engineer Verification Portal
               </h1>
               <p className="text-xs text-gray-500 mt-1">
-                Machine Shop-{shopId || 3} Pending Product Engineer Verification
+                Machine Shop-{shopId || 3} Pending Authorizations
               </p>
             </div>
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={fetchPendingReports}
-                className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                title="Refresh"
+                onClick={fetchAllReports}
+                className="p-2.5 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer border border-gray-200 shadow-sm"
+                title="Refresh All Pending Reports"
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
-              <span className="bg-blue-100 text-blue-800 px-4 py-2 rounded font-bold uppercase shadow-sm">
+              <span className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-sm">
                 Logged in: {currentPE}
               </span>
             </div>
           </div>
 
-          {pendingReports.length === 0 ? (
-            <p className="text-gray-500 italic py-6">No Air Gap Checksheets pending your review.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-gray-300">
-                <thead className="bg-gray-800 text-white">
-                  <tr>
-                    <th className="p-3 border border-gray-300">Date</th>
-                    <th className="p-3 border border-gray-300">Line Code</th>
-                    <th className="p-3 border border-gray-300">Part Name</th>
-                    <th className="p-3 border border-gray-300">Part No</th>
-                    <th className="p-3 border border-gray-300">Status</th>
-                    <th className="p-3 border border-gray-300 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingReports.map((report, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="p-3 border border-gray-300 font-bold">
-                        {formatDate(report.reportDate)}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-bold">
-                        {report.lineCode}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {report.partName || "N/A"}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {report.partNo || "N/A"}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
-                          Pending Review
-                        </span>
-                      </td>
-                      <td className="p-3 border border-gray-300 text-center">
-                        <button
-                          onClick={() => handleOpenReviewModal(report)}
-                          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors"
-                        >
-                          Review & Verify
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Navigation Tabs */}
+          <div className="flex border-b border-gray-200 mb-6 gap-2">
+            <button
+              onClick={() => setActiveTab("airgap")}
+              className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
+                activeTab === "airgap"
+                  ? "border-blue-600 text-blue-600 bg-blue-50/50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              <span>Air Gap Sensor Checksheets</span>
+              {pendingAirGapReports.length > 0 && (
+                <span className="bg-red-500 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                  {pendingAirGapReports.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("idletime")}
+              className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
+                activeTab === "idletime"
+                  ? "border-orange-500 text-orange-600 bg-orange-50/50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>Daily Production & Idle Time Reports</span>
+              {pendingIdleTimeReports.length > 0 && (
+                <span className="bg-orange-500 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                  {pendingIdleTimeReports.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* TAB 1: Air Gap Sensor Reports */}
+          {activeTab === "airgap" && (
+            <div>
+              {pendingAirGapReports.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                  <Activity className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                  <p className="text-gray-500 font-semibold">No Air Gap Checksheets pending your review.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Line Code</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Part No</th>
+                        <th className="p-3 border border-gray-300 text-center">Status</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingAirGapReports.map((report, idx) => (
+                        <tr key={`ag-${idx}`} className="hover:bg-blue-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold text-blue-700">
+                            {report.lineCode}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.partNo || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <span className="bg-red-100 text-red-700 px-2.5 py-1 rounded-full text-xs font-bold">
+                              Pending Review
+                            </span>
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report, "airgap")}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Verify
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: Daily Production & Idle Time Reports */}
+          {activeTab === "idletime" && (
+            <div>
+              {pendingIdleTimeReports.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                  <Clock className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                  <p className="text-gray-500 font-semibold">No Daily Production & Idle Time Reports pending your review.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Line Code</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300 text-center">Shop</th>
+                        <th className="p-3 border border-gray-300 text-center">Status</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingIdleTimeReports.map((report, idx) => (
+                        <tr key={`it-${idx}`} className="hover:bg-orange-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold text-orange-600">
+                            {report.lineCode}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-700">
+                            MS-{report.machineShop || shopId || 3}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <span className="bg-orange-100 text-orange-800 px-2.5 py-1 rounded-full text-xs font-bold">
+                              Pending PE Approval
+                            </span>
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report, "idletime")}
+                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Verify
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      {/* FULL-SCREEN SPLIT MODAL */}
+      {/* FULL-SCREEN SPLIT MODAL FOR PREVIEW & VERIFICATION */}
       {selectedReport && (
         <div className="fixed inset-0 z-[9999] bg-white flex flex-col overflow-hidden animate-fade-in">
           <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
-            <h3 className="font-bold text-xl uppercase tracking-wider">
-              Verify Air Gap Checksheet
-            </h3>
+            <div className="flex items-center gap-3">
+              <h3 className="font-bold text-lg sm:text-xl uppercase tracking-wider">
+                {reviewReportType === "airgap"
+                  ? "Verify Air Gap Checksheet"
+                  : "Verify Daily Production & Idle Time Report"}
+              </h3>
+              <span className={`text-[11px] font-extrabold px-3 py-1 rounded-full uppercase ${
+                reviewReportType === "airgap" ? "bg-blue-600" : "bg-orange-500"
+              }`}>
+                {reviewReportType === "airgap" ? "Air Gap Checksheet" : "Idle Time Report"}
+              </span>
+            </div>
             <button
               onClick={() => {
                 setSelectedReport(null);
+                setReviewReportType(null);
                 setPdfUrl(null);
               }}
-              className="text-gray-400 hover:text-red-400 transition-colors"
+              className="text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
             >
               <X size={28} />
             </button>
           </div>
+
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            {/* Left Preview Pane */}
             <div className="flex-1 h-full bg-[#525659] relative flex items-center justify-center">
               {isPdfLoading && (
                 <Loader className="animate-spin text-white w-12 h-12 absolute" />
@@ -223,26 +410,53 @@ const ProductEngineer = () => {
                 />
               )}
             </div>
-            <div className="w-full lg:w-[400px] bg-gray-50 border-l border-gray-300 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
+
+            {/* Right Details and Approval Pane */}
+            <div className="w-full lg:w-[420px] bg-gray-50 border-l border-gray-300 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
               <div className="p-6 flex-1 flex flex-col">
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 mb-6 text-sm flex flex-col gap-2 shadow-sm text-blue-900">
+                <div className={`p-4 rounded-xl border mb-6 text-sm flex flex-col gap-2.5 shadow-sm ${
+                  reviewReportType === "airgap"
+                    ? "bg-blue-50 border-blue-200 text-blue-900"
+                    : "bg-orange-50 border-orange-200 text-orange-950"
+                }`}>
+                  <h4 className="font-black text-base uppercase border-b pb-2">
+                    Report Summary
+                  </h4>
                   <p>
                     <span className="font-bold">Line Code:</span> {selectedReport.lineCode}
                   </p>
                   <p>
                     <span className="font-bold">Part Name:</span> {selectedReport.partName || "N/A"}
                   </p>
+                  {selectedReport.partNo && (
+                    <p>
+                      <span className="font-bold">Part No:</span> {selectedReport.partNo}
+                    </p>
+                  )}
                   <p>
                     <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate)}
                   </p>
+                  <p>
+                    <span className="font-bold">Machine Shop:</span> MS-{selectedReport.machineShop || shopId || 3}
+                  </p>
+                  <p>
+                    <span className="font-bold">Assigned Reviewer:</span> {currentPE}
+                  </p>
                 </div>
 
-                <div className="mt-auto">
+                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 mb-6 text-xs text-yellow-900">
+                  <p className="font-bold mb-1">Verification Confirmation</p>
+                  <p>
+                    By clicking <strong>Verify & Approve</strong>, your signature (<span className="font-bold">{currentPE}</span>) will be recorded permanently as the authorized Product Engineer for this report.
+                  </p>
+                </div>
+
+                <div className="mt-auto pt-4">
                   <button
                     onClick={submitPESignature}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1 cursor-pointer flex items-center justify-center gap-2"
                   >
-                    Verify & Approve
+                    <span>Verify & Approve</span>
                   </button>
                 </div>
               </div>

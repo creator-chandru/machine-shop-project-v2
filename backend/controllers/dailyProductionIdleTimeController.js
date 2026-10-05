@@ -470,12 +470,21 @@ const getPendingPEIdleTimeData = async (req, res) => {
         const { name } = req.params;
         const shopId = parseInt(req.query.shopId, 10);
 
+        if (!name) {
+            return res.status(400).json({
+                error: "Product Engineer name is required"
+            });
+        }
+
         const request = new sql.Request();
 
-        let shopFilter = '';
+        request.input("peName", sql.NVarChar(255), name);
+
+        let shopFilter = "";
+
         if (!isNaN(shopId)) {
-            request.input('machineShop', sql.Int, shopId);
-            shopFilter = ' AND machineShop = @machineShop';
+            request.input("machineShop", sql.Int, shopId);
+            shopFilter = " AND machineShop = @machineShop";
         }
 
         const result = await request.query(`
@@ -483,43 +492,58 @@ const getPendingPEIdleTimeData = async (req, res) => {
                 machineShop,
                 lineCode,
                 MAX(partName) AS partName,
-                FORMAT(reportDate, 'yyyy-MM-dd') AS reportDate,
+                CONVERT(varchar(10), reportDate, 23) AS reportDate,
+
                 MAX(secInchargeSign_Shift1) AS secInchargeSign_Shift1,
                 MAX(secInchargeSign_Shift2) AS secInchargeSign_Shift2,
                 MAX(secInchargeSign_Shift3) AS secInchargeSign_Shift3,
+
                 MAX(shiftOfficerSign_Shift1) AS shiftOfficerSign_Shift1,
                 MAX(shiftOfficerSign_Shift2) AS shiftOfficerSign_Shift2,
                 MAX(shiftOfficerSign_Shift3) AS shiftOfficerSign_Shift3,
+
                 'Pending Review' AS status
+
             FROM DailyProductionIdleTimeReport
-            WHERE (
-                secInchargeSign_Shift1 LIKE 'Pending [%' OR
-                secInchargeSign_Shift2 LIKE 'Pending [%' OR
-                secInchargeSign_Shift3 LIKE 'Pending [%' OR
-                shiftOfficerSign_Shift1 LIKE 'Pending [%' OR
-                shiftOfficerSign_Shift2 LIKE 'Pending [%' OR
-                shiftOfficerSign_Shift3 LIKE 'Pending [%'
+
+            WHERE
+            (
+                secInchargeSign_Shift1 = 'Pending [' + @peName + ']'
+                OR secInchargeSign_Shift2 = 'Pending [' + @peName + ']'
+                OR secInchargeSign_Shift3 = 'Pending [' + @peName + ']'
             )
-            AND NOT (
-                (secInchargeSign_Shift1 LIKE 'Approved (%' OR secInchargeSign_Shift1 IS NULL OR secInchargeSign_Shift1 = '') AND
-                (secInchargeSign_Shift2 LIKE 'Approved (%' OR secInchargeSign_Shift2 IS NULL OR secInchargeSign_Shift2 = '') AND
-                (secInchargeSign_Shift3 LIKE 'Approved (%' OR secInchargeSign_Shift3 IS NULL OR secInchargeSign_Shift3 = '') AND
-                (shiftOfficerSign_Shift1 LIKE 'Approved (%' OR shiftOfficerSign_Shift1 IS NULL OR shiftOfficerSign_Shift1 = '') AND
-                (shiftOfficerSign_Shift2 LIKE 'Approved (%' OR shiftOfficerSign_Shift2 IS NULL OR shiftOfficerSign_Shift2 = '') AND
-                (shiftOfficerSign_Shift3 LIKE 'Approved (%' OR shiftOfficerSign_Shift3 IS NULL OR shiftOfficerSign_Shift3 = '')
+
+            AND
+            (
+                secInchargeSign_Shift1 LIKE 'Pending [[]%'
+                OR secInchargeSign_Shift2 LIKE 'Pending [[]%'
+                OR secInchargeSign_Shift3 LIKE 'Pending [[]%'
             )
-              ${shopFilter}
-            GROUP BY machineShop, lineCode, reportDate
-            ORDER BY reportDate DESC
+
+            ${shopFilter}
+
+            GROUP BY
+                machineShop,
+                lineCode,
+                reportDate
+
+            ORDER BY
+                reportDate DESC
         `);
 
         return res.status(200).json(result.recordset);
+
     } catch (err) {
-        console.error("Error fetching pending PE idle time data:", err);
-        return res.status(500).json({ error: 'Failed to fetch pending PE idle time data' });
+        console.error(
+            "Error fetching pending PE idle time data:",
+            err
+        );
+
+        return res.status(500).json({
+            error: "Failed to fetch pending PE idle time data"
+        });
     }
 };
-
 // ============================================================
 // POST: PE SIGN AND APPROVE
 // ============================================================

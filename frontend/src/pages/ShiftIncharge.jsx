@@ -46,7 +46,8 @@ const ShiftIncharge = () => {
     { name: "Skill Evaluation - Practical Production and Quantity", path: `/shift-incharge/${shopId}/skill-evaluation-practical`, icon: BadgeCheck },
     { name: "Operator Observation Sheet", path: `/shift-incharge/${shopId}/operator-observation-sheet`, icon: SearchCheck },
     { name: "Competency Evaluation Form", path: `/shift-incharge/${shopId}/competency-evaluation-form`, icon: ShieldCheck },
-    { name: "Corrective Action Register", path: `/shift-incharge/${shopId}/corrective-action-register`, icon: ClipboardCheck }
+    { name: "Corrective Action Register", path: `/shift-incharge/${shopId}/corrective-action-register`, icon: ClipboardCheck },
+    { name: "Jig / Fixture Issue Intimation Report", path: `/shift-incharge/${shopId}/jig-fixture-intimation-report`, icon: Wrench }
   ];
 
   return (

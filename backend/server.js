@@ -19,6 +19,7 @@ const operatorObservationSheetRoutes = require("./routes/operatorObservationShee
 const skillEvaluationPracticalRoutes = require("./routes/skillEvaluationPractical.js");
 const competencyEvaluationFormRoutes = require("./routes/competencyEvaluationFormRoutes.js");
 const correctiveActionRoutes = require("./routes/correction_action_register.js");
+const jigFixtureIntimationReportRoutes=require("./routes/jig_fixture_intimation_report.js");
 const app = express();
 
 app.use(cors({
@@ -48,8 +49,7 @@ app.use('/api', competencyEvaluationFormRoutes);
 app.use('/api/parts', partQtyRoutes);
 app.use('/api/mappings', partMappingRoutes);
 app.use('/api/corrective-actions', correctiveActionRoutes);
-
-
+app.use('/api/jig-fixture-issue', jigFixtureIntimationReportRoutes);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);

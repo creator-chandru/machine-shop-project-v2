@@ -14,6 +14,7 @@ import SkillEvaluationPractical from "./skillEvaluationPractical";
 import OperatorObservationSheet from "./operatorObservationSheet";
 import CompetencyEvaluationForm from "./competencyEvaluationForm";
 import CorrectiveActionRegister from "./corrective_action_register";
+import JigFixtureIssueIntimation from "./jig_fixture_intimation_report";
 /**
  * Central map for operator forms
  *
@@ -47,7 +48,9 @@ const formMap = {
    "operator-observation-sheet": <OperatorObservationSheet />,
    
    "competency-evaluation-form": <CompetencyEvaluationForm />,
-   "corrective-action-register":<CorrectiveActionRegister />
+   "corrective-action-register":<CorrectiveActionRegister />,
+   "jig-fixture-intimation-report":<JigFixtureIssueIntimation/>
+  
   // Future forms:
   // "some-form": <SomeForm />,
 };

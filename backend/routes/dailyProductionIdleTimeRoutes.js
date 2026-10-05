@@ -4,11 +4,19 @@ const router = express.Router();
 const {
   getMachineShopDetails,
   getPartQuantities,
+  getIncharges,
+  getPeIncharges,
+  getHofIncharges,
   getPEUsers,
+  getPartTraceability,
   getDailyProductionIdleTime,
   saveDailyProductionIdleTime,
+  getQcIdleTimeReports,
+  signQcIdleTimeApproval,
   getPendingPEIdleTimeData,
   signPEApproval,
+  getHofIdleTimeReports,
+  signHofIdleTimeApproval,
   generateIdleTimeReport
 } = require('../controllers/dailyProductionIdleTimeController.js');
 
@@ -24,22 +32,68 @@ router.get(
   getPartQuantities
 );
 
+// Get Approver Dropdowns
+router.get(
+  '/daily-production-idle-time/incharges',
+  getIncharges
+);
+router.get(
+  '/daily-production-idle-time/pe-incharges',
+  getPeIncharges
+);
+router.get(
+  '/daily-production-idle-time/hof-incharges',
+  getHofIncharges
+);
+
 // Get PE Users for selection dropdown
 router.get(
   '/daily-production-idle-time/pe/users',
   getPEUsers
 );
 
-// Get Pending Idle Time Reports for Product Engineer Dashboard
+// Traceability
+router.get(
+  '/daily-production-idle-time/traceability',
+  getPartTraceability
+);
+
+// Get QC Pending Idle Time Reports & Sign
+router.get(
+  '/daily-production-idle-time/qc/:name',
+  getQcIdleTimeReports
+);
+router.post(
+  '/daily-production-idle-time/sign-qc',
+  signQcIdleTimeApproval
+);
+
+// Get Pending Idle Time Reports for Product Engineer Dashboard & Sign
 router.get(
   '/daily-production-idle-time/pe/pending/:name',
   getPendingPEIdleTimeData
 );
-
-// PE sign and approve endpoint
+router.get(
+  '/daily-production-idle-time/pe/:name',
+  getPendingPEIdleTimeData
+);
 router.post(
   '/daily-production-idle-time/pe/sign',
   signPEApproval
+);
+router.post(
+  '/daily-production-idle-time/sign-pe',
+  signPEApproval
+);
+
+// Get HOF Pending Idle Time Reports & Sign
+router.get(
+  '/daily-production-idle-time/hof/:name',
+  getHofIdleTimeReports
+);
+router.post(
+  '/daily-production-idle-time/sign-hof',
+  signHofIdleTimeApproval
 );
 
 // Generate PDF Report Preview endpoint

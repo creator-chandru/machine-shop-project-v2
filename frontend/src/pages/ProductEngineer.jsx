@@ -39,7 +39,7 @@ const ProductEngineer = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/air-gap-sensor/pe/pending/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
+        `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/pe/pending/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -56,7 +56,7 @@ const ProductEngineer = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/daily-production-idle-time/pe/pending/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
+        `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/pe/pending/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -95,6 +95,20 @@ const ProductEngineer = () => {
     fetchAllReports();
   }, [shopId, currentPE]);
 
+  const normalizeDate = (rawDate) => {
+    if (!rawDate) return "";
+    let isoDate = String(rawDate);
+    if (isoDate.includes("/")) {
+      const parts = isoDate.split("/");
+      if (parts.length === 3) {
+        isoDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+      }
+    } else if (isoDate.includes("T")) {
+      isoDate = isoDate.split("T")[0];
+    }
+    return isoDate;
+  };
+
   // Open Full-screen split review modal with PDF
   const handleOpenReviewModal = async (report, type) => {
     setSelectedReport(report);
@@ -105,35 +119,25 @@ const ProductEngineer = () => {
     try {
       const token = localStorage.getItem("token");
       let apiUrl = "";
+      const isoDate = normalizeDate(report.reportDate || report.checkDate || report.date);
 
       if (type === "airgap") {
         const params = new URLSearchParams({
           lineCode: report.lineCode,
-          partNo: report.partNo,
-          date: report.reportDate,
+          partNo: report.partNo || "",
+          date: isoDate,
           shopId: String(report.machineShop || shopId || 3),
         });
         apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/report?${params.toString()}`;
       } else if (type === "idletime") {
         const params = new URLSearchParams({
           lineCode: report.lineCode,
-          date: report.reportDate,
+          date: isoDate,
           shopId: String(report.machineShop || shopId || 3),
         });
         apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/report?${params.toString()}`;
       } else {
         // Daily Production Report
-        const rawDate = report.reportDate || report.checkDate;
-        let isoDate = rawDate;
-        if (rawDate && rawDate.includes("/")) {
-          const parts = rawDate.split("/");
-          if (parts.length === 3) {
-            isoDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
-          }
-        } else if (rawDate && rawDate.includes("T")) {
-          isoDate = rawDate.split("T")[0];
-        }
-
         const params = new URLSearchParams({
           lineCode: report.lineCode,
           date: isoDate,
@@ -173,34 +177,27 @@ const ProductEngineer = () => {
       const token = localStorage.getItem("token");
       let endpoint = "";
       let payload = {};
+      const isoDate = normalizeDate(selectedReport.reportDate || selectedReport.checkDate || selectedReport.date);
 
       if (reviewReportType === "airgap") {
         endpoint = `${process.env.REACT_APP_API_URL || ""}/api/air-gap-sensor/pe/sign`;
         payload = {
           lineCode: selectedReport.lineCode,
           partNo: selectedReport.partNo,
-          date: selectedReport.reportDate,
+          date: isoDate,
           signature: currentPE,
         };
       } else if (reviewReportType === "idletime") {
         endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-idle-time/pe/sign`;
         payload = {
           lineCode: selectedReport.lineCode,
-          date: selectedReport.reportDate,
+          date: isoDate,
           machineShop: selectedReport.machineShop || shopId || 3,
           signature: currentPE,
+          peUsername: currentPE,
         };
       } else {
         // Daily Production Report
-        const rawDate = selectedReport.reportDate || selectedReport.checkDate;
-        let isoDate = rawDate;
-        if (rawDate && rawDate.includes("/")) {
-          const parts = rawDate.split("/");
-          if (parts.length === 3) {
-            isoDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
-          }
-        }
-
         endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-pe`;
         payload = {
           lineCode: selectedReport.lineCode,

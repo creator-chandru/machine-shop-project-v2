@@ -2,30 +2,48 @@ const express = require('express');
 
 const router = express.Router();
 
-const correctiveActionController = require('../controllers/correctiveActionController');
+const correctiveActionController =
+    require('../controllers/correctiveActionController');
 
-// Get part names
+
+// ============================================================
+// GET PART NAMES
+// ============================================================
+
 router.get(
     '/part-names/:shopId',
     correctiveActionController.getPartNames
 );
 
-// Get existing record
+
+// ============================================================
+// GET EXISTING RECORD
+// ============================================================
+
 router.get(
     '/record',
     correctiveActionController.getRecord
 );
 
-// Save record
+
+// ============================================================
+// SAVE RECORD
+// ============================================================
+
 router.post(
     '/',
     correctiveActionController.saveRecord
 );
 
-// Generate PDF
+
+// ============================================================
+// GENERATE PDF
+// ============================================================
+
 router.get(
     '/report',
     correctiveActionController.generatePdfReport
 );
+
 
 module.exports = router;

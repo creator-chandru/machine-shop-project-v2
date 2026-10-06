@@ -217,7 +217,10 @@ const ProductEngineer = () => {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Approval failed");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Approval failed");
+      }
 
       const successMsg =
         reviewReportType === "airgap"
@@ -235,7 +238,7 @@ const ProductEngineer = () => {
         fetchAllReports();
       }, 1500);
     } catch (err) {
-      toast.error("Failed to save PE verification.");
+      toast.error(err.message || "Failed to save PE verification.");
     }
   };
 
@@ -466,6 +469,7 @@ const ProductEngineer = () => {
                         <th className="p-3 border border-gray-300">Date</th>
                         <th className="p-3 border border-gray-300">Line Code</th>
                         <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Submitted By</th>
                         <th className="p-3 border border-gray-300 text-center">Shop</th>
                         <th className="p-3 border border-gray-300 text-center">Status</th>
                         <th className="p-3 border border-gray-300 text-center">Action</th>
@@ -473,7 +477,10 @@ const ProductEngineer = () => {
                     </thead>
                     <tbody className="text-sm">
                       {pendingIdleTimeReports.map((report, idx) => (
-                        <tr key={`it-${idx}`} className="hover:bg-orange-50/40 transition-colors">
+                        <tr
+                          key={`it-${report.id ?? `${report.machineShop}-${report.lineCode}-${report.reportDate}-${idx}`}`}
+                          className="hover:bg-orange-50/40 transition-colors"
+                        >
                           <td className="p-3 border border-gray-300 font-bold">
                             {formatDate(report.reportDate)}
                           </td>
@@ -482,6 +489,9 @@ const ProductEngineer = () => {
                           </td>
                           <td className="p-3 border border-gray-300">
                             {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 uppercase">
+                            {report.submittedBy || "Shift Incharge"}
                           </td>
                           <td className="p-3 border border-gray-300 text-center font-bold text-gray-700">
                             MS-{report.machineShop || shopId || 3}
@@ -593,6 +603,11 @@ const ProductEngineer = () => {
                   {selectedReport.shift && (
                     <p>
                       <span className="font-bold">Shift:</span> {selectedReport.shift}
+                    </p>
+                  )}
+                  {selectedReport.submittedBy && (
+                    <p>
+                      <span className="font-bold">Submitted By:</span> {selectedReport.submittedBy}
                     </p>
                   )}
                   <p>

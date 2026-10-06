@@ -1,91 +1,69 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FileDown, Plus, Trash2 } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle2,
+  Save
+} from 'lucide-react';
+
 import Header from '../components/Header';
+import { useLineSet } from '../context/LineSetContext';
 
 // ============================================================
-// DEFAULT FALLBACK PART NAMES
+// INITIAL FORM
 // ============================================================
 
-const fallbackPartNames = [
-  "YNC ESP KNUCKLE LH U/P",
-  "YNC ESP KNUCKLE RH U/P",
-  "ARM, ASSY STRG INTERMEDIATE LH Y9T",
-  "ARM, ASSY STRG INTERMEDIATE RH Y9T",
-  "KNU-STRG-FR LH – (MY19)",
-  "KNU-STRG-FR RH – (MY19)",
-  "YTA KNUCKLE LH U/P",
-  "YTA KNUCKLE RH U/P",
-  "KNUCKLE STRG FR LH J92",
-  "KNUCKLE STRG FR RH J92",
-  "STR. KNUCKLE HOUSING LH (MPV)",
-  "STR. KNUCKLE HOUSING RH (MPV)",
-  "PIVOT SUSPENSION LH (78)",
-  "PIVOT SUSPENSION RH (78)",
-  "KNUCKLE STEERING LH Y1K U/P",
-  "KNUCKLE STEERING RH Y1K U/P",
-  "KNUCKLE STREEING LH YHB U/P",
-  "KNUCKLE STREEING RH YHB U/P",
-  "KNUCKLE STEERING LH (YG8) U/P",
-  "KNUCKLE STEERING RH (YG8) U/P",
-  "KNUCKLE,L FR SUBASSY(31XA)",
-  "KNUCKLE,R FR SUBASSY(31XA)",
-  "KNUCKLE LH 20M UNPAINTED",
-  "KNUCKLE RH 20M UNPAINTED",
-  "KNUCKLE ASSY STR. LH (Y9T) ABS U/P",
-  "KNUCKLE ASSY STR. RH (Y9T) ABS U/P",
-  "DIFFERENTIAL CASE YRA",
-  "STEERING KNUCKLE LH CC21E",
-  "STEERING KNUCKLE RH CC21E",
-  "KNUCKLE STG. LH ABS PASSENGER (BOLERO ABS)",
-  "KNUCKLE STG. RH ABS PASSENGER (BOLERO ABS)",
-  "KNUCKLE STEERING LH (XD/YBA) U/P ABS",
-  "KNUCKLE STEERING RH (XD/YBA) U/P ABS"
-];
+const initialForm = {
+  departmentSection: '',
+  reportDate: new Date().toISOString().split('T')[0],
+  jfWhdReferenceNo: '',
+  shiftTime: '',
 
-// ============================================================
-// INITIAL FORM DATA
-// ============================================================
+  natureOfProblem: '',
+  receivedBy: '',
+  actionIntimatedBy: '',
 
-const initialFormData = {
-  formCode: "QF/08/MRO-04",
-  revision: "03",
-  revisionDate: "20.08.2024",
-  title: "CORRECTIVE ACTION REGISTER",
-  company: "SAKTHI AUTO",
+  actionTakenDetails: '',
+  toolingObservation: '',
+  actionTakenBy: '',
 
-  header: {
-    date: new Date().toISOString().split('T')[0]
-  },
+  workStartedAt: '',
+  workCompletedAt: '',
+  timeLost: '',
 
-  categoryLegend: [
-    {
-      code: "A",
-      description:
-        "More than 5 parts in same defect in a single day (Machining)"
-    },
-    {
-      code: "B",
-      description:
-        "Repeated rejections"
-    },
-    {
-      code: "C",
-      description:
-        "A single defect in Customer specified characteristics (Special / Critical / Safety Characteristics)"
-    },
-    {
-      code: "D",
-      description:
-        "A single defect due to Crack and part broken."
-    },
-    {
-      code: "E",
-      description:
-        "Any new defect occurred."
-    }
-  ]
+  correctiveActionFeedback: '',
+  feedbackGivenBy: '',
+
+  reasonForUndueDelay: '',
+
+  workAndSparesDetails: '',
+
+  mexMydouJf: '',
+
+  preventiveAction: ''
 };
+
+// ============================================================
+// CHECKLIST
+// ============================================================
+
+const defaultChecklistItems = [
+  'History book',
+  'Flage History Card',
+  'Chuck',
+  'History Card',
+  'J/F Inspection Plan',
+  'Tooling Manual',
+  'Informed to Design',
+  '',
+  '',
+  '',
+  '',
+  ''
+];
 
 // ============================================================
 // TOAST
@@ -103,15 +81,16 @@ const Toast = ({ message, type, onClose }) => {
 
   return (
     <div
-      className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}
+      className={`fixed bottom-6 right-6 z-[100] ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 animate-bounce`}
     >
       <span className="text-sm font-semibold">
         {message}
       </span>
 
       <button
+        type="button"
         onClick={onClose}
-        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+        className="ml-2 font-bold text-lg leading-none hover:text-gray-200"
       >
         ×
       </button>
@@ -123,64 +102,161 @@ const Toast = ({ message, type, onClose }) => {
 // MAIN COMPONENT
 // ============================================================
 
-export default function CorrectiveActionRegister() {
+export default function JigFixtureIssueIntimation() {
 
   const { shopId } = useParams();
   const navigate = useNavigate();
 
+  const { lineSet } = useLineSet();
+
   const actualShopId = shopId || '3';
 
   // ==========================================================
-  // STATE
+  // PAGE
   // ==========================================================
 
-  const [headerInfo, setHeaderInfo] = useState({
-    ...initialFormData.header
-  });
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const [partNameOptions, setPartNameOptions] =
-    useState(fallbackPartNames);
+  // ==========================================================
+  // FORM
+  // ==========================================================
 
-  const [loadingPartNames, setLoadingPartNames] =
+  const [form, setForm] = useState(initialForm);
+
+  // ==========================================================
+  // MACHINE DETAILS
+  // ==========================================================
+
+  const [machineDetails, setMachineDetails] = useState([]);
+
+  const [loadingMachineDetails, setLoadingMachineDetails] =
     useState(false);
 
-  const [entries, setEntries] = useState([
+  // ==========================================================
+  // STOCK CARDS
+  // ==========================================================
+
+  const [stockCards, setStockCards] = useState([
     {
-      date: new Date().toISOString().split('T')[0],
-      partName: fallbackPartNames[0],
-      problemDescription: "",
-      problemCategory: "E",
-      quantity: 1,
-      rootCause: "",
-      correctiveAction: "",
-      result: "OK",
-      signature: ""
+      tableNo: 1,
+      slNo: 1,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 1,
+      slNo: 2,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 1,
+      slNo: 3,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 1,
+      slNo: 4,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 1,
+      slNo: 5,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+
+    {
+      tableNo: 2,
+      slNo: 1,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 2,
+      slNo: 2,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 2,
+      slNo: 3,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 2,
+      slNo: 4,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
+    },
+    {
+      tableNo: 2,
+      slNo: 5,
+      stockCardNo: '',
+      qty: '',
+      sign: ''
     }
   ]);
 
-  const [isSaving, setIsSaving] =
-    useState(false);
+  // ==========================================================
+  // CHECKLIST
+  // ==========================================================
 
-  const [saveSuccess, setSaveSuccess] =
-    useState(false);
+  const [checklist, setChecklist] = useState(
+    defaultChecklistItems.map((item, index) => ({
+      slNo: index + 1,
+      checklistItem: item,
+      status: ''
+    }))
+  );
 
-  const [toast, setToast] =
-    useState({
-      message: '',
-      type: ''
-    });
+  // ==========================================================
+  // SIGNATURE
+  // ==========================================================
 
-  const [isSavedRecord, setIsSavedRecord] =
-    useState(false);
+  const [signatures, setSignatures] = useState({
+    'Shift Incharge': ''
+  });
 
-  const lookupSeqRef = useRef(0);
+  // ==========================================================
+  // SAVE STATE
+  // ==========================================================
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // ==========================================================
+  // TOAST
+  // ==========================================================
+
+  const [toast, setToast] = useState({
+    message: '',
+    type: ''
+  });
+
+  // ==========================================================
+  // CURRENT USER
+  // ==========================================================
 
   const currentUser =
     JSON.parse(localStorage.getItem('user'))?.username ||
     'Unknown';
 
   // ==========================================================
-  // TOAST
+  // TOAST FUNCTION
   // ==========================================================
 
   const triggerToast = (
@@ -202,16 +278,16 @@ export default function CorrectiveActionRegister() {
   };
 
   // ==========================================================
-  // FETCH PART NAMES
+  // FETCH MACHINE DETAILS
   // ==========================================================
 
   useEffect(() => {
 
-    const fetchPartNames = async () => {
+    const fetchMachineDetails = async () => {
 
       try {
 
-        setLoadingPartNames(true);
+        setLoadingMachineDetails(true);
 
         const token =
           localStorage.getItem('token');
@@ -224,499 +300,366 @@ export default function CorrectiveActionRegister() {
           : {};
 
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL || ""}/api/corrective-action-register/part-names/${actualShopId}`,
+          `${process.env.REACT_APP_API_URL || ''}/api/jig-fixture-issue/machine-details`,
           {
             headers
           }
         );
 
         if (!res.ok) {
-          console.warn(
-            "Part names API failed:",
-            res.status
-          );
-
-          return;
-        }
-
-        const contentType =
-          res.headers.get("content-type");
-
-        if (
-          !contentType ||
-          !contentType.includes("application/json")
-        ) {
-          console.warn(
-            "Part names response is not JSON"
-          );
-
-          return;
-        }
-
-        const data =
-          await res.json();
-
-     
-
-        // ------------------------------------------------------
-        // HANDLE DIFFERENT BACKEND RESPONSE FORMATS
-        // ------------------------------------------------------
-
-        let receivedPartNames = [];
-
-        if (Array.isArray(data)) {
-
-          receivedPartNames = data;
-
-        } else if (
-          data &&
-          Array.isArray(data.partNames)
-        ) {
-
-          receivedPartNames =
-            data.partNames;
-
-        } else if (
-          data &&
-          Array.isArray(data.data)
-        ) {
-
-          receivedPartNames =
-            data.data;
-        }
-
-        // ------------------------------------------------------
-        // CONVERT OBJECTS TO STRINGS
-        //
-        // Supports:
-        // "ABC"
-        //
-        // AND:
-        // { partName: "ABC" }
-        // ------------------------------------------------------
-
-        const cleanedPartNames =
-          receivedPartNames
-            .map((part) => {
-
-              if (
-                typeof part === 'string'
-              ) {
-                return part;
-              }
-
-              if (
-                part &&
-                typeof part === 'object' &&
-                typeof part.partName === 'string'
-              ) {
-                return part.partName;
-              }
-
-              return null;
-            })
-            .filter(Boolean);
-
-       
-
-        if (
-          cleanedPartNames.length > 0
-        ) {
-
-          setPartNameOptions(
-            cleanedPartNames
-          );
-
-          // If the current first row contains an
-          // old fallback value, keep it if possible.
-          setEntries((prev) =>
-            prev.map((entry) => {
-
-              if (!entry.partName) {
-                return {
-                  ...entry,
-                  partName:
-                    cleanedPartNames[0]
-                };
-              }
-
-              return entry;
-            })
+          throw new Error(
+            'Failed to fetch machine details'
           );
         }
+
+        const data = await res.json();
+
+        setMachineDetails(
+          Array.isArray(data)
+            ? data
+            : []
+        );
 
       } catch (err) {
 
-        console.warn(
-          'Part names fetch error, using fallback list:',
+        console.error(
+          'Machine details fetch error:',
           err
+        );
+
+        triggerToast(
+          'Unable to load machine details.',
+          'error'
         );
 
       } finally {
 
-        setLoadingPartNames(false);
+        setLoadingMachineDetails(false);
+
       }
+
     };
 
-    fetchPartNames();
+    fetchMachineDetails();
 
-  }, [actualShopId]);
+  }, []);
 
   // ==========================================================
-  // FETCH EXISTING RECORD
+  // LINE SET SYNC
   // ==========================================================
 
   useEffect(() => {
 
-    const checkExistingRecord = async () => {
+    if (lineSet?.lineCode) {
 
-      if (!headerInfo.date) {
-        return;
-      }
+      setForm(prev => ({
+        ...prev,
+        departmentSection:
+          lineSet.lineCode
+      }));
 
-      const seq =
-        ++lookupSeqRef.current;
+    }
 
-      try {
-
-        const token =
-          localStorage.getItem('token');
-
-        const headers = token
-          ? {
-              Authorization:
-                `Bearer ${token}`
-            }
-          : {};
-
-        const params =
-          new URLSearchParams({
-            machineShop: actualShopId,
-            date: headerInfo.date
-          });
-
-        const res = await fetch(
-          `${process.env.REACT_APP_API_URL || ""}/api/corrective-action-register/record?${params.toString()}`,
-          {
-            headers
-          }
-        );
-
-        if (
-          seq !== lookupSeqRef.current
-        ) {
-          return;
-        }
-
-        if (!res.ok) {
-          return;
-        }
-
-        const contentType =
-          res.headers.get("content-type");
-
-        if (
-          !contentType ||
-          !contentType.includes("application/json")
-        ) {
-          return;
-        }
-
-        const record =
-          await res.json();
-
-        if (
-          seq !== lookupSeqRef.current
-        ) {
-          return;
-        }
-
-        if (
-          record &&
-          Array.isArray(record.entries) &&
-          record.entries.length > 0
-        ) {
-
-          setIsSavedRecord(true);
-
-          // --------------------------------------------------
-          // ALSO NORMALIZE PART NAME OBJECTS IF RETURNED
-          // --------------------------------------------------
-
-          const normalizedEntries =
-            record.entries.map((entry) => ({
-              ...entry,
-
-              partName:
-                typeof entry.partName === 'object' &&
-                entry.partName !== null
-                  ? entry.partName.partName || ""
-                  : entry.partName || "",
-
-              signature:
-                entry.signature ||
-                entry.operatorSignature ||
-                ""
-            }));
-
-          setEntries(
-            normalizedEntries
-          );
-
-          triggerToast(
-            "Existing register entries loaded for this date.",
-            "success"
-          );
-
-        } else {
-
-          setIsSavedRecord(false);
-        }
-
-      } catch (err) {
-
-        console.warn(
-          'Check existing record error:',
-          err
-        );
-      }
-    };
-
-    checkExistingRecord();
-
-  }, [
-    actualShopId,
-    headerInfo.date
-  ]);
+  }, [lineSet?.lineCode]);
 
   // ==========================================================
-  // ROW CHANGE
+  // FORM CHANGE
   // ==========================================================
 
-  const handleRowChange = (
-    index,
+  const handleChange = (
     field,
-    val
+    value
   ) => {
 
-    setEntries(prev => {
+    setForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
 
-      const updated = [...prev];
-
-      updated[index] = {
-        ...updated[index],
-        [field]: val
-      };
-
-      return updated;
-    });
   };
 
   // ==========================================================
-  // ADD ROW
+  // STOCK CARD CHANGE
   // ==========================================================
 
-  const handleAddRow = () => {
+  const handleStockCardChange = (
+    tableNo,
+    slNo,
+    field,
+    value
+  ) => {
 
-    setEntries(prev => [
+    setStockCards(prev =>
+      prev.map(card => {
+
+        if (
+          card.tableNo === tableNo &&
+          card.slNo === slNo
+        ) {
+
+          return {
+            ...card,
+            [field]: value
+          };
+
+        }
+
+        return card;
+
+      })
+    );
+
+  };
+
+  // ==========================================================
+  // ADD STOCK CARD ROW
+  // ==========================================================
+
+  const handleAddStockRow = (
+    tableNo
+  ) => {
+
+    setStockCards(prev => {
+
+      const tableRows =
+        prev.filter(
+          row => row.tableNo === tableNo
+        );
+
+      const nextSlNo =
+        tableRows.length + 1;
+
+      return [
+        ...prev,
+        {
+          tableNo,
+          slNo: nextSlNo,
+          stockCardNo: '',
+          qty: '',
+          sign: ''
+        }
+      ];
+
+    });
+
+  };
+
+  // ==========================================================
+  // DELETE STOCK CARD ROW
+  // ==========================================================
+
+  const handleDeleteStockRow = (
+    tableNo
+  ) => {
+
+    setStockCards(prev => {
+
+      const tableRows =
+        prev.filter(
+          row => row.tableNo === tableNo
+        );
+
+      if (tableRows.length <= 1) {
+        return prev;
+      }
+
+      const lastRow =
+        tableRows[tableRows.length - 1];
+
+      return prev.filter(
+        row =>
+          !(
+            row.tableNo === tableNo &&
+            row.slNo === lastRow.slNo
+          )
+      );
+
+    });
+
+  };
+
+  // ==========================================================
+  // SIGN STOCK CARD
+  // ==========================================================
+
+  const handleStockSign = (
+    tableNo,
+    slNo
+  ) => {
+
+    setStockCards(prev =>
+      prev.map(card => {
+
+        if (
+          card.tableNo === tableNo &&
+          card.slNo === slNo
+        ) {
+
+          return {
+            ...card,
+            sign: currentUser
+          };
+
+        }
+
+        return card;
+
+      })
+    );
+
+  };
+
+  // ==========================================================
+  // CHECKLIST CHANGE
+  // ==========================================================
+
+  const handleChecklistChange = (
+    slNo,
+    field,
+    value
+  ) => {
+
+    setChecklist(prev =>
+      prev.map(item => {
+
+        if (item.slNo === slNo) {
+
+          return {
+            ...item,
+            [field]: value
+          };
+
+        }
+
+        return item;
+
+      })
+    );
+
+  };
+
+  // ==========================================================
+  // ADD CHECKLIST ROW
+  // ==========================================================
+
+  const handleAddChecklistRow = () => {
+
+    setChecklist(prev => [
 
       ...prev,
 
       {
-        date:
-          headerInfo.date ||
-          new Date()
-            .toISOString()
-            .split('T')[0],
-
-        partName:
-          partNameOptions.length > 0
-            ? partNameOptions[0]
-            : "",
-
-        problemDescription: "",
-
-        problemCategory: "E",
-
-        quantity: 1,
-
-        rootCause: "",
-
-        correctiveAction: "",
-
-        result: "OK",
-
-        signature: ""
+        slNo: prev.length + 1,
+        checklistItem: '',
+        status: ''
       }
 
     ]);
+
   };
 
   // ==========================================================
-  // DELETE LAST ROW
+  // DELETE CHECKLIST ROW
   // ==========================================================
 
-  const handleDeleteLastRow = () => {
+  const handleDeleteChecklistRow = () => {
 
-    if (entries.length <= 1) {
+    if (checklist.length <= 12) {
 
       triggerToast(
-        "Form must have at least one entry.",
-        "error"
+        'The standard checklist contains 12 rows.',
+        'error'
       );
 
       return;
     }
 
-    setEntries(prev =>
+    setChecklist(prev =>
       prev.slice(0, -1)
     );
+
   };
 
   // ==========================================================
-  // APPROVE ROW
+  // APPROVE SHIFT INCHARGE
   // ==========================================================
 
-  const handleApproveRowSignature = (
-    index
-  ) => {
+  const handleApprove = () => {
 
-    setEntries(prev => {
-
-      const updated = [...prev];
-
-      updated[index] = {
-        ...updated[index],
-        signature: currentUser
-      };
-
-      return updated;
-    });
+    setSignatures(prev => ({
+      ...prev,
+      'Shift Incharge':
+        currentUser
+    }));
 
     triggerToast(
-      `Row ${index + 1} signed by ${currentUser}`,
-      "success"
+      `Approved by ${currentUser}`,
+      'success'
     );
+
   };
 
   // ==========================================================
-  // DOWNLOAD PDF
+  // VALIDATION
   // ==========================================================
 
-  const handleDownloadPdf = async () => {
+  const validateForm = () => {
 
-    if (!headerInfo.date) {
+    if (!actualShopId) {
 
       triggerToast(
-        "Please select a Date first.",
-        "error"
+        'Machine Shop is required.',
+        'error'
       );
 
-      return;
+      return false;
+
     }
 
-    if (!isSavedRecord) {
+    if (!form.reportDate) {
 
       triggerToast(
-        "No saved record found for this date. Save before downloading.",
-        "error"
+        'Please select the report date.',
+        'error'
       );
 
-      return;
+      setCurrentPage(1);
+
+      return false;
+
     }
 
-    try {
-
-      const token =
-        localStorage.getItem("token");
-
-      const headers = token
-        ? {
-            Authorization:
-              `Bearer ${token}`
-          }
-        : {};
-
-      const params =
-        new URLSearchParams({
-          date: headerInfo.date,
-          shopId: String(actualShopId)
-        });
-
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/corrective-action-register/report?${params.toString()}`,
-        {
-          headers
-        }
-      );
-
-      if (!res.ok) {
-
-        let errorMessage =
-          "PDF report request failed";
-
-        try {
-
-          const errorData =
-            await res.json();
-
-          if (errorData.message) {
-            errorMessage =
-              errorData.message;
-          }
-
-        } catch {
-          // Ignore JSON parsing error
-        }
-
-        throw new Error(
-          errorMessage
-        );
-      }
-
-      const blob =
-        await res.blob();
-
-      const blobUrl =
-        URL.createObjectURL(blob);
-
-      const link =
-        document.createElement("a");
-
-      link.href =
-        blobUrl;
-
-      link.download =
-        `Corrective_Action_Register_${headerInfo.date}.pdf`;
-
-      document.body.appendChild(link);
-
-      link.click();
-
-      document.body.removeChild(link);
-
-      setTimeout(() => {
-        URL.revokeObjectURL(blobUrl);
-      }, 1000);
+    if (
+      !form.departmentSection &&
+      !lineSet?.lineCode
+    ) {
 
       triggerToast(
-        "PDF generated and downloaded!",
-        "success"
+        'Department / Section or Line Code is required.',
+        'error'
       );
 
-    } catch (err) {
+      setCurrentPage(1);
 
-      console.error(
-        "PDF generation failed:",
-        err
-      );
+      return false;
 
-      triggerToast(
-        err.message ||
-        "Failed to generate PDF",
-        "error"
-      );
     }
+
+    if (!signatures['Shift Incharge']) {
+
+      triggerToast(
+        'Please get Shift Incharge approval before saving.',
+        'error'
+      );
+
+      setCurrentPage(2);
+
+      return false;
+
+    }
+
+    return true;
+
   };
 
   // ==========================================================
@@ -725,134 +668,35 @@ export default function CorrectiveActionRegister() {
 
   const handleSave = async () => {
 
-    // --------------------------------------------------------
-    // VALIDATE
-    // --------------------------------------------------------
-
-    const emptyEntries =
-      entries.some(
-        e =>
-          !e.partName ||
-          !e.problemDescription ||
-          !e.rootCause ||
-          !e.correctiveAction
-      );
-
-    if (emptyEntries) {
-
-      triggerToast(
-        "Please select Part Name, and fill in Problem Description, Root Cause, and Corrective Action for all rows.",
-        "error"
-      );
-
-      return;
-    }
-
-    const unsignedEntries =
-      entries.some(
-        e => !e.signature
-      );
-
-    if (unsignedEntries) {
-
-      triggerToast(
-        "Please sign all rows before saving.",
-        "error"
-      );
-
+    if (!validateForm()) {
       return;
     }
 
     setIsSaving(true);
     setSaveSuccess(false);
 
-    // --------------------------------------------------------
-    // NORMALIZE ENTRIES BEFORE SENDING
-    // --------------------------------------------------------
-
-    const cleanEntries =
-      entries.map((entry) => ({
-
-        date:
-          entry.date ||
-          headerInfo.date,
-
-        partName:
-          typeof entry.partName === 'object' &&
-          entry.partName !== null
-            ? entry.partName.partName || ""
-            : entry.partName || "",
-
-        problemDescription:
-          entry.problemDescription || "",
-
-        problemCategory:
-          entry.problemCategory || "E",
-
-        quantity:
-          entry.quantity === "" ||
-          entry.quantity === null ||
-          entry.quantity === undefined
-            ? 1
-            : Number(entry.quantity),
-
-        rootCause:
-          entry.rootCause || "",
-
-        correctiveAction:
-          entry.correctiveAction || "",
-
-        result:
-          entry.result || "OK",
-
-        signature:
-          entry.signature || "",
-
-        // Backend can use these if needed
-        operatorSignature:
-          entry.operatorSignature ||
-          entry.signature ||
-          "",
-
-        shiftInchargeSignature:
-          entry.shiftInchargeSignature ||
-          null
-
-      }));
-
-    // --------------------------------------------------------
-    // PAYLOAD
-    //
-    // IMPORTANT:
-    // Backend expects machineShop + recordDate + entries
-    // --------------------------------------------------------
-
     const payload = {
 
-      machineShop:
-        Number(actualShopId),
+      header: {
 
-      lineCode:
-        null,
+        ...form,
 
-      recordDate:
-        headerInfo.date,
+        machineShop:
+          Number(actualShopId),
 
-      entries:
-        cleanEntries,
+        lineCode:
+          lineSet?.lineCode ||
+          form.departmentSection
 
-      formCode:
-        initialFormData.formCode,
+      },
 
-      revision:
-        initialFormData.revision,
+      stockCards,
 
-      revisionDate:
-        initialFormData.revisionDate
+      checklist,
+
+      signatures
+
     };
-
-  
-  
 
     try {
 
@@ -870,11 +714,12 @@ export default function CorrectiveActionRegister() {
                 `Bearer ${token}`
             }
           : {})
+
       };
 
       const res =
         await fetch(
-          `${process.env.REACT_APP_API_URL || ""}/api/corrective-action-register`,
+          `${process.env.REACT_APP_API_URL || ''}/api/jig-fixture-issue`,
           {
             method: 'POST',
             headers,
@@ -882,10 +727,6 @@ export default function CorrectiveActionRegister() {
               JSON.stringify(payload)
           }
         );
-
-      // ------------------------------------------------------
-      // READ SERVER RESPONSE
-      // ------------------------------------------------------
 
       let responseData = null;
 
@@ -898,28 +739,21 @@ export default function CorrectiveActionRegister() {
         responseData = null;
       }
 
-     
-
       if (!res.ok) {
 
         throw new Error(
-          responseData?.message ||
           responseData?.error ||
+          responseData?.message ||
           `Save failed (${res.status})`
         );
+
       }
-
-      // ------------------------------------------------------
-      // SUCCESS
-      // ------------------------------------------------------
-
-      setIsSavedRecord(true);
 
       setSaveSuccess(true);
 
       triggerToast(
-        "Corrective Action Register saved successfully!",
-        "success"
+        'Jig & Fixture Issue Intimation saved successfully!',
+        'success'
       );
 
       await new Promise(
@@ -937,31 +771,1211 @@ export default function CorrectiveActionRegister() {
     } catch (err) {
 
       console.error(
-        'Save error:',
+        'Jig & Fixture save error:',
         err
       );
 
       triggerToast(
         err.message ||
-        'Failed to save register.',
+        'Failed to save Jig & Fixture Issue Intimation.',
         'error'
       );
 
     } finally {
 
       setIsSaving(false);
+
     }
+
   };
 
   // ==========================================================
-  // JSX
+  // STOCK TABLE
+  // ==========================================================
+
+  const renderStockTable = (
+    tableNo
+  ) => {
+
+    const rows =
+      stockCards.filter(
+        row =>
+          row.tableNo === tableNo
+      );
+
+    return (
+
+      <div className="border-2 border-gray-800">
+
+        <div className="flex justify-between items-center bg-gray-100 border-b-2 border-gray-800 px-3 py-2">
+
+          <span className="font-bold text-xs uppercase">
+            Stock Card {tableNo}
+          </span>
+
+          <div className="flex gap-1">
+
+            <button
+              type="button"
+              onClick={() =>
+                handleAddStockRow(tableNo)
+              }
+              className="flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded text-[10px] font-bold uppercase"
+            >
+              <Plus className="w-3 h-3" />
+              Add
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                handleDeleteStockRow(tableNo)
+              }
+              className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-[10px] font-bold uppercase"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </button>
+
+          </div>
+
+        </div>
+
+        <table className="w-full border-collapse text-xs">
+
+          <thead>
+
+            <tr className="bg-gray-50">
+
+              <th className="border border-gray-800 p-2 w-12">
+                S.No
+              </th>
+
+              <th className="border border-gray-800 p-2">
+                Stock Card No
+              </th>
+
+              <th className="border border-gray-800 p-2 w-20">
+                Qty
+              </th>
+
+              <th className="border border-gray-800 p-2 w-28">
+                Sign
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {rows.map(row => (
+
+              <tr key={`${tableNo}-${row.slNo}`}>
+
+                <td className="border border-gray-800 p-1 text-center font-bold">
+                  {row.slNo}
+                </td>
+
+                <td className="border border-gray-800 p-1">
+
+                  <input
+                    type="text"
+                    value={row.stockCardNo || ''}
+                    onChange={e =>
+                      handleStockCardChange(
+                        tableNo,
+                        row.slNo,
+                        'stockCardNo',
+                        e.target.value
+                      )
+                    }
+                    className="w-full p-2 outline-none bg-transparent uppercase"
+                    placeholder="Stock Card No"
+                  />
+
+                </td>
+
+                <td className="border border-gray-800 p-1">
+
+                  <input
+                    type="number"
+                    value={row.qty || ''}
+                    onChange={e =>
+                      handleStockCardChange(
+                        tableNo,
+                        row.slNo,
+                        'qty',
+                        e.target.value
+                      )
+                    }
+                    className="w-full p-2 text-center outline-none bg-transparent"
+                  />
+
+                </td>
+
+                <td className="border border-gray-800 p-1 text-center">
+
+                  {row.sign ? (
+
+                    <div className="flex flex-col items-center">
+
+                      <span className="text-green-600 font-bold text-[10px]">
+                        Signed ✓
+                      </span>
+
+                      <span className="text-[10px] font-bold truncate max-w-[80px]">
+                        {row.sign}
+                      </span>
+
+                    </div>
+
+                  ) : (
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleStockSign(
+                          tableNo,
+                          row.slNo
+                        )
+                      }
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded text-[10px] font-bold uppercase"
+                    >
+                      Sign
+                    </button>
+
+                  )}
+
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+    );
+
+  };
+
+  // ==========================================================
+  // CHECKLIST TABLE
+  // ==========================================================
+
+  const renderChecklistTable = (
+    start,
+    end
+  ) => {
+
+    const rows =
+      checklist.slice(start, end);
+
+    return (
+
+      <div className="border-2 border-gray-800">
+
+        <div className="bg-gray-100 border-b-2 border-gray-800 px-3 py-2 font-bold text-xs uppercase">
+          Check List for Data Entry
+        </div>
+
+        <table className="w-full border-collapse text-xs">
+
+          <thead>
+
+            <tr>
+
+              <th className="border border-gray-800 p-2 w-12">
+                S.No
+              </th>
+
+              <th className="border border-gray-800 p-2 text-left">
+                Checklist Item
+              </th>
+
+              <th className="border border-gray-800 p-2 w-20">
+                Status
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {rows.map(item => (
+
+              <tr key={item.slNo}>
+
+                <td className="border border-gray-800 p-1 text-center font-bold">
+                  {item.slNo}
+                </td>
+
+                <td className="border border-gray-800 p-1">
+
+                  {item.slNo <= 7 &&
+                  item.checklistItem ? (
+
+                    <span className="block p-1 font-medium">
+                      {item.checklistItem}
+                    </span>
+
+                  ) : (
+
+                    <input
+                      type="text"
+                      value={
+                        item.checklistItem || ''
+                      }
+                      onChange={e =>
+                        handleChecklistChange(
+                          item.slNo,
+                          'checklistItem',
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-1 outline-none bg-transparent"
+                      placeholder="Enter item"
+                    />
+
+                  )}
+
+                </td>
+
+                <td className="border border-gray-800 p-1">
+
+                  <select
+                    value={
+                      item.status || ''
+                    }
+                    onChange={e =>
+                      handleChecklistChange(
+                        item.slNo,
+                        'status',
+                        e.target.value
+                      )
+                    }
+                    className="w-full p-1 text-center outline-none bg-transparent font-bold"
+                  >
+
+                    <option value="">
+                      -
+                    </option>
+
+                    <option value="YES">
+                      YES
+                    </option>
+
+                    <option value="NO">
+                      NO
+                    </option>
+
+                    <option value="NA">
+                      N/A
+                    </option>
+
+                  </select>
+
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+    );
+
+  };
+
+  // ==========================================================
+  // PAGE NAVIGATION
+  // ==========================================================
+
+  const renderPageNavigation = () => (
+
+    <div className="w-full max-w-[95rem] mb-4">
+
+      <div className="bg-white rounded-xl shadow-xl p-2">
+
+        <div className="grid grid-cols-2 gap-2">
+
+          <button
+            type="button"
+            onClick={() =>
+              setCurrentPage(1)
+            }
+            className={`py-3 px-4 rounded-lg font-bold text-sm uppercase tracking-wider transition-colors ${
+              currentPage === 1
+                ? 'bg-orange-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Page 1 — Issue / Action Details
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setCurrentPage(2)
+            }
+            className={`py-3 px-4 rounded-lg font-bold text-sm uppercase tracking-wider transition-colors ${
+              currentPage === 2
+                ? 'bg-orange-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Page 2 — Stock / Checklist
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  );
+
+  // ==========================================================
+  // PAGE 1
+  // ==========================================================
+
+  const renderPage1 = () => (
+
+    <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl border-4 border-gray-100">
+
+      {/* ====================================================
+          HEADER
+      ==================================================== */}
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-gray-200 pb-4 gap-4">
+
+        <div>
+
+          <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
+            SAKTHI AUTO COMPONENT LIMITED
+          </span>
+
+          <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
+            TOOLING CORRECTIVE ACTION INTIMATION SLIP
+          </h2>
+
+          <div className="text-xs text-gray-500 mt-1">
+            Jig & Fixture Issue Intimation
+          </div>
+
+        </div>
+
+        <div className="text-right text-xs font-semibold text-gray-600">
+
+          <div>
+            Machine Shop:
+            <span className="font-bold text-gray-900 ml-1">
+              {actualShopId}
+            </span>
+          </div>
+
+          {loadingMachineDetails && (
+            <div className="text-orange-500 mt-1">
+              Loading machine details...
+            </div>
+          )}
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          BASIC INFORMATION
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800">
+
+        <div className="grid grid-cols-1 md:grid-cols-2">
+
+          <div className="border-b md:border-r border-gray-800 p-3">
+
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Department / Section
+            </label>
+
+            <input
+              type="text"
+              value={
+                form.departmentSection || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'departmentSection',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none bg-transparent border-b border-gray-300 font-semibold uppercase"
+              placeholder="Department / Section"
+            />
+
+          </div>
+
+          <div className="border-b border-gray-800 p-3">
+
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Date
+            </label>
+
+            <input
+              type="date"
+              value={
+                form.reportDate || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'reportDate',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none bg-transparent border-b border-gray-300 font-semibold"
+            />
+
+          </div>
+
+          <div className="border-b md:border-r border-gray-800 p-3">
+
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              JF / WHD Reference No
+            </label>
+
+            <input
+              type="text"
+              value={
+                form.jfWhdReferenceNo || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'jfWhdReferenceNo',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none bg-transparent border-b border-gray-300 font-semibold uppercase"
+              placeholder="Reference No"
+            />
+
+          </div>
+
+          <div className="border-b border-gray-800 p-3">
+
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Shift / Time
+            </label>
+
+            <input
+              type="text"
+              value={
+                form.shiftTime || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'shiftTime',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none bg-transparent border-b border-gray-300 font-semibold"
+              placeholder="Shift / Time"
+            />
+
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          NATURE OF PROBLEM
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Nature of Problem / Reasons for Action Required
+          </span>
+
+        </div>
+
+        <textarea
+          rows={6}
+          value={
+            form.natureOfProblem || ''
+          }
+          onChange={e =>
+            handleChange(
+              'natureOfProblem',
+              e.target.value
+            )
+          }
+          className="w-full p-3 outline-none resize-y uppercase text-sm"
+          placeholder="Enter nature of problem / reason for action required"
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 border-t border-gray-800">
+
+          <div className="md:border-r border-gray-800 p-3">
+
+            <label className="block text-xs font-bold mb-1">
+              Received By
+            </label>
+
+            <input
+              type="text"
+              value={
+                form.receivedBy || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'receivedBy',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 border-b border-gray-300 outline-none uppercase"
+            />
+
+          </div>
+
+          <div className="p-3">
+
+            <label className="block text-xs font-bold mb-1">
+              Action Intimated By
+            </label>
+
+            <input
+              type="text"
+              value={
+                form.actionIntimatedBy || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'actionIntimatedBy',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 border-b border-gray-300 outline-none uppercase"
+            />
+
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          ACTION TAKEN
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Details of Action Taken
+          </span>
+
+        </div>
+
+        <textarea
+          rows={6}
+          value={
+            form.actionTakenDetails || ''
+          }
+          onChange={e =>
+            handleChange(
+              'actionTakenDetails',
+              e.target.value
+            )
+          }
+          className="w-full p-3 outline-none resize-y uppercase text-sm"
+          placeholder="Enter details of action taken"
+        />
+
+      </div>
+
+      {/* ====================================================
+          OBSERVATION
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Details of Observation of the Toolings
+          </span>
+
+        </div>
+
+        <textarea
+          rows={6}
+          value={
+            form.toolingObservation || ''
+          }
+          onChange={e =>
+            handleChange(
+              'toolingObservation',
+              e.target.value
+            )
+          }
+          className="w-full p-3 outline-none resize-y uppercase text-sm"
+          placeholder="Enter tooling observation"
+        />
+
+        <div className="border-t border-gray-800 p-3">
+
+          <label className="block text-xs font-bold mb-1">
+            Action Taken By
+          </label>
+
+          <input
+            type="text"
+            value={
+              form.actionTakenBy || ''
+            }
+            onChange={e =>
+              handleChange(
+                'actionTakenBy',
+                e.target.value
+              )
+            }
+            className="w-full p-2 border-b border-gray-300 outline-none uppercase"
+          />
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          WORK TIMING
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="grid grid-cols-1 md:grid-cols-3">
+
+          <div className="md:border-r border-gray-800 p-3">
+
+            <label className="block text-xs font-bold mb-1">
+              Work Started At
+            </label>
+
+            <input
+              type="datetime-local"
+              value={
+                form.workStartedAt || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'workStartedAt',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none border-b border-gray-300"
+            />
+
+          </div>
+
+          <div className="md:border-r border-gray-800 p-3">
+
+            <label className="block text-xs font-bold mb-1">
+              Work Completed At
+            </label>
+
+            <input
+              type="datetime-local"
+              value={
+                form.workCompletedAt || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'workCompletedAt',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none border-b border-gray-300"
+            />
+
+          </div>
+
+          <div className="p-3">
+
+            <label className="block text-xs font-bold mb-1">
+              Time Lost
+            </label>
+
+            <input
+              type="text"
+              value={
+                form.timeLost || ''
+              }
+              onChange={e =>
+                handleChange(
+                  'timeLost',
+                  e.target.value
+                )
+              }
+              className="w-full p-2 outline-none border-b border-gray-300"
+              placeholder="Time lost"
+            />
+
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          FEEDBACK
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Feedback on Corrective Action
+          </span>
+
+        </div>
+
+        <textarea
+          rows={5}
+          value={
+            form.correctiveActionFeedback || ''
+          }
+          onChange={e =>
+            handleChange(
+              'correctiveActionFeedback',
+              e.target.value
+            )
+          }
+          className="w-full p-3 outline-none resize-y uppercase text-sm"
+          placeholder="Enter feedback on corrective action"
+        />
+
+        <div className="border-t border-gray-800 p-3">
+
+          <label className="block text-xs font-bold mb-1">
+            Feedback Given By
+          </label>
+
+          <input
+            type="text"
+            value={
+              form.feedbackGivenBy || ''
+            }
+            onChange={e =>
+              handleChange(
+                'feedbackGivenBy',
+                e.target.value
+              )
+            }
+            className="w-full p-2 outline-none border-b border-gray-300 uppercase"
+          />
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          DELAY
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Reason for Undue Delay
+          </span>
+
+        </div>
+
+        <textarea
+          rows={4}
+          value={
+            form.reasonForUndueDelay || ''
+          }
+          onChange={e =>
+            handleChange(
+              'reasonForUndueDelay',
+              e.target.value
+            )
+          }
+          className="w-full p-3 outline-none resize-y uppercase text-sm"
+          placeholder="Enter reason for undue delay"
+        />
+
+      </div>
+
+      {/* ====================================================
+          WORK + SPARES
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Details of Work Attended By & Details of Spares Consumed
+          </span>
+
+        </div>
+
+        <textarea
+          rows={5}
+          value={
+            form.workAndSparesDetails || ''
+          }
+          onChange={e =>
+            handleChange(
+              'workAndSparesDetails',
+              e.target.value
+            )
+          }
+          className="w-full p-3 outline-none resize-y uppercase text-sm"
+          placeholder="Enter work attended and spares consumed"
+        />
+
+      </div>
+
+      {/* ====================================================
+          MEX / MYDOU / J&F
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 border-t-0 p-3">
+
+        <label className="block text-xs font-bold mb-1">
+          M.Ex / MYDOU / J&F
+        </label>
+
+        <input
+          type="text"
+          value={
+            form.mexMydouJf || ''
+          }
+          onChange={e =>
+            handleChange(
+              'mexMydouJf',
+              e.target.value
+            )
+          }
+          className="w-full p-2 outline-none border-b border-gray-300 uppercase"
+          placeholder="Enter details"
+        />
+
+      </div>
+
+      {/* ====================================================
+          FOOTER
+      ==================================================== */}
+
+      <div className="flex justify-between items-center mt-4 text-xs text-gray-500 font-semibold">
+
+        <span>
+          QF / 07 / MTD - 08
+        </span>
+
+        <span>
+          01.07.2013
+        </span>
+
+      </div>
+
+      {/* ====================================================
+          PAGE BUTTON
+      ==================================================== */}
+
+      <div className="flex justify-end mt-6 pt-4 border-t border-gray-300">
+
+        <button
+          type="button"
+          onClick={() =>
+            setCurrentPage(2)
+          }
+          className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-8 py-3 rounded font-bold uppercase tracking-wider text-sm shadow-lg"
+        >
+          Next Page
+          <ChevronRight className="w-4 h-4" />
+        </button>
+
+      </div>
+
+    </div>
+
+  );
+
+  // ==========================================================
+  // PAGE 2
+  // ==========================================================
+
+  const renderPage2 = () => (
+
+    <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl border-4 border-gray-100">
+
+      {/* ====================================================
+          PAGE HEADER
+      ==================================================== */}
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-gray-200 pb-4 gap-4">
+
+        <div>
+
+          <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
+            SAKTHI AUTO COMPONENT LIMITED
+          </span>
+
+          <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
+            JIG & FIXTURE ISSUE INTIMATION
+          </h2>
+
+          <div className="text-xs text-gray-500 mt-1">
+            Stock Card / Checklist / Preventive Action
+          </div>
+
+        </div>
+
+        <div className="text-right text-xs">
+
+          <div className="font-bold text-gray-700">
+            Date
+          </div>
+
+          <div className="font-semibold text-gray-900">
+            {form.reportDate || '-'}
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          STOCK CARD TABLES
+      ==================================================== */}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {renderStockTable(1)}
+
+        {renderStockTable(2)}
+
+      </div>
+
+      {/* ====================================================
+          CHECKLIST
+      ==================================================== */}
+
+      <div className="mt-6">
+
+        <div className="flex justify-between items-center mb-2">
+
+          <h3 className="font-bold text-gray-800 text-sm uppercase">
+            Check List for Data Entry
+          </h3>
+
+          <div className="flex gap-2">
+
+            <button
+              type="button"
+              onClick={handleAddChecklistRow}
+              className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded text-xs font-bold uppercase"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Row
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDeleteChecklistRow}
+              className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-xs font-bold uppercase"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete Row
+            </button>
+
+          </div>
+
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {renderChecklistTable(0, 6)}
+
+          {renderChecklistTable(6, checklist.length)}
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          PREVENTIVE ACTION
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 mt-6">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Details Of Preventive Action Required & Taken
+          </span>
+
+        </div>
+
+        <textarea
+          rows={8}
+          value={
+            form.preventiveAction || ''
+          }
+          onChange={e =>
+            handleChange(
+              'preventiveAction',
+              e.target.value
+            )
+          }
+          className="w-full p-4 outline-none resize-y uppercase text-sm"
+          placeholder="Enter details of preventive action required and taken"
+        />
+
+      </div>
+
+      {/* ====================================================
+          SHIFT INCHARGE APPROVAL
+      ==================================================== */}
+
+      <div className="border-2 border-gray-800 mt-6">
+
+        <div className="px-3 py-2 bg-gray-100 border-b border-gray-800">
+
+          <span className="font-bold text-xs uppercase">
+            Shift Incharge Approval
+          </span>
+
+        </div>
+
+        <div className="p-5 flex flex-col sm:flex-row justify-between items-center gap-4">
+
+          <div>
+
+            <div className="text-xs text-gray-500 uppercase font-semibold">
+              Approval Status
+            </div>
+
+            {signatures['Shift Incharge'] ? (
+
+              <div className="flex items-center gap-2 mt-1">
+
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+
+                <div>
+
+                  <div className="text-sm font-bold text-green-600">
+                    Approved
+                  </div>
+
+                  <div className="text-xs font-bold text-gray-800 uppercase">
+                    {signatures['Shift Incharge']}
+                  </div>
+
+                </div>
+
+              </div>
+
+            ) : (
+
+              <div className="text-sm font-semibold text-gray-500 mt-1">
+                Awaiting Shift Incharge approval
+              </div>
+
+            )}
+
+          </div>
+
+          {!signatures['Shift Incharge'] && (
+
+            <button
+              type="button"
+              onClick={handleApprove}
+              className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded font-bold uppercase tracking-wider text-xs shadow"
+            >
+              Approve
+            </button>
+
+          )}
+
+        </div>
+
+      </div>
+
+      {/* ====================================================
+          BOTTOM CONTROLS
+      ==================================================== */}
+
+      <div className="flex flex-col sm:flex-row justify-between gap-3 mt-6 pt-5 border-t border-gray-300">
+
+        <button
+          type="button"
+          onClick={() =>
+            setCurrentPage(1)
+          }
+          className="flex items-center justify-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-8 py-3 rounded font-bold uppercase tracking-wider text-sm shadow"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Back to Page 1
+        </button>
+
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={
+            isSaving ||
+            saveSuccess
+          }
+          className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold uppercase tracking-wider text-sm shadow-lg"
+        >
+
+          <Save className="w-4 h-4" />
+
+          {isSaving
+            ? 'SAVING...'
+            : saveSuccess
+              ? 'SAVED ✓'
+              : 'SAVE & CONTINUE'}
+
+        </button>
+
+      </div>
+
+    </div>
+
+  );
+
+  // ==========================================================
+  // MAIN RETURN
   // ==========================================================
 
   return (
 
-    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center p-6 pb-20">
 
       <Header />
+
+      {/* ====================================================
+          TOAST
+      ==================================================== */}
 
       <Toast
         message={toast.message}
@@ -974,27 +1988,39 @@ export default function CorrectiveActionRegister() {
         }
       />
 
+      {/* ====================================================
+          SAVE OVERLAY
+      ==================================================== */}
+
       {(isSaving || saveSuccess) && (
 
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[90]">
 
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
 
             {isSaving ? (
 
               <>
+
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
 
                 <h2 className="text-xl font-bold text-gray-800">
-                  Saving Register Data...
+                  Saving Jig & Fixture Data...
                 </h2>
+
               </>
 
             ) : (
 
-              <h2 className="text-xl font-bold text-green-800">
-                Data Saved Successfully
-              </h2>
+              <>
+
+                <CheckCircle2 className="w-12 h-12 text-green-600 mx-auto mb-3" />
+
+                <h2 className="text-xl font-bold text-green-800">
+                  Data Saved Successfully
+                </h2>
+
+              </>
 
             )}
 
@@ -1004,521 +2030,60 @@ export default function CorrectiveActionRegister() {
 
       )}
 
-      <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
+      {/* ====================================================
+          PAGE SELECTOR
+      ==================================================== */}
 
-        {/* ====================================================
-            HEADER
-        ==================================================== */}
+      <div className="w-full max-w-[95rem] mt-4 mb-4">
 
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-gray-200 pb-4 gap-4">
+        <div className="bg-white rounded-xl shadow-xl p-2">
 
-          <div>
+          <div className="grid grid-cols-2 gap-2">
 
-            <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
-              {initialFormData.company}
-            </span>
-
-            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
-              {initialFormData.title}
-            </h2>
-
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-
-              <span>
-                Form Code: {initialFormData.formCode}
-              </span>
-
-              |
-
-              <span>
-                Rev No: {initialFormData.revision}
-              </span>
-
-              |
-
-              <span>
-                Rev Date: {initialFormData.revisionDate}
-              </span>
-
-            </div>
-
-          </div>
-
-          <button
-            type="button"
-            onClick={handleDownloadPdf}
-            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
-          >
-            <FileDown className="w-4 h-4" />
-            Download PDF
-          </button>
-
-        </div>
-
-        {/* ====================================================
-            CONTROLS
-        ==================================================== */}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-
-          <div>
-
-            <label className="font-bold text-gray-700 block mb-1 text-sm">
-              Date
-            </label>
-
-            <input
-              type="date"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-              value={headerInfo.date}
-              onChange={(e) =>
-                setHeaderInfo(prev => ({
-                  ...prev,
-                  date: e.target.value
-                }))
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentPage(1)
               }
-            />
-
-          </div>
-
-          {/* ROW MANAGEMENT */}
-
-          <div className="flex items-end gap-2 col-span-1 md:col-span-2">
-
-            <button
-              type="button"
-              onClick={handleAddRow}
-              className="flex-1 flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-3 rounded text-xs transition-colors uppercase tracking-wider cursor-pointer"
+              className={`py-3 px-4 rounded-lg font-bold text-sm uppercase tracking-wider transition-colors ${
+                currentPage === 1
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
             >
-              <Plus className="w-3.5 h-3.5" />
-              Add Row
+              Page 1 — Issue / Action Details
             </button>
 
             <button
               type="button"
-              onClick={handleDeleteLastRow}
-              className="flex-1 flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded text-xs transition-colors uppercase tracking-wider cursor-pointer"
+              onClick={() =>
+                setCurrentPage(2)
+              }
+              className={`py-3 px-4 rounded-lg font-bold text-sm uppercase tracking-wider transition-colors ${
+                currentPage === 2
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete Row
+              Page 2 — Stock / Checklist
             </button>
 
           </div>
-
-        </div>
-
-        {/* ====================================================
-            TABLE
-        ==================================================== */}
-
-        <div className="overflow-x-auto">
-
-          <table className="w-full border-collapse border border-gray-800 text-xs text-center">
-
-            <thead className="bg-gray-100 text-gray-800 font-bold">
-
-              <tr>
-
-                <th className="border border-gray-800 p-2 w-28">
-                  DATE
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[220px]">
-                  PART NAME
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[180px]">
-                  PROBLEM DESCRIPTION
-                </th>
-
-                <th className="border border-gray-800 p-2 w-28">
-                  PROBLEM CATEGORY (A/B/C/D/E)
-                </th>
-
-                <th className="border border-gray-800 p-2 w-20">
-                  QUANTITY
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[190px]">
-                  ROOT CAUSE
-                </th>
-
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[190px]">
-                  CORRECTIVE ACTION
-                </th>
-
-                <th className="border border-gray-800 p-2 w-20">
-                  RESULT
-                </th>
-
-                <th className="border border-gray-800 p-2 w-28">
-                  SIGNATURE
-                </th>
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              {entries.map((row, idx) => (
-
-                <tr
-                  key={`entry-${idx}`}
-                  className="hover:bg-gray-50"
-                >
-
-                  {/* DATE */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <input
-                      type="date"
-                      className="w-full text-center bg-transparent outline-none p-1 font-medium"
-                      value={row.date || ''}
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'date',
-                          e.target.value
-                        )
-                      }
-                    />
-
-                  </td>
-
-                  {/* =================================================
-                      PART NAME
-                      FIXED: ALWAYS RENDER STRING
-                  ================================================= */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <select
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 font-semibold uppercase cursor-pointer"
-                      value={
-                        typeof row.partName === 'object'
-                          ? row.partName?.partName || ''
-                          : row.partName || ''
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'partName',
-                          e.target.value
-                        )
-                      }
-                    >
-
-                      <option value="">
-                        Select Part Name
-                      </option>
-
-                      {partNameOptions.map(
-                        (part, pIdx) => {
-
-                          // ------------------------------------------
-                          // Convert backend object -> string
-                          // ------------------------------------------
-
-                          const partName =
-                            typeof part === 'object' &&
-                            part !== null
-                              ? part.partName || ''
-                              : String(part);
-
-                          if (!partName) {
-                            return null;
-                          }
-
-                          return (
-
-                            <option
-                              key={`${partName}-${pIdx}`}
-                              value={partName}
-                            >
-                              {partName}
-                            </option>
-
-                          );
-                        }
-                      )}
-
-                    </select>
-
-                    {loadingPartNames && (
-
-                      <div className="text-[9px] text-gray-400 mt-1">
-                        Loading part names...
-                      </div>
-
-                    )}
-
-                  </td>
-
-                  {/* PROBLEM DESCRIPTION */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <textarea
-                      rows={2}
-                      placeholder="Describe problem"
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 resize-y uppercase"
-                      value={
-                        row.problemDescription || ''
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'problemDescription',
-                          e.target.value
-                        )
-                      }
-                    />
-
-                  </td>
-
-                  {/* CATEGORY */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <select
-                      className="w-full text-center bg-transparent outline-none p-1 font-bold cursor-pointer"
-                      value={
-                        row.problemCategory || "E"
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'problemCategory',
-                          e.target.value
-                        )
-                      }
-                    >
-
-                      <option value="A">A</option>
-                      <option value="B">B</option>
-                      <option value="C">C</option>
-                      <option value="D">D</option>
-                      <option value="E">E</option>
-
-                    </select>
-
-                  </td>
-
-                  {/* QUANTITY */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <input
-                      type="number"
-                      min={1}
-                      className="w-full text-center bg-transparent outline-none p-1 font-medium"
-                      value={
-                        row.quantity ?? 1
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'quantity',
-                          parseInt(
-                            e.target.value,
-                            10
-                          ) || 1
-                        )
-                      }
-                    />
-
-                  </td>
-
-                  {/* ROOT CAUSE */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <textarea
-                      rows={2}
-                      placeholder="Enter root cause"
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 resize-y uppercase"
-                      value={
-                        row.rootCause || ''
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'rootCause',
-                          e.target.value
-                        )
-                      }
-                    />
-
-                  </td>
-
-                  {/* CORRECTIVE ACTION */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <textarea
-                      rows={2}
-                      placeholder="Enter corrective action"
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 resize-y uppercase"
-                      value={
-                        row.correctiveAction || ''
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'correctiveAction',
-                          e.target.value
-                        )
-                      }
-                    />
-
-                  </td>
-
-                  {/* RESULT */}
-
-                  <td className="border border-gray-800 p-1">
-
-                    <select
-                      className="w-full text-center bg-transparent outline-none p-1 font-bold cursor-pointer"
-                      value={
-                        row.result || "OK"
-                      }
-                      onChange={(e) =>
-                        handleRowChange(
-                          idx,
-                          'result',
-                          e.target.value
-                        )
-                      }
-                    >
-
-                      <option value="OK">
-                        OK
-                      </option>
-
-                      <option value="NOT OK">
-                        NOT OK
-                      </option>
-
-                    </select>
-
-                  </td>
-
-                  {/* SIGNATURE */}
-
-                  <td className="border border-gray-800 p-1 text-center bg-gray-50/30">
-
-                    {row.signature ? (
-
-                      <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-
-                        <span className="text-[10px] font-bold text-green-600 leading-tight">
-                          Approved ✓
-                        </span>
-
-                        <span
-                          className="text-xs font-extrabold text-gray-900 uppercase truncate max-w-[90px]"
-                          title={row.signature}
-                        >
-                          {row.signature}
-                        </span>
-
-                      </div>
-
-                    ) : (
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleApproveRowSignature(idx)
-                        }
-                        className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-3 py-1 rounded shadow transition-all hover:scale-105 uppercase tracking-wider cursor-pointer"
-                      >
-                        Approve
-                      </button>
-
-                    )}
-
-                  </td>
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
-        {/* ====================================================
-            NOTES / LEGEND
-        ==================================================== */}
-
-        <div className="border-2 border-gray-800 flex flex-col mt-6">
-
-          <div className="px-3 py-1.5 font-bold text-gray-800 text-xs border-b border-gray-800 bg-gray-100">
-
-            Note: The Problem Category to be mentioned as A or B or C or D or E
-
-          </div>
-
-          <div className="p-3 text-xs text-gray-700 space-y-1.5 bg-white font-medium">
-
-            {initialFormData.categoryLegend.map(
-              item => (
-
-                <div
-                  key={item.code}
-                  className="flex gap-2"
-                >
-
-                  <span className="font-bold text-gray-900 w-6">
-                    {item.code} -
-                  </span>
-
-                  <span>
-                    {item.description}
-                  </span>
-
-                </div>
-
-              )
-            )}
-
-          </div>
-
-        </div>
-
-        {/* ====================================================
-            SAVE BUTTON
-        ==================================================== */}
-
-        <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
-
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={
-              isSaving ||
-              saveSuccess
-            }
-            className="bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer uppercase tracking-wider text-sm"
-          >
-
-            {isSaving
-              ? "SAVING..."
-              : saveSuccess
-                ? "SAVED ✓"
-                : "SAVE & CONTINUE"}
-
-          </button>
 
         </div>
 
       </div>
 
+      {/* ====================================================
+          PAGE CONTENT
+      ==================================================== */}
+
+      {currentPage === 1
+        ? renderPage1()
+        : renderPage2()}
+
     </div>
+
   );
+
 }

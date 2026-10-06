@@ -697,7 +697,7 @@ export default function DailyProductionIdleTimeReport() {
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      navigate(`/operator/${shopId || 3}`);
+      navigate(`/shift-incharge/${shopId || 3}`);
     } catch (err) {
       console.error("Save error:", err);
       setIsSaving(false);

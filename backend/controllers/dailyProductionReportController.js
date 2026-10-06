@@ -208,26 +208,68 @@ const saveDailyProductionReport = async (req, res) => {
     const peSignature = signatures?.productionEngineer || '';
     const hofSignature = signatures?.hofProduction || '';
 
-    // Clear previous unverified draft rows
-    await transaction.request()
-      .input('MachineShop', sql.NVarChar(50), machineShop)
-      .input('lineCode', sql.NVarChar(50), lineCode)
-      .input('ReportDate', sql.Date, reportDate)
-      .input('Shift', sql.NVarChar(10), shift)
-      .query(`
+    // Fetch existing records for this line & date to preserve already-signed rows (per machine)
+    const existingReq = transaction.request();
+    existingReq.input('MachineShop', sql.NVarChar(50), machineShop);
+    existingReq.input('lineCode', sql.NVarChar(50), lineCode);
+    existingReq.input('ReportDate', sql.Date, reportDate);
+    existingReq.input('Shift', sql.NVarChar(10), shift);
+
+    const existingResult = await existingReq.query(`
+      SELECT MachineNo, Sign_SupervisorProduction 
+      FROM DailyProductionReport
+      WHERE MachineShop = @MachineShop
+        AND lineCode = @lineCode
+        AND CONVERT(date, ReportDate) = CONVERT(date, @ReportDate)
+        AND Shift = @Shift
+    `);
+
+    // Map existing signatures by MachineNo
+    const existingSigs = {};
+    existingResult.recordset.forEach(r => {
+      if (r.MachineNo) {
+        existingSigs[r.MachineNo] = r.Sign_SupervisorProduction || '';
+      }
+    });
+
+    // Extract all machine numbers from the incoming payload
+    const machineNos = rows.map(r => r.machineNo || '').filter(m => m !== '');
+
+    // Clear unverified draft rows ONLY for the specific machines being updated
+    if (machineNos.length > 0) {
+      const deleteReq = transaction.request();
+      deleteReq.input('MachineShop', sql.NVarChar(50), machineShop);
+      deleteReq.input('lineCode', sql.NVarChar(50), lineCode);
+      deleteReq.input('ReportDate', sql.Date, reportDate);
+      deleteReq.input('Shift', sql.NVarChar(10), shift);
+
+      const mcParams = [];
+      machineNos.forEach((mc, idx) => {
+        const paramName = `mc_${idx}`;
+        deleteReq.input(paramName, sql.NVarChar(50), mc);
+        mcParams.push(`@${paramName}`);
+      });
+
+      await deleteReq.query(`
         DELETE FROM DailyProductionReport
         WHERE MachineShop = @MachineShop
           AND lineCode = @lineCode
           AND CONVERT(date, ReportDate) = CONVERT(date, @ReportDate)
           AND Shift = @Shift
+          AND MachineNo IN (${mcParams.join(', ')})
           AND (
             Sign_SupervisorQuality IS NULL OR Sign_SupervisorQuality = '' OR Sign_SupervisorQuality = 'Pending'
             OR Sign_ProductionEngineer IS NULL OR Sign_ProductionEngineer = '' OR Sign_ProductionEngineer = 'Pending'
             OR Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending'
           )
       `);
+    }
 
     for (const row of rows) {
+      // Preserve shift supervisor signature if the frontend passes it blank but we already have one saved
+      const existingSigForRow = existingSigs[row.machineNo || ''] || '';
+      const finalShiftSupSig = signatures?.shiftSupervisorProduction || existingSigForRow;
+
       await transaction.request()
         .input('MachineShop', sql.NVarChar(50), machineShop)
         .input('lineCode', sql.NVarChar(50), lineCode)
@@ -253,7 +295,7 @@ const saveDailyProductionReport = async (req, res) => {
         .input('TimeFrom', sql.VarChar(10), sanitizeTime(row.time?.from))
         .input('TimeTo', sql.VarChar(10), sanitizeTime(row.time?.to))
 
-        .input('Sign_SupervisorProduction', sql.NVarChar(100), signatures?.shiftSupervisorProduction || '')
+        .input('Sign_SupervisorProduction', sql.NVarChar(100), finalShiftSupSig)
         .input('Sign_SupervisorQuality', sql.NVarChar(100), qcSignature)
         .input('Sign_ProductionEngineer', sql.NVarChar(100), peSignature)
         .input('Sign_HOFProduction', sql.NVarChar(100), hofSignature)
@@ -559,7 +601,7 @@ const signHofApproval = async (req, res) => {
 // 13. GET DAILY PRODUCTION RECORDS (AUTO LOAD EXISTING)
 // ============================================================
 const getDailyProductionRecords = async (req, res) => {
-  const { machineShop, lineCode, date, shift } = req.query;
+  const { machineShop, lineCode, date, shift, machineNo } = req.query;
 
   try {
     let query = `
@@ -612,6 +654,11 @@ const getDailyProductionRecords = async (req, res) => {
     if (shift) {
       request.input('shift', sql.NVarChar(10), shift);
       query += ` AND Shift = @shift`;
+    }
+    // New query parameter filter to enable loading specific machines only
+    if (machineNo) {
+      request.input('machineNo', sql.NVarChar(50), String(machineNo));
+      query += ` AND MachineNo = @machineNo`;
     }
 
     query += ` ORDER BY Id ASC`;
@@ -693,7 +740,7 @@ const getDailyProductionRecords = async (req, res) => {
 // ============================================================
 const generateReport = async (req, res) => {
   try {
-    const { lineCode, date, shift, shopId } = req.query;
+    const { lineCode, date, shift, shopId, machineNo } = req.query;
 
     if (!lineCode || !date) {
       return res.status(400).send("lineCode and date are required.");
@@ -727,6 +774,11 @@ const generateReport = async (req, res) => {
     if (shopId) {
       request.input('machineShop', sql.NVarChar(50), String(shopId));
       query += ` AND MachineShop = @machineShop`;
+    }
+    // Include machineNo filter just in case the frontend also passes it here
+    if (machineNo) {
+      request.input('machineNo', sql.NVarChar(50), String(machineNo));
+      query += ` AND MachineNo = @machineNo`;
     }
 
     query += ` ORDER BY Id ASC`;
@@ -812,6 +864,13 @@ const generateReport = async (req, res) => {
     doc.lineWidth(0.5).strokeColor('black');
     let y = drawRow(headers, headerY + 45, true);
 
+    // Collect Signatures aggressively from ALL records 
+    // to ensure they display even if some specific machine records haven't been signed.
+    let opSig = '';
+    let qcSig = '';
+    let peSig = '';
+    let hofSig = '';
+
     records.forEach((r) => {
       const timeVal = (r.TimeFrom || r.TimeTo) ? `${r.TimeFrom || ''}-${r.TimeTo || ''}` : '-';
       const castHold = r.ReasonForHold_Casting ? `${r.ReasonForHold_Casting} (${r.ReasonForHold_CastingQty || 0})` : '-';
@@ -829,6 +888,12 @@ const generateReport = async (req, res) => {
         timeVal,
         r.McStopTimeReason || "-"
       ], y, false);
+
+      // Aggregate Signatures
+      if (!opSig && r.Sign_SupervisorProduction && !String(r.Sign_SupervisorProduction).includes('Pending')) opSig = r.Sign_SupervisorProduction;
+      if (!qcSig && r.Sign_SupervisorQuality && !String(r.Sign_SupervisorQuality).includes('Pending')) qcSig = r.Sign_SupervisorQuality;
+      if (!peSig && r.Sign_ProductionEngineer && !String(r.Sign_ProductionEngineer).includes('Pending')) peSig = r.Sign_ProductionEngineer;
+      if (!hofSig && r.Sign_HOFProduction && !String(r.Sign_HOFProduction).includes('Pending')) hofSig = r.Sign_HOFProduction;
     });
 
     // Signatures Block
@@ -844,8 +909,7 @@ const generateReport = async (req, res) => {
     doc.lineWidth(0.5).strokeColor('black');
     doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Supervisor (Production)", startX, sigY, { width: sigColWidth - 10, align: "center" });
     doc.rect(startX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    const opSig = first.Sign_SupervisorProduction;
-    if (opSig && !String(opSig).includes('Pending')) {
+    if (opSig) {
       doc.fillColor('black').font('Helvetica').fontSize(8).text(String(opSig), startX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
     }
 
@@ -853,8 +917,7 @@ const generateReport = async (req, res) => {
     const qcX = startX + sigColWidth;
     doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Supervisor (Quality)", qcX, sigY, { width: sigColWidth - 10, align: "center" });
     doc.rect(qcX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    const qcSig = first.Sign_SupervisorQuality;
-    if (qcSig && !String(qcSig).includes('Pending')) {
+    if (qcSig) {
       doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(qcX + 20, sigY + 26).lineTo(qcX + 24, sigY + 31).lineTo(qcX + 30, sigY + 20).stroke();
       doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(qcSig).toUpperCase()})`, qcX + 34, sigY + 22, { lineBreak: false });
     } else {
@@ -866,8 +929,7 @@ const generateReport = async (req, res) => {
     doc.strokeColor('black').lineWidth(0.5);
     doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Production Engineer", peX, sigY, { width: sigColWidth - 10, align: "center" });
     doc.rect(peX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    const peSig = first.Sign_ProductionEngineer;
-    if (peSig && !String(peSig).includes('Pending')) {
+    if (peSig) {
       doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(peX + 20, sigY + 26).lineTo(peX + 24, sigY + 31).lineTo(peX + 30, sigY + 20).stroke();
       doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(peSig).toUpperCase()})`, peX + 34, sigY + 22, { lineBreak: false });
     } else {
@@ -879,8 +941,7 @@ const generateReport = async (req, res) => {
     doc.strokeColor('black').lineWidth(0.5);
     doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("HOF - Production", hofX, sigY, { width: sigColWidth - 10, align: "center" });
     doc.rect(hofX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    const hofSig = first.Sign_HOFProduction;
-    if (hofSig && !String(hofSig).includes('Pending')) {
+    if (hofSig) {
       doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(hofX + 20, sigY + 26).lineTo(hofX + 24, sigY + 31).lineTo(hofX + 30, sigY + 20).stroke();
       doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(hofSig).toUpperCase()})`, hofX + 34, sigY + 22, { lineBreak: false });
     } else {

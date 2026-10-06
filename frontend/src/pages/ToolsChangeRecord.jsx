@@ -4,7 +4,6 @@ import { useLineSet } from "../context/LineSetContext.jsx";
 import { ArrowLeft, FileDown, Save } from "lucide-react";
 import Header from "../components/Header";
 
-
 const CHUNK_SIZE = 3;
 const INITIAL_SECTIONS = 1;
 const INITIAL_ROWS = 1;
@@ -81,7 +80,6 @@ const Toast = ({ message, type, onClose }) => {
     </div>
   );
 };
-
 
 export default function ToolChangeRecord() {
   const { shopId } = useParams();
@@ -307,6 +305,7 @@ export default function ToolChangeRecord() {
     checkExistingRecord(lineSet.lineCode, headerInfo.date, lineSet.machineNo || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineSet]);
+  
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || headerInfo.lineCode;
@@ -699,7 +698,7 @@ export default function ToolChangeRecord() {
       navigate(
         isQC
           ? `/qc/${shopId || 3}`
-          : `/shift-incharge/${shopId || 3}/daily-production-report`
+          : `/shift-incharge/${shopId || 3}`
       );
     } catch (err) {
       console.error("Save error:", err);
@@ -858,7 +857,8 @@ export default function ToolChangeRecord() {
               <button
                 type="button"
                 onClick={handleAddColumn}
-                className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
+                disabled={isSavedRecord}
+                className={`inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 + Add Column
               </button>
@@ -866,7 +866,8 @@ export default function ToolChangeRecord() {
                 <button
                   type="button"
                   onClick={handleRemoveColumn}
-                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
+                  disabled={isSavedRecord}
+                  className={`inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   − Delete Column
                 </button>
@@ -880,7 +881,8 @@ export default function ToolChangeRecord() {
               <button
                 type="button"
                 onClick={handleAddRow}
-                className="inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
+                disabled={isSavedRecord}
+                className={`inline-flex items-center gap-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 + Add Row
               </button>
@@ -888,7 +890,8 @@ export default function ToolChangeRecord() {
                 <button
                   type="button"
                   onClick={handleRemoveRow}
-                  className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
+                  disabled={isSavedRecord}
+                  className={`inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   − Delete Row
                 </button>
@@ -918,7 +921,7 @@ export default function ToolChangeRecord() {
                             </span>
                             <input
                               type="text"
-                              disabled={isQC}
+                              disabled={isQC || isSavedRecord}
                               className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400 disabled:text-gray-700"
                               value={sec.partTraceability}
                               placeholder={isQC ? "-" : "Enter / Generate Traceability"}
@@ -949,7 +952,7 @@ export default function ToolChangeRecord() {
                             </span>
                             <input
                               type="text"
-                              disabled={isQC}
+                              disabled={isQC || isSavedRecord}
                               className="w-full outline-none font-medium px-1 bg-transparent border-b border-transparent focus:border-orange-400 disabled:text-gray-700"
                               value={sec.toolDescription}
                               placeholder={isQC ? "-" : "Enter Tool Description"}
@@ -985,7 +988,7 @@ export default function ToolChangeRecord() {
                                 onChange={(e) =>
                                   handleSectionMetaChange(globalIdx, "mcNo", e.target.value)
                                 }
-                                disabled={!headerInfo.lineCode || isQC}
+                                disabled={!headerInfo.lineCode || isQC || isSavedRecord}
                               >
                                 <option value="">Select M/C</option>
                                 {machineOptions.map((m, index) => (
@@ -1002,7 +1005,7 @@ export default function ToolChangeRecord() {
                               <select
                                 className="w-full outline-none font-medium text-center bg-transparent cursor-pointer disabled:text-gray-700"
                                 value={sec.opNo || headerInfo.opNo}
-                                disabled={isQC}
+                                disabled={isQC || isSavedRecord}
                                 onChange={(e) =>
                                   handleSectionMetaChange(globalIdx, "opNo", e.target.value)
                                 }
@@ -1036,7 +1039,7 @@ export default function ToolChangeRecord() {
                               </span>
                               <input
                                 type="date"
-                                disabled={isQC}
+                                disabled={isQC || isSavedRecord}
                                 className="w-full outline-none font-medium text-center bg-transparent disabled:text-gray-700"
                                 value={sec.date}
                                 onChange={(e) =>
@@ -1051,7 +1054,7 @@ export default function ToolChangeRecord() {
                               <select
                                 className="w-full outline-none font-medium text-center bg-transparent cursor-pointer disabled:text-gray-700"
                                 value={sec.shift}
-                                disabled={isQC}
+                                disabled={isQC || isSavedRecord}
                                 onChange={(e) =>
                                   handleSectionMetaChange(globalIdx, "shift", e.target.value)
                                 }
@@ -1081,7 +1084,7 @@ export default function ToolChangeRecord() {
                               </span>
                               <input
                                 type="time"
-                                disabled={isQC}
+                                disabled={isQC || isSavedRecord}
                                 className="w-full outline-none font-medium text-center bg-transparent disabled:text-gray-700"
                                 value={sec.from}
                                 onChange={(e) =>
@@ -1095,7 +1098,7 @@ export default function ToolChangeRecord() {
                               </span>
                               <input
                                 type="time"
-                                disabled={isQC}
+                                disabled={isQC || isSavedRecord}
                                 className="w-full outline-none font-medium text-center bg-transparent disabled:text-gray-700"
                                 value={sec.to}
                                 onChange={(e) =>
@@ -1137,7 +1140,7 @@ export default function ToolChangeRecord() {
                                   <input
                                     type="number"
                                     step="any"
-                                    disabled={isQC}
+                                    disabled={isQC || isSavedRecord}
                                     className="w-[45%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
                                     placeholder="100.5"
                                     value={rowData.nominalValue ?? ""}
@@ -1151,7 +1154,7 @@ export default function ToolChangeRecord() {
                                     }
                                   />
                                   <select
-                                    disabled={isQC}
+                                    disabled={isQC || isSavedRecord}
                                     className="w-[25%] h-full text-center outline-none bg-gray-50 border border-gray-300 rounded cursor-pointer font-bold text-xs py-0.5 disabled:border-transparent disabled:bg-transparent disabled:text-gray-800"
                                     value={rowData.operatorSymbol || "±"}
                                     onChange={(e) =>
@@ -1170,7 +1173,7 @@ export default function ToolChangeRecord() {
                                   <input
                                     type="number"
                                     step="any"
-                                    disabled={isQC}
+                                    disabled={isQC || isSavedRecord}
                                     className="w-[30%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
                                     placeholder="5.3"
                                     value={rowData.toleranceValue ?? ""}
@@ -1188,7 +1191,7 @@ export default function ToolChangeRecord() {
                               <td className="border border-gray-800 p-0">
                                 <input
                                   type="text"
-                                  disabled={isQC}
+                                  disabled={isQC || isSavedRecord}
                                   className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
                                   placeholder="Before"
                                   value={rowData.before}
@@ -1205,7 +1208,7 @@ export default function ToolChangeRecord() {
                               <td className="border border-gray-800 p-0">
                                 <input
                                   type="text"
-                                  disabled={isQC}
+                                  disabled={isQC || isSavedRecord}
                                   className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
                                   placeholder="After"
                                   value={rowData.after}
@@ -1249,7 +1252,8 @@ export default function ToolChangeRecord() {
                               <button
                                 type="button"
                                 onClick={() => handleApproveToolChangedBy(globalIdx)}
-                                className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                                disabled={isSavedRecord}
+                                className={`bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
                               >
                                 Approve
                               </button>

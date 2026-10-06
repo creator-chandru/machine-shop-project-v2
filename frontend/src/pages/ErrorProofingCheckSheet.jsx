@@ -721,7 +721,8 @@ export default function ErrorProofingCheckSheet() {
             <button
               type="button"
               onClick={handleAddRow}
-              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+              disabled={isSavedRecord}
+              className={`inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <span className="text-sm font-bold leading-none">
                 +
@@ -734,7 +735,8 @@ export default function ErrorProofingCheckSheet() {
               <button
                 type="button"
                 onClick={handleRemoveRow}
-                className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+                disabled={isSavedRecord}
+                className={`inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <span className="text-sm font-bold leading-none">
                   −
@@ -790,7 +792,7 @@ export default function ErrorProofingCheckSheet() {
                           e.target.value
                         )
                       }
-                      disabled={!headerInfo.lineCode}
+                      disabled={!headerInfo.lineCode || isSavedRecord}
                     >
 
                       <option value="">
@@ -832,6 +834,7 @@ export default function ErrorProofingCheckSheet() {
                           e.target.value
                         )
                       }
+                      disabled={isSavedRecord}
                     />
 
                   </td>
@@ -851,6 +854,7 @@ export default function ErrorProofingCheckSheet() {
                           e.target.value
                         )
                       }
+                      disabled={isSavedRecord}
                     />
 
                   </td>
@@ -869,6 +873,7 @@ export default function ErrorProofingCheckSheet() {
                           e.target.value
                         )
                       }
+                      disabled={isSavedRecord}
                     >
 
                       <option value=""></option>
@@ -898,7 +903,8 @@ export default function ErrorProofingCheckSheet() {
                     <button
                       type="button"
                       onClick={handleApproveSignatures}
-                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer"
+                      disabled={isSavedRecord}
+                      className={`bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       Approve
                     </button>

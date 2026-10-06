@@ -543,6 +543,7 @@ export default function PreOperationChecklist() {
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
               value={headerInfo.opNo}
               onChange={(e) => handleHeaderChange('opNo', e.target.value)}
+              disabled={isSavedRecord}
             >
               <option value="">Select OP</option>
               <option value="20">20</option>
@@ -600,7 +601,7 @@ export default function PreOperationChecklist() {
                                 </td>
                                 <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 text-left px-3 text-gray-700">
                                   {param.specEditable ? (
-                                    <input type="text" className="w-full h-full text-center outline-none bg-transparent py-1" value={specifications[param.slNo] || ''} onChange={(e) => handleSpecificationChange(param.slNo, e.target.value)} placeholder="Enter spec" />
+                                    <input type="text" className="w-full h-full text-center outline-none bg-transparent py-1" value={specifications[param.slNo] || ''} onChange={(e) => handleSpecificationChange(param.slNo, e.target.value)} placeholder="Enter spec" disabled={isSavedRecord} />
                                   ) : (param.specification || '-')}
                                 </td>
                                 <td rowSpan={param.subRows.length} className="border border-gray-800 p-2 text-gray-700">{param.unit || '-'}</td>
@@ -610,14 +611,14 @@ export default function PreOperationChecklist() {
                             <td className="border border-gray-800 p-2 bg-gray-50 font-semibold text-gray-600">{subRow}</td>
                             <td className="border border-gray-800 p-0">
                               {[5, 6, 7].includes(param.slNo) ? (
-                                <select className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer" value={cellValue} onChange={(e) => handleValueChange(param.slNo, subRow, e.target.value)}>
+                                <select className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer" value={cellValue} onChange={(e) => handleValueChange(param.slNo, subRow, e.target.value)} disabled={isSavedRecord}>
                                   <option value=""></option>
                                   <option value="MIN">MIN</option>
                                   <option value="MID">MID</option>
                                   <option value="MAX">MAX</option>
                                 </select>
                               ) : (
-                                <input type="text" className="w-full h-full text-center outline-none bg-transparent py-2" value={cellValue} onChange={(e) => handleValueChange(param.slNo, subRow, e.target.value)} />
+                                <input type="text" className="w-full h-full text-center outline-none bg-transparent py-2" value={cellValue} onChange={(e) => handleValueChange(param.slNo, subRow, e.target.value)} disabled={isSavedRecord} />
                               )}
                             </td>
                           </tr>
@@ -637,7 +638,7 @@ export default function PreOperationChecklist() {
                     </td>
                     <td className="border border-gray-800 p-2 text-left px-3 text-gray-700">
                       {param.specEditable ? (
-                        <input type="text" className="w-full h-full text-center outline-none bg-transparent py-1" value={specifications[param.slNo] || ''} onChange={(e) => handleSpecificationChange(param.slNo, e.target.value)} placeholder="Enter spec" />
+                        <input type="text" className="w-full h-full text-center outline-none bg-transparent py-1" value={specifications[param.slNo] || ''} onChange={(e) => handleSpecificationChange(param.slNo, e.target.value)} placeholder="Enter spec" disabled={isSavedRecord} />
                       ) : (param.specification || '-')}
                     </td>
                     <td className="border border-gray-800 p-2 text-gray-700">{param.unit || '-'}</td>
@@ -645,7 +646,7 @@ export default function PreOperationChecklist() {
                     <td className="border border-gray-800 p-2 text-gray-400">-</td>
                     <td className="border border-gray-800 p-0 relative align-middle">
                       {[4, 10, 11, 12].includes(param.slNo) ? (
-                        <select className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer" value={cellValue} onChange={(e) => handleValueChange(param.slNo, null, e.target.value)}>
+                        <select className="w-full h-full text-center outline-none bg-transparent py-2 cursor-pointer" value={cellValue} onChange={(e) => handleValueChange(param.slNo, null, e.target.value)} disabled={isSavedRecord}>
                           <option value=""></option>
                           <option value="OK">OK</option>
                           <option value="NOT OK">NOT OK</option>
@@ -657,6 +658,7 @@ export default function PreOperationChecklist() {
                             className={`w-full text-center outline-none bg-transparent py-1 ${errorMsg ? 'border-2 border-orange-500 rounded' : ''}`} 
                             value={cellValue} 
                             onChange={(e) => handleValueChange(param.slNo, null, e.target.value)} 
+                            disabled={isSavedRecord}
                           />
                           {errorMsg && (
                             <span className="text-red-500 text-xs font-bold w-full text-left pl-1">
@@ -685,7 +687,8 @@ export default function PreOperationChecklist() {
                     <button
                       type="button"
                       onClick={handleApproveSignatures}
-                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer"
+                      disabled={isSavedRecord}
+                      className={`bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-6 py-2 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer ${isSavedRecord ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       Approve
                     </button>

@@ -42,6 +42,7 @@ const createEmptyRow = (defaultPartNameNo = "") => ({
     from: "",
     to: "",
   },
+  isSavedRow: false,
 });
 
 const Toast = ({ message, type, onClose }) => {
@@ -175,12 +176,12 @@ export default function DailyProductionReport() {
     }
 
     if (record.rows && record.rows.length > 0) {
-      setRows(record.rows);
+      setRows(record.rows.map((r) => ({ ...r, isSavedRow: true })));
     }
 
     if (record.signatures) {
       setSignatures({
-        shiftSupervisorProduction: record.signatures.shiftSupervisorProduction || "",
+        shiftSupervisorProduction: record.signatures.shiftSupervisorProduction || record.signatures.shiftIncharge || "",
         shiftSupervisorQuality: record.signatures.shiftSupervisorQuality || "",
         productionEngineer: record.signatures.productionEngineer || "",
         hofProduction: record.signatures.hofProduction || "",
@@ -301,6 +302,7 @@ export default function DailyProductionReport() {
             setHeader((prev) => ({
               ...prev,
               shiftInchargeName: isShiftIncharge && currentUsername !== "Unknown" ? currentUsername : "",
+              partTraceabilityMachining: "",
             }));
           }
         }
@@ -400,6 +402,10 @@ export default function DailyProductionReport() {
 
   const handleHeaderChange = (field, val) => {
     if (isReadOnlyApprover) return;
+    if (isSavedRecord && ["partTraceabilityMachining", "shiftInchargeName", "assignedQc", "assignedPe", "assignedHof"].includes(field)) {
+      return;
+    }
+
     setHeader((prev) => ({ ...prev, [field]: val }));
 
     if (field === "lineCode") {
@@ -445,7 +451,7 @@ export default function DailyProductionReport() {
   };
 
   const handleRowChange = (rowIdx, field, subField, val) => {
-    if (isReadOnlyApprover) return;
+    if (isReadOnlyApprover || rows[rowIdx].isSavedRow) return;
     setRows((prev) => {
       const next = [...prev];
       if (subField) {
@@ -477,7 +483,11 @@ export default function DailyProductionReport() {
 
   const handleRemoveRow = () => {
     if (isReadOnlyApprover) return;
-    setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+    setRows((prev) => {
+      if (prev.length <= 1) return prev;
+      if (prev[prev.length - 1].isSavedRow) return prev;
+      return prev.slice(0, -1);
+    });
   };
 
   // Shift Incharge Approves "Shift Supervisor (Production)"
@@ -640,7 +650,8 @@ export default function DailyProductionReport() {
       },
       rows,
       signatures: {
-        ...signatures,
+        shiftSupervisorProduction: signatures.shiftSupervisorProduction || header.shiftInchargeName || currentUsername,
+        shiftIncharge: signatures.shiftSupervisorProduction || header.shiftInchargeName || currentUsername,
         shiftSupervisorQuality: isQC ? currentUsername : signatures.shiftSupervisorQuality || "Pending",
         productionEngineer: isPE ? currentUsername : signatures.productionEngineer || "Pending",
         hofProduction: isHOF ? currentUsername : signatures.hofProduction || "Pending",
@@ -687,7 +698,7 @@ export default function DailyProductionReport() {
           ? `/production-engineer/${shopId || 3}`
           : isHOF
           ? `/hof/${shopId || 3}`
-          : `/operator/${shopId || 3}/daily-production-idle-time-report`
+          : `/shift-incharge/${shopId || 3}`
       );
     } catch (err) {
       console.error("Save error:", err);
@@ -826,7 +837,7 @@ export default function DailyProductionReport() {
               type="text"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
               value={header.partTraceabilityMachining}
-              disabled={isReadOnlyApprover}
+              disabled={isReadOnlyApprover || isSavedRecord}
               onChange={(e) => handleHeaderChange("partTraceabilityMachining", e.target.value)}
               placeholder="Auto-generated / Enter Traceability"
             />
@@ -863,7 +874,7 @@ export default function DailyProductionReport() {
               type="text"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
               value={header.shiftInchargeName}
-              disabled={isReadOnlyApprover}
+              disabled={isReadOnlyApprover || isSavedRecord}
               onChange={(e) => handleHeaderChange("shiftInchargeName", e.target.value)}
               placeholder="Enter name"
             />
@@ -890,11 +901,12 @@ export default function DailyProductionReport() {
                 >
                   + Add Row
                 </button>
-                {rows.length > 1 && (
+                {rows.length > 1 && !rows[rows.length - 1].isSavedRow && (
                   <button
                     type="button"
                     onClick={handleRemoveRow}
-                    className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded transition-colors shadow hover:cursor-pointer"
+                    disabled={rows[rows.length - 1].isSavedRow}
+                    className={`inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded transition-colors shadow hover:cursor-pointer ${rows[rows.length - 1].isSavedRow ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     − Delete Row
                   </button>
@@ -958,7 +970,7 @@ export default function DailyProductionReport() {
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px] disabled:text-gray-700"
                         value={row.machineNo}
                         onChange={(e) => handleRowChange(rIdx, "machineNo", null, e.target.value)}
-                        disabled={!header.lineCode || isReadOnlyApprover}
+                        disabled={!header.lineCode || isReadOnlyApprover || row.isSavedRow}
                       >
                         <option value="">Select</option>
                         {machineOptions.map((machine, index) => (
@@ -992,7 +1004,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         value={row.operationDescription}
                         onChange={(e) => handleRowChange(rIdx, "operationDescription", null, e.target.value)}
@@ -1001,7 +1013,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         value={row.operatorName}
                         onChange={(e) => handleRowChange(rIdx, "operatorName", null, e.target.value)}
@@ -1010,7 +1022,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="number"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium disabled:text-gray-700"
                         value={row.produced}
                         onChange={(e) => handleRowChange(rIdx, "produced", null, e.target.value)}
@@ -1019,7 +1031,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="number"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium disabled:text-gray-700"
                         value={row.accepted}
                         onChange={(e) => handleRowChange(rIdx, "accepted", null, e.target.value)}
@@ -1028,7 +1040,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium disabled:text-gray-700"
                         value={row.holdNonConformance}
                         onChange={(e) => handleRowChange(rIdx, "holdNonConformance", null, e.target.value)}
@@ -1037,7 +1049,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         value={row.reasonForHold.casting}
                         onChange={(e) => handleRowChange(rIdx, "reasonForHold", "casting", e.target.value)}
@@ -1046,7 +1058,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="number"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium disabled:text-gray-700"
                         value={row.reasonForHold.castingQty}
                         onChange={(e) => handleRowChange(rIdx, "reasonForHold", "castingQty", e.target.value)}
@@ -1055,7 +1067,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         value={row.reasonForHold.machining}
                         onChange={(e) => handleRowChange(rIdx, "reasonForHold", "machining", e.target.value)}
@@ -1064,7 +1076,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="number"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium disabled:text-gray-700"
                         value={row.reasonForHold.machiningQty}
                         onChange={(e) => handleRowChange(rIdx, "reasonForHold", "machiningQty", e.target.value)}
@@ -1073,7 +1085,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         placeholder="Reason / Details"
                         value={row.mcStopTimeReason}
@@ -1083,7 +1095,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="time"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px] disabled:text-gray-700"
                         value={row.time.from}
                         onChange={(e) => handleRowChange(rIdx, "time", "from", e.target.value)}
@@ -1092,7 +1104,7 @@ export default function DailyProductionReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="time"
-                        disabled={isReadOnlyApprover}
+                        disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px] disabled:text-gray-700"
                         value={row.time.to}
                         onChange={(e) => handleRowChange(rIdx, "time", "to", e.target.value)}
@@ -1184,9 +1196,10 @@ export default function DailyProductionReport() {
                   ) : (
                     <div className="flex flex-col items-center gap-1 w-full">
                       <select
-                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
+                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center disabled:bg-gray-100"
                         value={header.assignedQc || ""}
                         onChange={(e) => handleHeaderChange("assignedQc", e.target.value)}
+                        disabled={isSavedRecord}
                       >
                         <option value="">-- Select QC --</option>
                         {qcUsers.map((qc, qIdx) => {
@@ -1242,9 +1255,10 @@ export default function DailyProductionReport() {
                   ) : (
                     <div className="flex flex-col items-center gap-1 w-full">
                       <select
-                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
+                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center disabled:bg-gray-100"
                         value={header.assignedPe || ""}
                         onChange={(e) => handleHeaderChange("assignedPe", e.target.value)}
+                        disabled={isSavedRecord}
                       >
                         <option value="">-- Select PE --</option>
                         {peUsers.map((pe, pIdx) => {
@@ -1300,9 +1314,10 @@ export default function DailyProductionReport() {
                   ) : (
                     <div className="flex flex-col items-center gap-1 w-full">
                       <select
-                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"
+                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center disabled:bg-gray-100"
                         value={header.assignedHof || ""}
                         onChange={(e) => handleHeaderChange("assignedHof", e.target.value)}
+                        disabled={isSavedRecord}
                       >
                         <option value="">-- Select HOF --</option>
                         {hofUsers.map((h, hIdx) => {

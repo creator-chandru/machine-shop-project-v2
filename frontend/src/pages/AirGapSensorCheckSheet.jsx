@@ -398,7 +398,7 @@ export default function AirGapSensorCheckSheet() {
       setIsSaving(false);
       setSaveSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      navigate(`/operator/${shopId}/tool-change-record`);
+      navigate(`/shift-incharge/${shopId}`);
     } catch (err) {
       setIsSaving(false);
       triggerToast(err.message || 'Failed to save checksheet.', 'error');

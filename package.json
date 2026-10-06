@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "mssql": "^12.7.4",
+    "pdfkit": "^0.20.2"
+  }
+}

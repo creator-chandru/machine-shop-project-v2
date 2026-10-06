@@ -2,48 +2,30 @@ const express = require('express');
 
 const router = express.Router();
 
-const {
-    getCorrectiveActionRecords,
-    getCorrectiveActionRecordById,
-    saveCorrectiveActionRecord,
-    updateCorrectiveActionRecord,
-    deleteCorrectiveActionRecord
-} = require('../controllers/correctiveActionController');
+const correctiveActionController = require('../controllers/correctiveActionController');
 
-
-// GET ALL RECORDS
+// Get part names
 router.get(
-    '/:shopId',
-    getCorrectiveActionRecords
+    '/part-names/:shopId',
+    correctiveActionController.getPartNames
 );
 
-
-// GET ONE RECORD
+// Get existing record
 router.get(
-    '/record/:id',
-    getCorrectiveActionRecordById
+    '/record',
+    correctiveActionController.getRecord
 );
 
-
-// SAVE
+// Save record
 router.post(
     '/',
-    saveCorrectiveActionRecord
+    correctiveActionController.saveRecord
 );
 
-
-// UPDATE
-router.put(
-    '/:id',
-    updateCorrectiveActionRecord
+// Generate PDF
+router.get(
+    '/report',
+    correctiveActionController.generatePdfReport
 );
-
-
-// DELETE
-router.delete(
-    '/:id',
-    deleteCorrectiveActionRecord
-);
-
 
 module.exports = router;

@@ -48,7 +48,7 @@ app.use('/api', skillEvaluationPracticalRoutes);
 app.use('/api', competencyEvaluationFormRoutes);
 app.use('/api/parts', partQtyRoutes);
 app.use('/api/mappings', partMappingRoutes);
-app.use('/api/corrective-actions', correctiveActionRoutes);
+app.use('/api/corrective-action-register', correctiveActionRoutes);
 app.use('/api/jig-fixture-issue', jigFixtureIntimationReportRoutes);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {

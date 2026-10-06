@@ -427,6 +427,8 @@ GO
 -- ============================================
 -- CorrectiveActionRegister
 -- ============================================
+USE MachineShop;
+GO
 
 DROP TABLE IF EXISTS CorrectiveActionRegister;
 GO
@@ -435,36 +437,28 @@ CREATE TABLE CorrectiveActionRegister
 (
     id INT IDENTITY(1,1) PRIMARY KEY,
 
-    -- Machine / Shop information
+    -- Machine / Shop / Header Information
     machineShop INT NOT NULL,
     lineCode NVARCHAR(100) NOT NULL,
-
-    -- Register information
+    machineNo NVARCHAR(50) NULL,
     recordDate DATE NOT NULL,
-    partName NVARCHAR(200),
-    problemDescription NVARCHAR(MAX),
 
-    -- Problem category
-    problemCategory NVARCHAR(10) NOT NULL,
-
-    -- Quantity affected
+    -- Entry Row Data (Matching QF/08/MRO-04 PDF Columns)
+    partName NVARCHAR(200) NOT NULL,
+    problemDescription NVARCHAR(MAX) NOT NULL,
+    problemCategory NVARCHAR(10) NOT NULL, -- Category: 'A', 'B', 'C', 'D', 'E'
     quantity INT NOT NULL DEFAULT 1,
+    rootCause NVARCHAR(MAX) NOT NULL,
+    correctiveAction NVARCHAR(MAX) NOT NULL,
+    result NVARCHAR(50) NOT NULL DEFAULT 'OK', -- 'OK', 'NOT OK'
+    operatorSignature NVARCHAR(100) NOT NULL,
+    shiftInchargeSignature NVARCHAR(100) NULL,
 
-    -- Analysis
-    rootCause NVARCHAR(MAX),
-    correctiveAction NVARCHAR(MAX),
-
-    -- Result
-    result NVARCHAR(50),
-
-    -- Approval / signature
-    operatorSignature NVARCHAR(100),
-    shiftInchargeSignature NVARCHAR(100),
-
-    -- Record information
+    -- Timestamps
     createdAt DATETIME DEFAULT GETDATE(),
     updatedAt DATETIME NULL,
 
+    -- Constraints
     CONSTRAINT CK_CorrectiveActionRegister_MachineShop
         CHECK (machineShop IN (1, 2, 3, 4, 5)),
 
@@ -476,6 +470,7 @@ CREATE TABLE CorrectiveActionRegister
 );
 GO
 
+-- Index Optimization
 CREATE INDEX IX_CorrectiveActionRegister_LineCode
 ON CorrectiveActionRegister(lineCode);
 GO

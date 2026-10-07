@@ -1,4 +1,4 @@
-const sql = require('mssql');
+const sql = require('../db');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
@@ -34,7 +34,7 @@ const getPartNames = async (req, res) => {
             .query(`
                 SELECT DISTINCT
                     partName
-                FROM MachineShop3PartQty
+                FROM M3PartSets
                 WHERE partName IS NOT NULL
                   AND LTRIM(RTRIM(partName)) <> ''
                 ORDER BY partName ASC

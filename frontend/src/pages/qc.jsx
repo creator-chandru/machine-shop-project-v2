@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
-import { ClipboardCheck, RefreshCw, Loader, X, FileSpreadsheet, Wrench } from "lucide-react";
+import { 
+  ClipboardCheck, 
+  RefreshCw, 
+  Loader, 
+  X, 
+  FileSpreadsheet, 
+  Wrench, 
+  FileText 
+} from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -9,8 +17,9 @@ const QC = () => {
   const navigate = useNavigate();
   const { shopId } = useParams();
 
-  const [activeFormType, setActiveFormType] = useState("tool-change"); // "tool-change" | "daily-production"
+  const [activeFormType, setActiveFormType] = useState("tool-change"); // "tool-change" | "daily-production" | "significant"
   const [pendingReports, setPendingReports] = useState([]);
+  const [pendingSignificantReports, setPendingSignificantReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
@@ -47,8 +56,28 @@ const QC = () => {
     }
   };
 
+  const fetchPendingSignificantReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-pending/qc/${encodeURIComponent(currentQC)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingSignificantReports(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending Significant Event Reports.");
+    }
+  };
+
   useEffect(() => {
-    fetchPendingReports();
+    if (activeFormType === "significant") {
+      fetchPendingSignificantReports();
+    } else {
+      fetchPendingReports();
+    }
   }, [shopId, activeFormType]);
 
   const handleOpenReviewModal = async (report) => {
@@ -57,7 +86,7 @@ const QC = () => {
     setIsPdfLoading(true);
 
     try {
-      const rawDate = report.reportDate || report.checkDate;
+      const rawDate = report.reportDate || report.checkDate || report.recordDate;
       let isoDate = rawDate;
       if (rawDate && rawDate.includes("/")) {
         const parts = rawDate.split("/");
@@ -69,20 +98,30 @@ const QC = () => {
       }
 
       const token = localStorage.getItem("token");
-      const params = new URLSearchParams({
-        lineCode: report.lineCode,
-        date: isoDate,
-        shopId: String(report.machineShop || shopId || 3),
-      });
+      let reportPath = "";
+      const params = new URLSearchParams();
 
-      if (activeFormType === "daily-production" && report.shift) {
-        params.append("shift", report.shift);
+      if (activeFormType === "significant") {
+        params.append("lineCode", report.lineCode || "");
+        params.append("partName", report.partName || "");
+        params.append("date", isoDate);
+        params.append("event", report.event || "");
+        params.append("shift", report.shift || "");
+        reportPath = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-report?${params.toString()}`;
+      } else {
+        params.append("lineCode", report.lineCode);
+        params.append("date", isoDate);
+        params.append("shopId", String(report.machineShop || shopId || 3));
+
+        if (activeFormType === "daily-production" && report.shift) {
+          params.append("shift", report.shift);
+        }
+
+        reportPath =
+          activeFormType === "tool-change"
+            ? `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/report?${params.toString()}`
+            : `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/report?${params.toString()}`;
       }
-
-      const reportPath =
-        activeFormType === "tool-change"
-          ? `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/report?${params.toString()}`
-          : `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/report?${params.toString()}`;
 
       const res = await fetch(reportPath, {
         headers: { Authorization: `Bearer ${token}` },
@@ -100,7 +139,7 @@ const QC = () => {
 
   const submitQcSignature = async () => {
     try {
-      const rawDate = selectedReport.reportDate || selectedReport.checkDate;
+      const rawDate = selectedReport.reportDate || selectedReport.checkDate || selectedReport.recordDate;
       let isoDate = rawDate;
       if (rawDate && rawDate.includes("/")) {
         const parts = rawDate.split("/");
@@ -109,27 +148,43 @@ const QC = () => {
         }
       }
 
-      const signEndpoint =
-        activeFormType === "tool-change"
-          ? `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/sign-qc`
-          : `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-qc`;
+      let signEndpoint = "";
+      let payload = {};
 
-      const payload =
-        activeFormType === "tool-change"
-          ? {
-              lineCode: selectedReport.lineCode,
-              date: isoDate,
-              machineNo: selectedReport.machineNo,
-              signature: currentQC,
-              qcUsername: currentQC,
-            }
-          : {
-              lineCode: selectedReport.lineCode,
-              date: isoDate,
-              shift: selectedReport.shift || "I",
-              signature: currentQC,
-              qcUsername: currentQC,
-            };
+      if (activeFormType === "significant") {
+        signEndpoint = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-sign`;
+        payload = {
+          role: "qc",
+          username: currentQC,
+          lineCode: selectedReport.lineCode,
+          partName: selectedReport.partName,
+          recordDate: isoDate,
+          event: selectedReport.event,
+          shift: selectedReport.shift || "I",
+        };
+      } else {
+        signEndpoint =
+          activeFormType === "tool-change"
+            ? `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/sign-qc`
+            : `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-qc`;
+
+        payload =
+          activeFormType === "tool-change"
+            ? {
+                lineCode: selectedReport.lineCode,
+                date: isoDate,
+                machineNo: selectedReport.machineNo,
+                signature: currentQC,
+                qcUsername: currentQC,
+              }
+            : {
+                lineCode: selectedReport.lineCode,
+                date: isoDate,
+                shift: selectedReport.shift || "I",
+                signature: currentQC,
+                qcUsername: currentQC,
+              };
+      }
 
       const res = await fetch(signEndpoint, {
         method: "POST",
@@ -146,7 +201,11 @@ const QC = () => {
 
       setTimeout(() => {
         setSelectedReport(null);
-        fetchPendingReports();
+        if (activeFormType === "significant") {
+          fetchPendingSignificantReports();
+        } else {
+          fetchPendingReports();
+        }
       }, 1500);
     } catch (err) {
       toast.error("Failed to save QC approval.");
@@ -172,7 +231,10 @@ const QC = () => {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={fetchPendingReports}
+                onClick={() => {
+                  fetchPendingReports();
+                  fetchPendingSignificantReports();
+                }}
                 className="p-2 text-gray-500 hover:text-orange-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                 title="Refresh"
               >
@@ -208,77 +270,149 @@ const QC = () => {
               <FileSpreadsheet className="w-4 h-4" />
               Daily Production Reports
             </button>
+            <button
+              onClick={() => setActiveFormType("significant")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeFormType === "significant"
+                  ? "bg-orange-500 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              Significant Event Records
+              {pendingSignificantReports.length > 0 && (
+                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
+                  {pendingSignificantReports.length}
+                </span>
+              )}
+            </button>
           </div>
 
-          {pendingReports.length === 0 ? (
-            <p className="text-gray-500 italic py-6">
-              No {activeFormType === "tool-change" ? "Tool Change" : "Daily Production"} records pending your review.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-gray-300">
-                <thead className="bg-gray-800 text-white">
-                  <tr>
-                    <th className="p-3 border border-gray-300 w-20 text-center">ID</th>
-                    <th className="p-3 border border-gray-300">Date</th>
-                    <th className="p-3 border border-gray-300">Line Code</th>
-                    {activeFormType === "daily-production" && (
-                      <th className="p-3 border border-gray-300">Shift</th>
-                    )}
-                    <th className="p-3 border border-gray-300">Part Details</th>
-                    <th className="p-3 border border-gray-300">Shift Incharge</th>
-                    <th className="p-3 border border-gray-300">Status</th>
-                    <th className="p-3 border border-gray-300 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingReports.map((report) => (
-                    <tr key={report.id} className="hover:bg-gray-50">
-                      <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
-                        #{report.id}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-medium">
-                        {formatDate(report.reportDate)}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-bold">
-                        {report.lineCode}
-                      </td>
-                      {activeFormType === "daily-production" && (
-                        <td className="p-3 border border-gray-300 font-semibold">
-                          {report.shift || "I"}
-                        </td>
-                      )}
-                      <td className="p-3 border border-gray-300">
-                        {report.partName || "N/A"}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {report.shiftInchargeName || report.toolChangedBySignature || "Shift Incharge"}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
-                          <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
-                            ✓ Signed
-                          </span>
-                        ) : (
-                          <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
-                            Pending Review
-                          </span>
+          {/* TAB CONTENT: Tool Change & Daily Production */}
+          {activeFormType !== "significant" && (
+            <div>
+              {pendingReports.length === 0 ? (
+                <p className="text-gray-500 italic py-6">
+                  No {activeFormType === "tool-change" ? "Tool Change" : "Daily Production"} records pending your review.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white">
+                      <tr>
+                        <th className="p-3 border border-gray-300 w-20 text-center">ID</th>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Line Code</th>
+                        {activeFormType === "daily-production" && (
+                          <th className="p-3 border border-gray-300">Shift</th>
                         )}
-                      </td>
-                      <td className="p-3 border border-gray-300 text-center">
-                        {(!report.verifiedByQcSignature || report.verifiedByQcSignature === "Pending") && (
-                          <button
-                            onClick={() => handleOpenReviewModal(report)}
-                            className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors cursor-pointer"
-                          >
-                            Review & Sign
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <th className="p-3 border border-gray-300">Part Details</th>
+                        <th className="p-3 border border-gray-300">Shift Incharge</th>
+                        <th className="p-3 border border-gray-300">Status</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingReports.map((report) => (
+                        <tr key={report.id} className="hover:bg-gray-50">
+                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
+                            #{report.id}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-medium">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {report.lineCode}
+                          </td>
+                          {activeFormType === "daily-production" && (
+                            <td className="p-3 border border-gray-300 font-semibold">
+                              {report.shift || "I"}
+                            </td>
+                          )}
+                          <td className="p-3 border border-gray-300">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.shiftInchargeName || report.toolChangedBySignature || "Shift Incharge"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
+                              <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
+                                ✓ Signed
+                              </span>
+                            ) : (
+                              <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
+                                Pending Review
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            {(!report.verifiedByQcSignature || report.verifiedByQcSignature === "Pending") && (
+                              <button
+                                onClick={() => handleOpenReviewModal(report)}
+                                className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors cursor-pointer"
+                              >
+                                Review & Sign
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB CONTENT: Significant Event Records */}
+          {activeFormType === "significant" && (
+            <div>
+              {pendingSignificantReports.length === 0 ? (
+                <p className="text-gray-500 italic py-6">
+                  No Significant Event Records pending your review.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Line Name</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Event</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingSignificantReports.map((report, idx) => (
+                        <tr key={`sig-${idx}`} className="hover:bg-orange-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.recordDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold text-orange-700">
+                            {report.lineCode}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-gray-600">
+                            {report.event || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report)}
+                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Sign
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -289,7 +423,7 @@ const QC = () => {
         <div className="fixed inset-0 z-[9999] bg-white flex flex-col overflow-hidden animate-fade-in">
           <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
             <h3 className="font-bold text-xl uppercase tracking-wider">
-              Review & Sign {activeFormType === "tool-change" ? "Tool Change Record" : "Daily Production Report"}
+              Review & Sign {activeFormType === "tool-change" ? "Tool Change Record" : activeFormType === "significant" ? "Significant Event Record" : "Daily Production Report"}
             </h3>
             <button
               onClick={() => {
@@ -324,17 +458,27 @@ const QC = () => {
                     <span className="font-bold">Part Details:</span> {selectedReport.partName || "N/A"}
                   </p>
                   <p>
-                    <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate)}
+                    <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate || selectedReport.recordDate)}
                   </p>
+                  
                   {selectedReport.shift && (
                     <p>
                       <span className="font-bold">Shift:</span> {selectedReport.shift}
                     </p>
                   )}
-                  <p>
-                    <span className="font-bold">Shift Incharge:</span>{" "}
-                    {selectedReport.shiftInchargeName || selectedReport.toolChangedBySignature || "Shift Incharge"}
-                  </p>
+                  
+                  {activeFormType === "significant" && selectedReport.event && (
+                    <p>
+                      <span className="font-bold">Event:</span> {selectedReport.event}
+                    </p>
+                  )}
+
+                  {activeFormType !== "significant" && (
+                    <p>
+                      <span className="font-bold">Shift Incharge:</span>{" "}
+                      {selectedReport.shiftInchargeName || selectedReport.toolChangedBySignature || "Shift Incharge"}
+                    </p>
+                  )}
                 </div>
 
                 <div className="mt-auto">

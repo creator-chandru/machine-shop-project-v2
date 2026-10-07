@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState , useEffect} from "react";
+import { useParams } from "react-router-dom"; // Add this line
 
 const INITIAL_ROWS = 1;
 
@@ -20,11 +21,14 @@ const createEmptyRow = () => ({
 });
 
 export default function RecordOfSignificantEvent() {
+  const { shopId } = useParams(); // Grab the shopId from the URL
+
   // 1. Header Information
   const [header, setHeader] = useState({
+    machineShop: parseInt(shopId), // Dynamically set the machine shop!
     month: "",
     partName: "",
-    lineName: "",
+    lineCode: "", // CHANGE this from lineName to lineCode
     event: "",
     mcNo: "",
     opNo: "",
@@ -57,6 +61,47 @@ export default function RecordOfSignificantEvent() {
     qcIncharge: "",
     prodnHofSign: "",
   });
+
+
+  const [peUsers, setPeUsers] = useState([]);
+  const [qcUsers, setQcUsers] = useState([]);
+  const [hofUsers, setHofUsers] = useState([]);
+
+useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        // 1. Get the token from local storage
+        const token = localStorage.getItem("token"); 
+
+        // 2. Pass the token in the headers
+        const res = await fetch("http://localhost:5000/api/significant-event-users", {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
+        const data = await res.json();
+
+        // 3. Ensure 'data' is an array before attempting to filter
+        if (Array.isArray(data)) {
+          setPeUsers(data.filter(u => u.role === 'productengineer'));
+          setQcUsers(data.filter(u => u.role === 'qc'));
+          setHofUsers(data.filter(u => u.role === 'hof'));
+        } else {
+          console.error("API did not return an array. Data received:", data);
+        }
+      } catch (error) {
+        console.error("Error fetching users:", error);
+      }
+    };
+    fetchUsers();
+  }, []);
 
   // Handlers
   const handleHeaderChange = (field, val) => {
@@ -111,7 +156,7 @@ export default function RecordOfSignificantEvent() {
     setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   };
 
-  // Save to Backend
+// Save to Backend
   const handleSave = async () => {
     const payload = {
       header,
@@ -121,9 +166,15 @@ export default function RecordOfSignificantEvent() {
     };
 
     try {
+      // 1. Get the token from local storage
+      const token = localStorage.getItem("token");
+
       const res = await fetch("http://localhost:5000/api/significant-event-record", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}` // 2. Add the Authorization header here
+        },
         body: JSON.stringify(payload),
       });
 
@@ -184,7 +235,7 @@ export default function RecordOfSignificantEvent() {
                 </td>
               </tr>
 
-              {/* LINE NAME (DIRECTLY BELOW PART NAME) */}
+{/* LINE NAME */}
               <tr>
                 <td colSpan={2} className="border border-gray-800 p-2 text-left bg-white">
                   <div className="flex items-center gap-2">
@@ -194,8 +245,8 @@ export default function RecordOfSignificantEvent() {
                     <input
                       type="text"
                       className="w-full font-semibold text-gray-800 outline-none px-2 py-0.5 bg-transparent border-b border-gray-300 focus:border-orange-500"
-                      value={header.lineName}
-                      onChange={(e) => handleHeaderChange("lineName", e.target.value)}
+                      value={header.lineCode}
+                      onChange={(e) => handleHeaderChange("lineCode", e.target.value)}
                     />
                   </div>
                 </td>
@@ -509,13 +560,16 @@ export default function RecordOfSignificantEvent() {
                   PRODN INCHARGE
                 </td>
                 <td className="border border-gray-800 p-0 text-left w-[75%]">
-                  <input
-                    type="text"
-                    placeholder="Sign / Name"
-                    className="w-full outline-none font-medium bg-transparent px-3 py-2"
-                    value={signatures.prodnIncharge}
-                    onChange={(e) => handleSignatureChange("prodnIncharge", e.target.value)}
-                  />
+                  <select
+                className="w-full outline-none font-medium bg-transparent px-3 py-2 cursor-pointer"
+                value={signatures.prodnIncharge}
+                onChange={(e) => handleSignatureChange("prodnIncharge", e.target.value)}
+              >
+                <option value="">Select Prodn Incharge / PE</option>
+                {peUsers.map((u, i) => (
+                  <option key={i} value={u.username}>{u.username}</option>
+                ))}
+              </select>
                 </td>
               </tr>
 
@@ -525,13 +579,16 @@ export default function RecordOfSignificantEvent() {
                   QC INCHARGE
                 </td>
                 <td className="border border-gray-800 p-0 text-left w-[75%]">
-                  <input
-                    type="text"
-                    placeholder="Sign / Name"
-                    className="w-full outline-none font-medium bg-transparent px-3 py-2"
-                    value={signatures.qcIncharge}
-                    onChange={(e) => handleSignatureChange("qcIncharge", e.target.value)}
-                  />
+                  <select
+                className="w-full outline-none font-medium bg-transparent px-3 py-2 cursor-pointer"
+                value={signatures.qcIncharge}
+                onChange={(e) => handleSignatureChange("qcIncharge", e.target.value)}
+              >
+                <option value="">Select QC Incharge</option>
+                {qcUsers.map((u, i) => (
+                  <option key={i} value={u.username}>{u.username}</option>
+                ))}
+              </select>
                 </td>
               </tr>
 
@@ -541,13 +598,16 @@ export default function RecordOfSignificantEvent() {
                   PRODN HOF SIGN
                 </td>
                 <td className="border border-gray-800 p-0 text-left w-[75%]">
-                  <input
-                    type="text"
-                    placeholder="Sign / Name"
-                    className="w-full outline-none font-medium bg-transparent px-3 py-2"
-                    value={signatures.prodnHofSign}
-                    onChange={(e) => handleSignatureChange("prodnHofSign", e.target.value)}
-                  />
+                  <select
+                className="w-full outline-none font-medium bg-transparent px-3 py-2 cursor-pointer"
+                value={signatures.prodnHofSign}
+                onChange={(e) => handleSignatureChange("prodnHofSign", e.target.value)}
+              >
+                <option value="">Select HOF</option>
+                {hofUsers.map((u, i) => (
+                  <option key={i} value={u.username}>{u.username}</option>
+                ))}
+              </select>
                 </td>
               </tr>
 

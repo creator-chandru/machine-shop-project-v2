@@ -346,14 +346,41 @@ export default function AirGapSensorCheckSheet() {
     }
 
     const date = headerInfo.date;
+
+    // --- APPROVAL AND PE ASSIGNMENT CONSTRAINTS ---
+    for (const shift of SHIFTS) {
+      if (lockedShifts[shift]) continue;
+
+      for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
+        const block = blocks[bIdx];
+        const dateChecks = block.dailyChecks?.[date] || {};
+        const lineSignature = block.lineInchargeSignatures?.[date]?.[shift] || '';
+        const peSignature = shiftProdSignatures[date]?.[shift] || '';
+
+        const hasData = block.parameters.some((_, pIdx) => Boolean(dateChecks?.[pIdx]?.[shift]));
+
+        if (hasData) {
+          if (!lineSignature) {
+            triggerToast(`The Approve button must be selected for Shift ${shift}.`, "error");
+            return;
+          }
+          if (!peSignature) {
+            triggerToast("Please assign Product Engineer.", "error");
+            return;
+          }
+        }
+      }
+    }
+
     const completeShifts = SHIFTS.filter((shift) => {
       if (lockedShifts[shift]) return false;
       return blocks.length > 0 && blocks.every((block) => {
         const dateChecks = block.dailyChecks?.[date] || {};
         const lineSignature = block.lineInchargeSignatures?.[date]?.[shift] || '';
+        const peSignature = shiftProdSignatures[date]?.[shift] || '';
         const allParametersRecorded = block.parameters.every((_, paramIdx) => Boolean(dateChecks?.[paramIdx]?.[shift]));
         
-        return Boolean(block.machineNo && allParametersRecorded && lineSignature);
+        return Boolean(block.machineNo && allParametersRecorded && lineSignature && peSignature);
       });
     });
 

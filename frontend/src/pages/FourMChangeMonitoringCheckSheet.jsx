@@ -5,7 +5,6 @@ import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import Header from "../components/Header";
 
-
 const formMeta = {
   formCode: "QF / 07 / MPD-36",
   revision: "01",
@@ -223,6 +222,22 @@ export default function FourMChangeMonitoringCheckSheet() {
     if (!headerInfo.partName) return triggerToast("Part Name is missing.", "error");
     
     if (!selectedMachineNo) return triggerToast("Please select a Machine No in the table.", "error");
+
+    // --- APPROVE BUTTON CONSTRAINT FOR DATA INSERTION ---
+    for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+      const row = rows[rIdx];
+      const hasDataEntered = Boolean(
+        row.date || row.mcNo || row.typeOf4M || row.description || 
+        row.firstPart || row.lastPart || row.inspectionFrequency || 
+        row.retroChecking || row.quarantine || row.partIdentification || 
+        row.internalCommunication
+      );
+
+      if (hasDataEntered && !row.inchargeSign) {
+        return triggerToast(`The Approve button must be selected for row ${rIdx + 1}.`, "error");
+      }
+    }
+
     if (!hodSign) return triggerToast("Please assign an HOD for verification.", "error");
 
     setIsSaving(true);
@@ -267,7 +282,6 @@ export default function FourMChangeMonitoringCheckSheet() {
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
-      <Header />
       <ToastContainer position="top-right" autoClose={3000} />
       <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
         

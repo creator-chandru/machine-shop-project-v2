@@ -3,12 +3,12 @@ const PDFDocument = require("pdfkit");
 const fs = require('fs');
 const path = require('path');
 
-// POST: Save Record of Significant Event into single table
+// POST: Save Record of Significant Event
 const saveSignificantEvent = async (req, res) => {
     const { header, traceability, rows, signatures } = req.body;
 
-    if (!header) {
-        return res.status(400).json({ error: 'Invalid payload: Header information is required' });
+    if (!header || !header.lineCode || !header.mcNo || !header.date) {
+        return res.status(400).json({ error: 'Line Code, M/C No, and Date are required' });
     }
 
     const transaction = new sql.Transaction();
@@ -16,20 +16,37 @@ const saveSignificantEvent = async (req, res) => {
     try {
         await transaction.begin();
 
+        const cleanDate = String(header.date).split('T')[0];
+
+        // Clear existing draft entries for this lineCode + mcNo + date combination
+        const delReq = transaction.request();
+        delReq.input('machineShop', sql.Int, header.machineShop || 3);
+        delReq.input('lineCode', sql.NVarChar, header.lineCode || '');
+        delReq.input('mcNo', sql.NVarChar, header.mcNo || '');
+        delReq.input('recordDate', sql.Date, cleanDate);
+
+        await delReq.query(`
+            DELETE FROM SignificantEventRecord
+            WHERE machineShop = @machineShop
+              AND lineCode = @lineCode
+              AND mcNo = @mcNo
+              AND CONVERT(date, recordDate) = CONVERT(date, @recordDate)
+        `);
+
         const rowsToInsert = (rows && rows.length > 0) ? rows : [{}];
 
         for (let rIdx = 0; rIdx < rowsToInsert.length; rIdx++) {
             const row = rowsToInsert[rIdx];
 
             await transaction.request()
-                .input('machineShop', sql.Int, header.machineShop || 3) // Required by your DB Schema
+                .input('machineShop', sql.Int, header.machineShop || 3)
                 .input('month', sql.NVarChar, header.month || '')
                 .input('partName', sql.NVarChar, header.partName || '')
-                .input('lineCode', sql.NVarChar, header.lineCode || '') // Fixed from lineName
+                .input('lineCode', sql.NVarChar, header.lineCode || '')
                 .input('event', sql.NVarChar, header.event || '')
                 .input('mcNo', sql.NVarChar, header.mcNo || '')
                 .input('opNo', sql.NVarChar, header.opNo || '')
-                .input('recordDate', header.date ? sql.Date : sql.NVarChar, header.date || null)
+                .input('recordDate', sql.Date, cleanDate)
                 .input('shift', sql.NVarChar, header.shift || 'I')
                 .input('fromTime', sql.NVarChar, header.from || '')
                 .input('toTime', sql.NVarChar, header.to || '')
@@ -88,7 +105,7 @@ const saveSignificantEvent = async (req, res) => {
         }
 
         await transaction.commit();
-        res.status(201).json({ message: 'Record of significant event saved successfully' });
+        res.status(201).json({ message: 'Record of Significant Event saved successfully' });
     } catch (err) {
         console.error('Error saving significant event record:', err);
         try { await transaction.rollback(); } catch (rollbackErr) { }
@@ -96,31 +113,41 @@ const saveSignificantEvent = async (req, res) => {
     }
 };
 
-// GET: Fetch Records by Date, Part Name, or Line Code
+// GET: Fetch Records (Exact or partial match for lineCode + mcNo + date)
 const getSignificantEventRecords = async (req, res) => {
-    const { date, partName, lineCode } = req.query;
+    const { date, partName, lineCode, mcNo, shift } = req.query;
 
     try {
         let query = `SELECT * FROM SignificantEventRecord WHERE 1=1`;
         const request = new sql.Request();
 
         if (date) {
-            request.input('date', sql.Date, date);
-            query += ` AND recordDate = @date`;
+            const cleanDate = String(date).split('T')[0];
+            request.input('date', sql.Date, cleanDate);
+            query += ` AND CONVERT(date, recordDate) = CONVERT(date, @date)`;
         }
         if (partName) {
             request.input('partName', sql.NVarChar, `%${partName}%`);
             query += ` AND partName LIKE @partName`;
         }
         if (lineCode) {
-            request.input('lineCode', sql.NVarChar, `%${lineCode}%`);
-            query += ` AND lineCode LIKE @lineCode`;
+            request.input('lineCode', sql.NVarChar, lineCode);
+            query += ` AND lineCode = @lineCode`;
+        }
+        if (mcNo) {
+            request.input('mcNo', sql.NVarChar, mcNo);
+            query += ` AND mcNo = @mcNo`;
+        }
+        if (shift) {
+            request.input('shift', sql.NVarChar, shift);
+            query += ` AND shift = @shift`;
         }
 
-        query += ` ORDER BY id DESC, rowIdx ASC`;
+        query += ` ORDER BY id ASC, rowIdx ASC`;
         const result = await request.query(query);
         res.json(result.recordset);
     } catch (err) {
+        console.error('Fetch error:', err);
         res.status(500).json({ error: 'Failed to fetch significant event records' });
     }
 };
@@ -189,7 +216,7 @@ const signSignificantEvent = async (req, res) => {
         else if (role === 'qc') columnToUpdate = 'qcIncharge';
         else if (role === 'hof') columnToUpdate = 'prodnHofSign';
 
-        const result = await request.query(`
+        await request.query(`
             UPDATE SignificantEventRecord 
             SET ${columnToUpdate} = @approvedStr
             WHERE partName = @partName AND lineCode = @lineCode 
@@ -203,150 +230,297 @@ const signSignificantEvent = async (req, res) => {
     }
 };
 
-// 4. Generate PDF Report
+// 4. Generate PDF Report (Properly aligned, auto-wrapping, no overlapping text)
 const generateSignificantEventPDF = async (req, res) => {
     try {
-        const { partName, lineCode, date, event, shift } = req.query; 
+        const { lineCode, mcNo, date, shift } = req.query;
+
+        if (!lineCode || !date) {
+            return res.status(400).send("lineCode and date are required.");
+        }
+
+        const cleanDate = String(date).split('T')[0];
         const request = new sql.Request();
-        request.input('partName', sql.NVarChar, partName)
-               .input('lineCode', sql.NVarChar, lineCode)
-               .input('recordDate', sql.Date, date) 
-               .input('event', sql.NVarChar, event)
-               .input('shift', sql.NVarChar, shift);
+        request.input('lineCode', sql.NVarChar, lineCode);
+        request.input('recordDate', sql.Date, cleanDate);
 
-        const result = await request.query(`
+        let query = `
             SELECT * FROM SignificantEventRecord 
-            WHERE partName = @partName AND lineCode = @lineCode 
-              AND recordDate = @recordDate AND event = @event AND shift = @shift
-            ORDER BY rowIdx ASC
-        `);
+            WHERE lineCode = @lineCode 
+              AND CONVERT(date, recordDate) = CONVERT(date, @recordDate)
+        `;
 
-        if (result.recordset.length === 0) return res.status(404).json({ error: "No records found." });
+        if (mcNo) {
+            request.input('mcNo', sql.NVarChar, mcNo);
+            query += ` AND mcNo = @mcNo`;
+        }
+        if (shift) {
+            request.input('shift', sql.NVarChar, shift);
+            query += ` AND shift = @shift`;
+        }
+
+        query += ` ORDER BY rowIdx ASC`;
+
+        const result = await request.query(query);
+        if (result.recordset.length === 0) {
+            return res.status(404).json({ error: "No records found for the selected parameters." });
+        }
+
         const records = result.recordset;
         const header = records[0];
 
-        const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true });
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename=SignificantEvent_${lineCode}.pdf`);
-        doc.pipe(res);
-
-        const startX = 20;
-        let currentY = 20;
-        const fullW = doc.page.width - 40;
-
-        doc.lineWidth(1).strokeColor('black');
-
-        // Header Title
-        doc.rect(startX, currentY, 120, 40).stroke();
-        
-        // --- ADD LOGO HERE ---
-        const logoPath = path.join(__dirname, 'logo.jpg');
-        if (fs.existsSync(logoPath)) {
-            // Fit the logo beautifully inside the 120x40 px box
-            doc.image(logoPath, startX + 5, currentY + 5, { 
-                fit: [110, 30], 
-                align: 'center', 
-                valign: 'center' 
-            });
-        } else {
-            // Fallback text if logo.jpg is missing from the controllers folder
-            doc.font("Helvetica-Bold").fontSize(12).text("SAKTHI AUTO", startX, currentY + 15, { width: 120, align: "center" });
-        }
-
-        doc.rect(startX + 120, currentY, fullW - 120, 40).stroke();
-        doc.fillColor('black').fontSize(16).text("RECORD OF SIGNIFICANT EVENT (MACHINE SHOP)", startX + 120, currentY + 15, { width: fullW - 120, align: "center" });
-        currentY += 40;
-
-        // Header details
-        const halfW = fullW / 2;
-        const drawField = (label, val, x, w, y) => {
-            doc.rect(x, y, w, 20).stroke();
-            doc.font("Helvetica-Bold").fontSize(9).text(`${label}:`, x + 5, y + 6);
-            // Increased offset from 60 to 105 so the signature doesn't overlap the label!
-            doc.font("Helvetica").text(val || '', x + 105, y + 6); 
+        // Safe Date Formatter (DD/MM/YYYY)
+        const formatDisplayDate = (rawDate) => {
+            if (!rawDate) return '-';
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) {
+                const day = String(d.getDate()).padStart(2, '0');
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                return `${day}/${month}/${year}`;
+            }
+            const parts = String(rawDate).split('T')[0].split('-');
+            if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+            return String(rawDate);
         };
 
-        drawField("PART NAME", header.partName, startX, halfW, currentY);
-        drawField("LINE NAME", header.lineCode, startX + halfW, halfW, currentY); // Displayed as LINE NAME, using lineCode
-        currentY += 20;
-        drawField("EVENT", header.event, startX, halfW, currentY);
-        drawField("EVENT", header.event, startX + halfW, halfW, currentY);
-        currentY += 20;
-        
-        doc.rect(startX, currentY, halfW, 20).stroke();
-        doc.font("Helvetica-Bold").text(`M/C No : ${header.mcNo || ''}`, startX + 5, currentY + 6);
-        doc.text(`OP No : ${header.opNo || ''}`, startX + 150, currentY + 6);
-        doc.rect(startX + halfW, currentY, halfW, 20).stroke();
-        doc.text(`M/C No : ${header.mcNo || ''}`, startX + halfW + 5, currentY + 6);
-        currentY += 20;
+        const displayDate = formatDisplayDate(header.recordDate || cleanDate);
 
-        const dateStr = header.recordDate ? new Date(header.recordDate).toLocaleDateString('en-GB') : '';
-        drawField("DATE", dateStr, startX, halfW, currentY);
-        drawField("SHIFT", header.shift, startX + halfW, halfW, currentY);
-        currentY += 20;
-        drawField("FROM", header.fromTime, startX, halfW, currentY);
-        drawField("TO", header.toTime, startX + halfW, halfW, currentY);
-        currentY += 20;
+        const doc = new PDFDocument({ 
+            margin: 25, 
+            size: "A4", 
+            layout: "landscape", 
+            bufferPages: true, 
+            autoPageBreak: false 
+        });
 
-        // Table Headers
-        const c1 = 120, c2 = 120;
-        const ptW = (fullW - c1 - c2) / 6; 
-        const rowH = 20;
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename=SignificantEvent_${lineCode}_${header.mcNo || ''}.pdf`);
+        doc.pipe(res);
 
-        doc.rect(startX, currentY, c1, rowH * 2).fillAndStroke('#e5e7eb', 'black');
-        doc.fillColor('black').font("Helvetica-Bold").text("CONTROL SPEC", startX, currentY + 12, { width: c1, align: "center" });
-        doc.rect(startX + c1, currentY, c2, rowH * 2).fillAndStroke('#e5e7eb', 'black');
-        doc.fillColor('black').text("INSPECTION INST / GAUGE", startX + c1, currentY + 8, { width: c2, align: "center" });
-        
-        doc.rect(startX + c1 + c2, currentY, ptW * 3, rowH).fillAndStroke('#d1d5db', 'black');
-        doc.fillColor('black').text("BEFORE OCCURANCE", startX + c1 + c2, currentY + 6, { width: ptW * 3, align: "center" });
-        doc.rect(startX + c1 + c2 + (ptW * 3), currentY, ptW * 3, rowH).fillAndStroke('#d1d5db', 'black');
-        doc.fillColor('black').text("AFTER CORRECTION", startX + c1 + c2 + (ptW * 3), currentY + 6, { width: ptW * 3, align: "center" });
+        const startX = 25;
+        let currentY = 25;
+        const totalWidth = doc.page.width - 50;
 
-        currentY += rowH;
-        for (let i = 0; i < 6; i++) {
-            doc.rect(startX + c1 + c2 + (i * ptW), currentY, ptW, rowH).fillAndStroke('#e5e7eb', 'black');
-            doc.fillColor('black').text(`PART ${i % 3 + 1}`, startX + c1 + c2 + (i * ptW), currentY + 6, { width: ptW, align: "center" });
+        // ============================================================
+        // 1. TOP TITLE BLOCK
+        // ============================================================
+        const topHeaderH = 42;
+        doc.lineWidth(1).strokeColor('black');
+
+        // Logo Box
+        doc.rect(startX, currentY, 110, topHeaderH).stroke();
+        const logoPath = path.join(__dirname, 'logo.jpg');
+        if (fs.existsSync(logoPath)) {
+            doc.image(logoPath, startX + 5, currentY + 5, { fit: [100, 32], align: 'center', valign: 'center' });
+        } else {
+            doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("SAKTHI AUTO", startX, currentY + 15, { width: 110, align: "center" });
         }
-        currentY += rowH;
 
-        // Rows
-        const drawRow = (col1, col2, b1, b2, b3, a1, a2, a3) => {
-            doc.rect(startX, currentY, c1, rowH).stroke(); doc.font("Helvetica").text(col1 || '', startX + 2, currentY + 6);
-            doc.rect(startX + c1, currentY, c2, rowH).stroke(); doc.text(col2 || '', startX + c1 + 2, currentY + 6);
-            [b1, b2, b3, a1, a2, a3].forEach((val, idx) => {
-                doc.rect(startX + c1 + c2 + (idx * ptW), currentY, ptW, rowH).stroke();
-                doc.text(val || '', startX + c1 + c2 + (idx * ptW), currentY + 6, { width: ptW, align: "center" });
+        // Title Box
+        const titleW = totalWidth - 110 - 150;
+        doc.rect(startX + 110, currentY, titleW, topHeaderH).stroke();
+        doc.fillColor('black').font("Helvetica-Bold").fontSize(13).text("RECORD OF SIGNIFICANT EVENT (MACHINE SHOP)", startX + 110, currentY + 14, { width: titleW, align: "center" });
+
+        // Meta Info Box (Doc code, Shift, Date)
+        doc.rect(startX + totalWidth - 150, currentY, 150, topHeaderH).stroke();
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text("DOC: QF/07/MPD-02 | REV: 07", startX + totalWidth - 150, currentY + 6, { width: 150, align: "center" });
+        doc.font("Helvetica").fontSize(7.5).text(`LINE: ${lineCode} | SHIFT: ${header.shift || 'I'}`, startX + totalWidth - 150, currentY + 18, { width: 150, align: "center" });
+        doc.text(`DATE: ${displayDate}`, startX + totalWidth - 150, currentY + 29, { width: 150, align: "center" });
+
+        currentY += topHeaderH;
+
+        // ============================================================
+        // 2. HEADER DETAILS GRID
+        // ============================================================
+        doc.lineWidth(0.5);
+
+        // Row 1: Line Code (35%) & Part Name (65%) with adaptive height for multiline part names
+        const partNameText = header.partName ? String(header.partName).trim() : "-";
+        const partNameW = (totalWidth * 0.65) - 95;
+        doc.font("Helvetica").fontSize(7.5);
+        const partNameH = doc.heightOfString(partNameText, { width: partNameW });
+        const row1H = Math.max(22, partNameH + 8);
+
+        // LINE CODE cell
+        doc.rect(startX, currentY, totalWidth * 0.35, row1H).stroke();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("LINE CODE:", startX + 6, currentY + (row1H / 2) - 4);
+        doc.font("Helvetica").fontSize(8).text(header.lineCode || '-', startX + 75, currentY + (row1H / 2) - 4);
+
+        // PART NAME cell
+        doc.rect(startX + (totalWidth * 0.35), currentY, totalWidth * 0.65, row1H).stroke();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("PART NAME:", startX + (totalWidth * 0.35) + 6, currentY + 5);
+        doc.font("Helvetica").fontSize(7.5).text(partNameText, startX + (totalWidth * 0.35) + 85, currentY + 5, { width: partNameW });
+
+        currentY += row1H;
+
+        // Row 2: Event (Full width)
+        const eventText = header.event ? String(header.event).trim() : "-";
+        doc.font("Helvetica").fontSize(8);
+        const eventTextH = doc.heightOfString(eventText, { width: totalWidth - 85 });
+        const row2H = Math.max(20, eventTextH + 8);
+
+        doc.rect(startX, currentY, totalWidth, row2H).stroke();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("EVENT:", startX + 6, currentY + 5);
+        doc.font("Helvetica").fontSize(8).text(eventText, startX + 75, currentY + 5, { width: totalWidth - 85 });
+
+        currentY += row2H;
+
+        // Helper for two-column 20px rows
+        const halfW = totalWidth / 2;
+        const draw2ColRow = (l1, v1, l2, v2) => {
+            const h = 20;
+            doc.rect(startX, currentY, halfW, h).stroke();
+            doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text(`${l1}:`, startX + 6, currentY + 5);
+            doc.font("Helvetica").fontSize(8).text(v1 ? String(v1) : '-', startX + 75, currentY + 5);
+
+            doc.rect(startX + halfW, currentY, halfW, h).stroke();
+            doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text(`${l2}:`, startX + halfW + 6, currentY + 5);
+            doc.font("Helvetica").fontSize(8).text(v2 ? String(v2) : '-', startX + halfW + 75, currentY + 5);
+            currentY += h;
+        };
+
+        // Row 3: M/C No & OP No
+        draw2ColRow("M/C NO", header.mcNo, "OP NO", header.opNo);
+
+        // Row 4: Time From & Time To
+        draw2ColRow("TIME FROM", header.fromTime, "TIME TO", header.toTime);
+
+        currentY += 6; // Spacing before table
+
+        // ============================================================
+        // 3. MEASUREMENTS & SPECIFICATIONS TABLE
+        // ============================================================
+        const c1 = 145; // Control Spec
+        const c2 = 135; // Inspection Gauge
+        const ptW = (totalWidth - c1 - c2) / 6; // ~85px each for Part 1-3
+        const headerRowH = 18;
+
+        // Header Row 1
+        doc.rect(startX, currentY, c1, headerRowH * 2).fillAndStroke('#e5e7eb', 'black');
+        doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("CONTROL SPEC", startX, currentY + 12, { width: c1, align: "center" });
+
+        doc.rect(startX + c1, currentY, c2, headerRowH * 2).fillAndStroke('#e5e7eb', 'black');
+        doc.fillColor('black').text("INSPECTION GAUGE", startX + c1, currentY + 12, { width: c2, align: "center" });
+
+        doc.rect(startX + c1 + c2, currentY, ptW * 3, headerRowH).fillAndStroke('#d1d5db', 'black');
+        doc.fillColor('black').text("BEFORE OCCURRENCE", startX + c1 + c2, currentY + 5, { width: ptW * 3, align: "center" });
+
+        doc.rect(startX + c1 + c2 + (ptW * 3), currentY, ptW * 3, headerRowH).fillAndStroke('#d1d5db', 'black');
+        doc.fillColor('black').text("AFTER CORRECTION", startX + c1 + c2 + (ptW * 3), currentY + 5, { width: ptW * 3, align: "center" });
+
+        currentY += headerRowH;
+
+        // Header Row 2 (Part 1, 2, 3)
+        for (let i = 0; i < 6; i++) {
+            const xPos = startX + c1 + c2 + (i * ptW);
+            doc.rect(xPos, currentY, ptW, headerRowH).fillAndStroke('#e5e7eb', 'black');
+            doc.fillColor('black').fontSize(7.5).text(`PART ${(i % 3) + 1}`, xPos, currentY + 5, { width: ptW, align: "center" });
+        }
+        currentY += headerRowH;
+
+        // Row renderer
+        const drawTableRow = (title, gauge, b1, b2, b3, a1, a2, a3, isBoldTitle = false) => {
+            const rowH = 19;
+            const vals = [b1, b2, b3, a1, a2, a3];
+
+            // Col 1: Title / Spec
+            doc.rect(startX, currentY, c1, rowH).stroke();
+            doc.fillColor('black').font(isBoldTitle ? "Helvetica-Bold" : "Helvetica").fontSize(7.5)
+               .text(title || '-', startX + 5, currentY + 5, { width: c1 - 10, align: 'left', ellipsis: true });
+
+            // Col 2: Gauge
+            doc.rect(startX + c1, currentY, c2, rowH).stroke();
+            doc.font("Helvetica").fontSize(7.5)
+               .text(gauge || '-', startX + c1 + 5, currentY + 5, { width: c2 - 10, align: 'center', ellipsis: true });
+
+            // Cols 3-8: Before & After measurements
+            vals.forEach((v, idx) => {
+                const xPos = startX + c1 + c2 + (idx * ptW);
+                doc.rect(xPos, currentY, ptW, rowH).stroke();
+                doc.font("Helvetica").fontSize(7.5)
+                   .text(v ? String(v) : '-', xPos, currentY + 5, { width: ptW, align: 'center' });
             });
+
             currentY += rowH;
         };
 
-        drawRow("1) Part Traceability - Casting", "", header.castingBeforePart1, header.castingBeforePart2, header.castingBeforePart3, header.castingAfterPart1, header.castingAfterPart2, header.castingAfterPart3);
-        drawRow("2) Part Traceability - Machining", "", header.machiningBeforePart1, header.machiningBeforePart2, header.machiningBeforePart3, header.machiningAfterPart1, header.machiningAfterPart2, header.machiningAfterPart3);
+        // 1) Part Traceability - Casting
+        drawTableRow(
+            "1) Part Traceability - Casting", "-",
+            header.castingBeforePart1, header.castingBeforePart2, header.castingBeforePart3,
+            header.castingAfterPart1, header.castingAfterPart2, header.castingAfterPart3,
+            true
+        );
 
-        records.forEach(r => {
-            drawRow(r.controlSpec, r.inspectionGauge, r.beforePart1, r.beforePart2, r.beforePart3, r.afterPart1, r.afterPart2, r.afterPart3);
+        // 2) Part Traceability - Machining
+        drawTableRow(
+            "2) Part Traceability - Machining", "-",
+            header.machiningBeforePart1, header.machiningBeforePart2, header.machiningBeforePart3,
+            header.machiningAfterPart1, header.machiningAfterPart2, header.machiningAfterPart3,
+            true
+        );
+
+        // Dynamic Inspection Custom Rows
+        records.forEach((r) => {
+            drawTableRow(
+                r.controlSpec, r.inspectionGauge,
+                r.beforePart1, r.beforePart2, r.beforePart3,
+                r.afterPart1, r.afterPart2, r.afterPart3,
+                false
+            );
         });
 
-        // Signatures
-        currentY += 10;
-        drawField("PRODN INCHARGE", header.prodnIncharge, startX, halfW, currentY);
-        drawField("PRODN INCHARGE", header.prodnIncharge, startX + halfW, halfW, currentY);
-        currentY += 20;
-        drawField("QC INCHARGE", header.qcIncharge, startX, halfW, currentY);
-        drawField("QC INCHARGE", header.qcIncharge, startX + halfW, halfW, currentY);
-        currentY += 20;
-        drawField("PRODN HOF SIGN", header.prodnHofSign, startX, halfW, currentY);
-        drawField("PRODN HOF SIGN", header.prodnHofSign, startX + halfW, halfW, currentY);
-        currentY += 20;
+        currentY += 8;
 
-        doc.rect(startX, currentY, fullW, 20).stroke();
-        doc.font("Helvetica-Bold").text("Applicable Events: Significant Machine Break Downs & Other unusual situation and applicable 4M change.", startX + 5, currentY + 6);
+        // ============================================================
+        // 4. SIGNATURES BLOCK
+        // ============================================================
+        const sigWidth = totalWidth / 3;
+        const sigHeaderH = 18;
+        const sigBoxH = 34;
+
+        const drawSigBox = (title, sigVal, x) => {
+            // Header
+            doc.rect(x, currentY, sigWidth, sigHeaderH).fillAndStroke('#e5e7eb', 'black');
+            doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text(title, x, currentY + 5, { width: sigWidth, align: 'center' });
+
+            // Content
+            doc.rect(x, currentY + sigHeaderH, sigWidth, sigBoxH).stroke();
+            const textY = currentY + sigHeaderH + 11;
+
+            if (sigVal && sigVal.includes('Approved')) {
+                doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8.5).text(sigVal, x, textY, { width: sigWidth, align: 'center' });
+            } else if (sigVal && sigVal.includes('Pending')) {
+                doc.fillColor('red').font('Helvetica').fontSize(8.5).text(sigVal, x, textY, { width: sigWidth, align: 'center' });
+            } else if (sigVal) {
+                doc.fillColor('black').font('Helvetica-Bold').fontSize(8.5).text(sigVal, x, textY, { width: sigWidth, align: 'center' });
+            } else {
+                doc.fillColor('gray').font('Helvetica').fontSize(8.5).text("Pending", x, textY, { width: sigWidth, align: 'center' });
+            }
+        };
+
+        drawSigBox("PRODN INCHARGE", header.prodnIncharge, startX);
+        drawSigBox("QC INCHARGE", header.qcIncharge, startX + sigWidth);
+        drawSigBox("PRODN HOF SIGN", header.prodnHofSign, startX + (sigWidth * 2));
+
+        currentY += sigHeaderH + sigBoxH + 6;
+
+        // ============================================================
+        // 5. APPLICABLE EVENTS FOOTER
+        // ============================================================
+        doc.rect(startX, currentY, totalWidth, 18).stroke();
+        doc.fillColor('black').font("Helvetica-Bold").fontSize(7.5).text("Applicable Events:", startX + 6, currentY + 5);
+        doc.font("Helvetica").fontSize(7.5).text("Significant Machine Break Downs & Other unusual situation and applicable 4M change.", startX + 85, currentY + 5);
 
         doc.end();
     } catch (err) {
-        console.error("PDF generation error:", err); // Added error logging so you can see exact issues next time!
-        res.status(500).json({ error: "Failed to generate PDF" });
+        console.error("PDF generation error:", err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: "Failed to generate PDF" });
+        } else {
+            res.end();
+        }
     }
 };
 

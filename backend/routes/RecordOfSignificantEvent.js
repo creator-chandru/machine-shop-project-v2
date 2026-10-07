@@ -13,7 +13,7 @@ const {
 // POST: Save Record of Significant Event
 router.post('/significant-event-record', saveSignificantEvent);
 
-// GET: Fetch Records
+// GET: Fetch Records (supports lineCode, mcNo, date, shift filters)
 router.get('/significant-event-record', getSignificantEventRecords);
 
 // GET: Fetch Users for Dropdowns (PE, QC, HOF)
@@ -25,7 +25,7 @@ router.get('/significant-event-pending/:role/:username', getPendingSignificantEv
 // POST: Sign the report
 router.post('/significant-event-sign', signSignificantEvent);
 
-// GET: Generate PDF
+// GET: Generate PDF (neat landscape layout with clean table borders and proper offsets)
 router.get('/significant-event-report', generateSignificantEventPDF);
 
 module.exports = router;

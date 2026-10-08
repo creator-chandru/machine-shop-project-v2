@@ -3,42 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { FileDown, Plus, Trash2, ArrowLeft } from 'lucide-react';
 import Header from '../components/Header';
 
-const fallbackPartNames = [
-  "YNC ESP KNUCKLE LH U/P",
-  "YNC ESP KNUCKLE RH U/P",
-  "ARM, ASSY STRG INTERMEDIATE LH Y9T",
-  "ARM, ASSY STRG INTERMEDIATE RH Y9T",
-  "KNU-STRG-FR LH – (MY19)",
-  "KNU-STRG-FR RH – (MY19)",
-  "YTA KNUCKLE LH U/P",
-  "YTA KNUCKLE RH U/P",
-  "KNUCKLE STRG FR LH J92",
-  "KNUCKLE STRG FR RH J92",
-  "STR. KNUCKLE HOUSING LH (MPV)",
-  "STR. KNUCKLE HOUSING RH (MPV)",
-  "PIVOT SUSPENSION LH (78)",
-  "PIVOT SUSPENSION RH (78)",
-  "KNUCKLE STEERING LH Y1K U/P",
-  "KNUCKLE STEERING RH Y1K U/P",
-  "KNUCKLE STREEING LH YHB U/P",
-  "KNUCKLE STREEING RH YHB U/P",
-  "KNUCKLE STEERING LH (YG8) U/P",
-  "KNUCKLE STEERING RH (YG8) U/P",
-  "KNUCKLE,L FR SUBASSY(31XA)",
-  "KNUCKLE,R FR SUBASSY(31XA)",
-  "KNUCKLE LH 20M UNPAINTED",
-  "KNUCKLE RH 20M UNPAINTED",
-  "KNUCKLE ASSY STR. LH (Y9T) ABS U/P",
-  "KNUCKLE ASSY STR. RH (Y9T) ABS U/P",
-  "DIFFERENTIAL CASE YRA",
-  "STEERING KNUCKLE LH CC21E",
-  "STEERING KNUCKLE RH CC21E",
-  "KNUCKLE STG. LH ABS PASSENGER (BOLERO ABS)",
-  "KNUCKLE STG. RH ABS PASSENGER (BOLERO ABS)",
-  "KNUCKLE STEERING LH (XD/YBA) U/P ABS",
-  "KNUCKLE STEERING RH (XD/YBA) U/P ABS"
-];
-
 const formMeta = {
   formCode: "QF/08/MRO-04",
   revision: "03",
@@ -101,7 +65,7 @@ export default function CorrectiveActionRegister() {
     partName: ""
   });
 
-  const [partNameOptions, setPartNameOptions] = useState(fallbackPartNames);
+  const [partNameOptions, setPartNameOptions] = useState();
   const [loadingPartNames, setLoadingPartNames] = useState(false);
   const [entries, setEntries] = useState([createFreshRow()]);
 

@@ -9,6 +9,7 @@ import {
   Activity,
   Clock,
   FileSpreadsheet,
+  Users,
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -29,6 +30,7 @@ const ProductEngineer = () => {
   const [pendingIdleTimeReports, setPendingIdleTimeReports] = useState([]);
   const [pendingDailyProdReports, setPendingDailyProdReports] = useState([]);
   const [pendingSignificantReports, setPendingSignificantReports] = useState([]);
+  const [pendingOperatorAllotments, setPendingOperatorAllotments] = useState([]);
 
   // ============================================================
   // PDF REVIEW MODAL STATE
@@ -130,11 +132,28 @@ const ProductEngineer = () => {
     }
   };
 
+  const fetchPendingOperatorAllotments = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/operator-allotment/pe/pending/${encodeURIComponent(currentPE)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingOperatorAllotments(Array.isArray(data.records) ? data.records : []);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending Operator Allotments.");
+    }
+  };
+
   const fetchAllReports = () => {
     fetchPendingAirGapReports();
     fetchPendingIdleTimeReports();
     fetchPendingDailyProdReports();
     fetchPendingSignificantReports();
+    fetchPendingOperatorAllotments();
   };
 
   useEffect(() => {
@@ -179,6 +198,12 @@ const ProductEngineer = () => {
           shift: report.shift || "",
         });
         apiUrl = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-report?${params.toString()}`;
+      } else if (type === "operatorallotment") {
+        const params = new URLSearchParams({
+          lineCode: report.lineCode,
+          date: isoDate,
+        });
+        apiUrl = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/operator-allotment/report?${params.toString()}`;
       } else {
         const params = new URLSearchParams({
           lineCode: report.lineCode,
@@ -248,6 +273,12 @@ const ProductEngineer = () => {
           event: selectedReport.event,
           shift: selectedReport.shift,
         };
+      } else if (reviewReportType === "operatorallotment") {
+        endpoint = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/operator-allotment/pe/sign`;
+        payload = {
+          id: selectedReport.id,
+          peSignature: currentPE,
+        };
       } else {
         endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-pe`;
         payload = {
@@ -280,6 +311,8 @@ const ProductEngineer = () => {
           ? "Daily Production & Idle Time Report verified and approved successfully!"
           : reviewReportType === "significant"
           ? "Significant Event Record verified and approved successfully!"
+          : reviewReportType === "operatorallotment"
+          ? "Operator Allotment Sheet verified and approved successfully!"
           : "Daily Production Report verified and approved successfully!";
 
       toast.success(successMsg, { autoClose: 2000 });
@@ -385,6 +418,21 @@ const ProductEngineer = () => {
               {pendingSignificantReports.length > 0 && (
                 <span className="bg-purple-600 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
                   {pendingSignificantReports.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("operatorallotment")}
+              className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
+                activeTab === "operatorallotment" ? "border-teal-600 text-teal-600 bg-teal-50/50" : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Operator Allotment Sheets</span>
+              {pendingOperatorAllotments.length > 0 && (
+                <span className="bg-teal-600 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                  {pendingOperatorAllotments.length}
                 </span>
               )}
             </button>
@@ -570,11 +618,57 @@ const ProductEngineer = () => {
               )}
             </div>
           )}
+
+          {/* OPERATOR ALLOTMENT SHEETS */}
+          {activeTab === "operatorallotment" && (
+            <div>
+              {pendingOperatorAllotments.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                  <Users className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                  <p className="text-gray-500 font-semibold">No Operator Allotment Sheets pending your review.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Line Name</th>
+                        <th className="p-3 border border-gray-300">Shift</th>
+                        <th className="p-3 border border-gray-300">Product Engineer</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingOperatorAllotments.map((report, idx) => (
+                        <tr key={`oa-${report.id ?? idx}`} className="hover:bg-teal-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.recordDate || report.date)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold text-teal-700">{report.lineCode}</td>
+                          <td className="p-3 border border-gray-300">Shift {report.shift || "N/A"}</td>
+                          <td className="p-3 border border-gray-300">{report.productEngineer || "N/A"}</td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report, "operatorallotment")}
+                              className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Verify
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* ==========================================================
-          FULL SCREEN PDF REVIEW MODAL (MODERN UI)
+          FULL SCREEN PDF REVIEW MODAL
       ========================================================== */}
       {selectedReport && (
         <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4">
@@ -589,6 +683,8 @@ const ProductEngineer = () => {
                   ? "REVIEW & SIGN DAILY PRODUCTION REPORT"
                   : reviewReportType === "significant"
                   ? "REVIEW & SIGN SIGNIFICANT EVENT RECORD"
+                  : reviewReportType === "operatorallotment"
+                  ? "REVIEW & SIGN OPERATOR ALLOTMENT SHEET"
                   : "REVIEW & SIGN IDLE TIME REPORT"}
               </h2>
               <button
@@ -645,14 +741,18 @@ const ProductEngineer = () => {
                     </p>
                     
                     {selectedReport.shift && (
-                      <p><span className="font-extrabold">Shift:</span> {selectedReport.shift}</p>
+                      <p><span className="font-extrabold">Shift:</span> Shift {selectedReport.shift}</p>
+                    )}
+
+                    {reviewReportType === "operatorallotment" && selectedReport.productEngineer && (
+                      <p><span className="font-extrabold">Assigned PE:</span> {selectedReport.productEngineer}</p>
                     )}
                     
                     {reviewReportType === "significant" && selectedReport.event && (
                       <p><span className="font-extrabold">Event:</span> {selectedReport.event}</p>
                     )}
 
-                    {reviewReportType !== "significant" && (
+                    {reviewReportType !== "significant" && reviewReportType !== "operatorallotment" && (
                       <p><span className="font-extrabold">Shift Incharge:</span> {selectedReport.shiftInchargeName || "Shift Incharge"}</p>
                     )}
                   </div>

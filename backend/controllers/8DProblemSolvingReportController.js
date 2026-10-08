@@ -3,7 +3,43 @@ const PDFDocument = require("pdfkit");
 const fs = require('fs');
 const path = require('path');
 
+// ============================================================
+// 0. GET PART SETS FROM M3PartSets
+// ============================================================
+const getPartSets = async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT 
+        Id,
+        PartNo,
+        PartName
+      FROM M3PartSets
+      ORDER BY Id ASC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    try {
+      const fallbackResult = await sql.query(`SELECT * FROM M3PartSets ORDER BY 1 ASC`);
+      const mapped = fallbackResult.recordset.map((r) => {
+        const keys = Object.keys(r);
+        return {
+          Id: r.Id || r.id || r[keys[0]],
+          PartNo: r.PartNo || r.partNo || r.idSet || r[keys[1]],
+          PartName: r.PartName || r.partName || r.partSet || r[keys[2]]
+        };
+      });
+      return res.status(200).json(mapped);
+    } catch (fallbackErr) {
+      console.error('Error fetching M3PartSets:', fallbackErr);
+      return res.status(500).json({ error: 'Failed to fetch part sets from M3PartSets' });
+    }
+  }
+};
+
+// ============================================================
 // 1. SAVE OR UPDATE 8D REPORT
+// ============================================================
 const saveEightDReport = async (req, res) => {
   const {
     header,
@@ -36,20 +72,23 @@ const saveEightDReport = async (req, res) => {
     const category = header?.category || 'Quality';
     const problemFoundBy = header?.problemFoundBy || 'Production';
     const problemFoundByOther = header?.problemFoundByOther || '';
+    const assignedQc = header?.assignedQc || '';
+    const assignedPe = header?.assignedPe || '';
+    const assignedHof = header?.assignedHof || '';
 
-    // Check if record already exists for this date, customer, partNo
+    // Check existing record by Date + Shift + PartNo
     const checkReq = transaction.request();
     checkReq.input('MachineShop', sql.NVarChar(50), machineShop);
-    checkReq.input('Customer', sql.NVarChar(100), customer);
     checkReq.input('PartNo', sql.NVarChar(100), partNo);
     checkReq.input('ReportDate', sql.Date, reportDate);
+    checkReq.input('Shift', sql.NVarChar(10), shift);
 
     const checkRes = await checkReq.query(`
       SELECT Id FROM EightDProblemSolvingReport 
       WHERE MachineShop = @MachineShop 
-        AND Customer = @Customer 
         AND PartNo = @PartNo 
         AND CONVERT(date, ReportDate) = CONVERT(date, @ReportDate)
+        AND Shift = @Shift
     `);
 
     const request = transaction.request();
@@ -62,6 +101,9 @@ const saveEightDReport = async (req, res) => {
     request.input('Category', sql.NVarChar(50), category);
     request.input('ProblemFoundBy', sql.NVarChar(50), problemFoundBy);
     request.input('ProblemFoundByOther', sql.NVarChar(100), problemFoundByOther);
+    request.input('assignedQc', sql.NVarChar(100), assignedQc);
+    request.input('assignedPe', sql.NVarChar(100), assignedPe);
+    request.input('assignedHof', sql.NVarChar(100), assignedHof);
 
     request.input('TeamMembers', sql.NVarChar(sql.MAX), JSON.stringify(teamMembers || []));
     request.input('ProblemScope', sql.NVarChar(50), problemScope || 'New');
@@ -105,16 +147,33 @@ const saveEightDReport = async (req, res) => {
     request.input('EffectivenessMonitoring', sql.NVarChar(sql.MAX), JSON.stringify(verification?.effectiveness || []));
     request.input('HorizontalDeployment', sql.NVarChar(sql.MAX), verification?.horizontalDeployment || '');
 
-    request.input('Sign_TeamLeader', sql.NVarChar(100), signatures?.teamLeader || '');
-    request.input('Sign_ProductionHead', sql.NVarChar(100), signatures?.productionHead || '');
-    request.input('Sign_QualityHead', sql.NVarChar(100), signatures?.qualityHead || '');
-    request.input('Sign_ShiftIncharge', sql.NVarChar(100), signatures?.shiftIncharge || '');
+    const shiftInchargeSig = signatures?.shiftSupervisorProduction || signatures?.shiftIncharge || '';
+    const teamLeaderSig = signatures?.teamLeader || shiftInchargeSig;
+    const qualityHeadSig = signatures?.shiftSupervisorQuality || signatures?.qualityHead || '';
+    const productionHeadSig = signatures?.hofProduction || signatures?.productionEngineer || signatures?.productionHead || '';
+
+    request.input('Sign_TeamLeader', sql.NVarChar(100), teamLeaderSig);
+    request.input('Sign_ProductionHead', sql.NVarChar(100), productionHeadSig);
+    request.input('Sign_QualityHead', sql.NVarChar(100), qualityHeadSig);
+    request.input('Sign_ShiftIncharge', sql.NVarChar(100), shiftInchargeSig);
+
+    const isFullyApproved = Boolean(
+      teamLeaderSig &&
+      qualityHeadSig &&
+      productionHeadSig &&
+      !teamLeaderSig.includes('Pending') &&
+      !qualityHeadSig.includes('Pending') &&
+      !productionHeadSig.includes('Pending')
+    );
+    const reportStatus = isFullyApproved ? 'Completed' : 'Submitted';
+    request.input('Status', sql.NVarChar(50), reportStatus);
 
     if (checkRes.recordset.length > 0) {
       request.input('Id', sql.Int, checkRes.recordset[0].Id);
       await request.query(`
         UPDATE EightDProblemSolvingReport SET
-          Shift = @Shift, Category = @Category, ProblemFoundBy = @ProblemFoundBy, ProblemFoundByOther = @ProblemFoundByOther,
+          Customer = @Customer, PartName = @PartName, PartNo = @PartNo,
+          Category = @Category, ProblemFoundBy = @ProblemFoundBy, ProblemFoundByOther = @ProblemFoundByOther,
           TeamMembers = @TeamMembers, ProblemScope = @ProblemScope, QualityAlert = @QualityAlert,
           Segregation_Customer_Qty = @Segregation_Customer_Qty, Segregation_Customer_NotOk = @Segregation_Customer_NotOk,
           Segregation_FG_Qty = @Segregation_FG_Qty, Segregation_FG_NotOk = @Segregation_FG_NotOk,
@@ -130,9 +189,16 @@ const saveEightDReport = async (req, res) => {
           CorrectiveActions = @CorrectiveActions, VerificationQuestions = @VerificationQuestions,
           LessonsLearned = @LessonsLearned, IssueResolved = @IssueResolved, DateClosed = @DateClosed,
           AssignedTo = @AssignedTo, TrackingNo = @TrackingNo, EffectivenessMonitoring = @EffectivenessMonitoring,
-          HorizontalDeployment = @HorizontalDeployment, Sign_TeamLeader = @Sign_TeamLeader,
-          Sign_ProductionHead = @Sign_ProductionHead, Sign_QualityHead = @Sign_QualityHead,
-          Sign_ShiftIncharge = @Sign_ShiftIncharge, UpdatedAt = GETDATE()
+          HorizontalDeployment = @HorizontalDeployment,
+          Sign_TeamLeader = @Sign_TeamLeader,
+          Sign_ProductionHead = @Sign_ProductionHead,
+          Sign_QualityHead = @Sign_QualityHead,
+          Sign_ShiftIncharge = @Sign_ShiftIncharge,
+          assignedQc = @assignedQc,
+          assignedPe = @assignedPe,
+          assignedHof = @assignedHof,
+          Status = @Status,
+          UpdatedAt = GETDATE()
         WHERE Id = @Id
       `);
     } else {
@@ -147,7 +213,8 @@ const saveEightDReport = async (req, res) => {
           DevelopingSolution, TrialRunDetails, TrialRunDate, TrialRunSequence,
           CorrectiveActions, VerificationQuestions, LessonsLearned, IssueResolved, DateClosed,
           AssignedTo, TrackingNo, EffectivenessMonitoring, HorizontalDeployment,
-          Sign_TeamLeader, Sign_ProductionHead, Sign_QualityHead, Sign_ShiftIncharge
+          Sign_TeamLeader, Sign_ProductionHead, Sign_QualityHead, Sign_ShiftIncharge,
+          assignedQc, assignedPe, assignedHof, Status
         ) VALUES (
           @MachineShop, @ReportDate, @Shift, @Customer, @PartName, @PartNo, @Category, @ProblemFoundBy, @ProblemFoundByOther,
           @TeamMembers, @ProblemScope, @QualityAlert, @Segregation_Customer_Qty, @Segregation_Customer_NotOk,
@@ -158,7 +225,8 @@ const saveEightDReport = async (req, res) => {
           @DevelopingSolution, @TrialRunDetails, @TrialRunDate, @TrialRunSequence,
           @CorrectiveActions, @VerificationQuestions, @LessonsLearned, @IssueResolved, @DateClosed,
           @AssignedTo, @TrackingNo, @EffectivenessMonitoring, @HorizontalDeployment,
-          @Sign_TeamLeader, @Sign_ProductionHead, @Sign_QualityHead, @Sign_ShiftIncharge
+          @Sign_TeamLeader, @Sign_ProductionHead, @Sign_QualityHead, @Sign_ShiftIncharge,
+          @assignedQc, @assignedPe, @assignedHof, @Status
         )
       `);
     }
@@ -172,9 +240,11 @@ const saveEightDReport = async (req, res) => {
   }
 };
 
+// ============================================================
 // 2. GET 8D REPORTS
+// ============================================================
 const getEightDReports = async (req, res) => {
-  const { machineShop, customer, partNo, date } = req.query;
+  const { machineShop, customer, partNo, date, shift } = req.query;
   try {
     let query = `SELECT * FROM EightDProblemSolvingReport WHERE 1=1`;
     const request = new sql.Request();
@@ -195,9 +265,25 @@ const getEightDReports = async (req, res) => {
       request.input('reportDate', sql.NVarChar(50), String(date).split('T')[0]);
       query += ` AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)`;
     }
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      query += ` AND Shift = @shift`;
+    }
 
     query += ` ORDER BY Id DESC`;
     const result = await request.query(query);
+
+    const parseFishbone = (raw) => {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed.map((item, idx) =>
+          typeof item === "string" ? { text: item, side: idx % 2 === 0 ? "left" : "right" } : item
+        );
+      } catch (e) {
+        return [];
+      }
+    };
 
     const formatted = result.recordset.map((r) => ({
       id: r.Id,
@@ -211,6 +297,9 @@ const getEightDReports = async (req, res) => {
         category: r.Category || 'Quality',
         problemFoundBy: r.ProblemFoundBy || 'Production',
         problemFoundByOther: r.ProblemFoundByOther || '',
+        assignedQc: r.assignedQc || '',
+        assignedPe: r.assignedPe || '',
+        assignedHof: r.assignedHof || '',
       },
       teamMembers: r.TeamMembers ? JSON.parse(r.TeamMembers) : [],
       problemScope: r.ProblemScope || 'New',
@@ -228,10 +317,10 @@ const getEightDReports = async (req, res) => {
       processFlow: r.ProcessFlowSketch ? JSON.parse(r.ProcessFlowSketch) : [],
       interimActions: r.InterimActions ? JSON.parse(r.InterimActions) : [],
       fishbone: {
-        man: r.FishboneMan ? JSON.parse(r.FishboneMan) : [],
-        machine: r.FishboneMachine ? JSON.parse(r.FishboneMachine) : [],
-        method: r.FishboneMethod ? JSON.parse(r.FishboneMethod) : [],
-        material: r.FishboneMaterial ? JSON.parse(r.FishboneMaterial) : [],
+        man: parseFishbone(r.FishboneMan),
+        machine: parseFishbone(r.FishboneMachine),
+        method: parseFishbone(r.FishboneMethod),
+        material: parseFishbone(r.FishboneMaterial),
         problem: r.FishboneProblem || '',
       },
       validationRows: r.ValidationRows ? JSON.parse(r.ValidationRows) : [],
@@ -251,11 +340,15 @@ const getEightDReports = async (req, res) => {
       correctiveActions: r.CorrectiveActions ? JSON.parse(r.CorrectiveActions) : [],
       verification: r.VerificationQuestions ? JSON.parse(r.VerificationQuestions) : {},
       signatures: {
-        teamLeader: r.Sign_TeamLeader || '',
+        shiftSupervisorProduction: r.Sign_ShiftIncharge || r.Sign_TeamLeader || '',
+        shiftSupervisorQuality: r.Sign_QualityHead || '',
+        productionEngineer: r.Sign_ProductionHead || '',
+        hofProduction: r.Sign_ProductionHead || '',
+        teamLeader: r.Sign_TeamLeader || r.Sign_ShiftIncharge || '',
         productionHead: r.Sign_ProductionHead || '',
         qualityHead: r.Sign_QualityHead || '',
-        shiftIncharge: r.Sign_ShiftIncharge || '',
       },
+      status: r.Status || 'Draft',
     }));
 
     res.status(200).json(formatted);
@@ -265,11 +358,20 @@ const getEightDReports = async (req, res) => {
   }
 };
 
+// ============================================================
 // 3. GET SINGLE REPORT BY ID
+// ============================================================
 const getEightDReportById = async (req, res) => {
   const { id } = req.params;
+  const numericId = parseInt(id, 10);
+  if (isNaN(numericId)) {
+    return res.status(400).json({ error: 'Invalid report ID' });
+  }
+
   try {
-    const result = await sql.query`SELECT * FROM EightDProblemSolvingReport WHERE Id = ${id}`;
+    const request = new sql.Request();
+    request.input('id', sql.Int, numericId);
+    const result = await request.query(`SELECT * FROM EightDProblemSolvingReport WHERE Id = @id`);
     if (!result.recordset.length) return res.status(404).json({ message: 'Record not found' });
     res.status(200).json(result.recordset[0]);
   } catch (err) {
@@ -277,7 +379,9 @@ const getEightDReportById = async (req, res) => {
   }
 };
 
+// ============================================================
 // 4. SIGN APPROVAL
+// ============================================================
 const signEightDApproval = async (req, res) => {
   const { id, role, signature } = req.body;
   try {
@@ -285,246 +389,376 @@ const signEightDApproval = async (req, res) => {
     if (role === 'qc') col = 'Sign_QualityHead';
     if (role === 'pe' || role === 'hof') col = 'Sign_ProductionHead';
 
-    await sql.query(`UPDATE EightDProblemSolvingReport SET ${col} = ${signature} WHERE Id = ${id}`);
+    const reqq = new sql.Request();
+    reqq.input('sig', sql.NVarChar(100), signature);
+    reqq.input('id', sql.Int, parseInt(id, 10));
+
+    await reqq.query(`UPDATE EightDProblemSolvingReport SET ${col} = @sig, UpdatedAt = GETDATE() WHERE Id = @id`);
     res.status(200).json({ success: true, message: 'Signed successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// 5. PDFKIT GENERATOR (2 PAGES LANDSCAPE)
+
+// ============================================================
+// 5. PDF GENERATOR - STRICT 2-PAGE LANDSCAPE FORMAT
+// ============================================================
 const generateEightDPdf = async (req, res) => {
-  const { shopId, customer, partNo, date } = req.query;
+  const { shopId, date, shift, partNo, customer } = req.query;
   try {
+    if (!date || !partNo) {
+      return res.status(400).send("date and partNo are required to generate PDF.");
+    }
+
+    const cleanDate = String(date).split('T')[0];
     const request = new sql.Request();
     request.input('shopId', sql.NVarChar(50), String(shopId || 3));
-    request.input('customer', sql.NVarChar(100), customer || '');
-    request.input('partNo', sql.NVarChar(100), partNo || '');
+    request.input('partNo', sql.NVarChar(100), String(partNo).trim());
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
 
-    const result = await request.query(`
+    let query = `
       SELECT TOP 1 * FROM EightDProblemSolvingReport 
-      WHERE MachineShop = @shopId AND Customer = @customer AND PartNo = @partNo
-      ORDER BY Id DESC
-    `);
+      WHERE MachineShop = @shopId 
+        AND PartNo = @partNo 
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+    `;
+
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      query += ` AND Shift = @shift`;
+    }
+    if (customer) {
+      request.input('customer', sql.NVarChar(100), customer);
+      query += ` AND Customer = @customer`;
+    }
+
+    query += ` ORDER BY Id DESC`;
+    const result = await request.query(query);
 
     if (!result.recordset.length) {
-      return res.status(404).send("No 8D record found to preview PDF");
+      return res.status(404).send("No 8D record found for this date, shift, and part number combination.");
     }
 
     const r = result.recordset[0];
-    const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape" });
+
+    // Initialize document with autoPageBreak: false to prevent accidental page spills
+    const doc = new PDFDocument({ 
+      margin: 15, 
+      size: "A4", 
+      layout: "landscape", 
+      autoPageBreak: false 
+    });
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=8D_Report_${customer}_${partNo}.pdf`);
+    res.setHeader("Content-Disposition", `inline; filename=8D_Report_${r.PartNo.replace(/[\/\\?%*:|"<>]/g, '_')}_${cleanDate}.pdf`);
     doc.pipe(res);
 
-    const fullWidth = doc.page.width - 40;
+    const startX = 15;
+    const fullWidth = doc.page.width - 30; // 811.89 pt
+    const logoPath = path.join(__dirname, 'logo.jpg');
 
-    // === PAGE 1 ===
-    // Header
-    doc.lineWidth(1).strokeColor('black').rect(20, 20, 100, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(11).text("SAKTHI\nAUTO", 25, 28, { width: 90, align: "center" });
+    // ============================================================
+    // ======================== PAGE 1 ============================
+    // ============================================================
 
-    doc.rect(120, 20, fullWidth - 240, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(14).text("8D Problem Solving Report", 120, 32, { width: fullWidth - 240, align: "center" });
+    // 1. TOP HEADER (Height: 32)
+    doc.lineWidth(1).strokeColor('#1f2937');
+    doc.rect(startX, 15, 95, 32).stroke();
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, startX + 7, 18, { width: 80, height: 25 });
+    } else {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor('#1f2937').text("SAKTHI\nAUTO", startX, 19, { width: 95, align: "center" });
+    }
 
-    doc.rect(fullWidth - 100, 20, 120, 35).stroke();
-    doc.font("Helvetica").fontSize(8).text(`Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}`, fullWidth - 95, 26);
-    doc.text(`Shift: ${r.Shift || '1ST'}`, fullWidth - 95, 38);
+    doc.rect(startX + 95, 15, fullWidth - 305, 32).stroke();
+    doc.font("Helvetica-Bold").fontSize(13).fillColor('#111827').text("8D Problem Solving Report (Machine Shop)", startX + 95, 24, { width: fullWidth - 305, align: "center" });
 
-    // Metadata Subheader
-    doc.rect(20, 58, fullWidth, 42).stroke();
-    doc.fontSize(8).font("Helvetica-Bold");
-    doc.text(`Customer: ${r.Customer || '-'}`, 25, 64);
-    doc.text(`Part Name: ${r.PartName || '-'}`, 25, 76);
-    doc.text(`Part No: ${r.PartNo || '-'}`, 25, 88);
-    doc.text(`Category: ${r.Category || 'Quality'}`, 320, 64);
-    doc.text(`Problem found by: ${r.ProblemFoundBy || 'Production'}`, 320, 76);
-    doc.text(`Scope: ${r.ProblemScope || 'New'} | Alert: ${r.QualityAlert ? 'YES' : 'NO'}`, 520, 64);
+    // Top Right Info Box with Revision Code
+    doc.rect(startX + fullWidth - 210, 15, 210, 32).stroke();
+    doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#374151');
+    doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 19, { width: 200, align: 'center' });
+    doc.font("Helvetica").fontSize(7);
+    doc.text(`Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}   |   Shop: ${r.MachineShop || 3}`, startX + fullWidth - 205, 30, { width: 200, align: 'center' });
 
-    // Problem Description
-    doc.rect(20, 103, fullWidth, 35).stroke();
-    doc.font("Helvetica-Bold").text("(2a) Problem Description:", 25, 107);
-    doc.font("Helvetica").text(r.ProblemDescription || "None", 25, 119, { width: fullWidth - 10 });
+    // 2. METADATA SUB-HEADER (Height: 36)
+    const metaY = 51;
+    doc.rect(startX, metaY, fullWidth, 36).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.2).fillColor('#111827');
+    doc.text("Customer: ", startX + 8, metaY + 4, { continued: true }).font("Helvetica").text(r.Customer || '-');
+    doc.font("Helvetica-Bold").text("Part Name: ", startX + 8, metaY + 15, { continued: true }).font("Helvetica").text(r.PartName || '-', { width: 310, ellipsis: true });
+    doc.font("Helvetica-Bold").text("Part No: ", startX + 8, metaY + 26, { continued: true }).font("Helvetica").text(r.PartNo || '-', { width: 310, ellipsis: true });
 
-    // Fishbone 4M Diagram Box
-    doc.rect(20, 142, fullWidth, 180).stroke();
-    doc.font("Helvetica-Bold").text("(4) Root cause analysis - Cause & Effect Diagram (Fishbone / Ishikawa 4M):", 25, 147);
+    doc.font("Helvetica-Bold").text("Category: ", startX + 335, metaY + 4, { continued: true }).font("Helvetica").text(r.Category || 'Quality');
+    doc.font("Helvetica-Bold").text("Problem Found By: ", startX + 335, metaY + 15, { continued: true }).font("Helvetica").text(r.ProblemFoundBy || 'Production');
+    doc.font("Helvetica-Bold").text("Scope: ", startX + 335, metaY + 26, { continued: true }).font("Helvetica").text(`${r.ProblemScope || 'New'}   |   Quality Alert: ${r.QualityAlert ? 'YES' : 'NO'}`);
 
-    // Fishbone Spine & Branches
-    const spineY = 230;
-    doc.lineWidth(2).moveTo(40, spineY).lineTo(620, spineY).stroke();
+    const teamList = r.TeamMembers ? JSON.parse(r.TeamMembers).filter(Boolean).join(", ") : "-";
+    doc.font("Helvetica-Bold").text("Team Members: ", startX + 560, metaY + 4, { continued: true }).font("Helvetica").text(teamList || '-', { width: fullWidth - 568 });
+    doc.font("Helvetica-Bold").text("Customer Visit Required: ", startX + 560, metaY + 26, { continued: true }).font("Helvetica").text(r.IsCustomerVisitRequired || 'No');
 
-    // MAN (Top-Left)
-    doc.lineWidth(1.5).moveTo(140, 165).lineTo(220, spineY).stroke();
-    doc.font("Helvetica-Bold").fontSize(9).text("MAN", 125, 155);
-    const manCauses = r.FishboneMan ? JSON.parse(r.FishboneMan) : [];
-    manCauses.forEach((c, idx) => {
-      doc.lineWidth(0.8).moveTo(120, 180 + idx * 16).lineTo(180, 180 + idx * 16).stroke();
-      doc.font("Helvetica").fontSize(7).text(c, 50, 175 + idx * 16, { width: 125, align: 'right' });
+    // 3. PROBLEM DESCRIPTION (Height: 28)
+    const descY = 91;
+    doc.rect(startX, descY, fullWidth, 28).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(2a) Problem Description:", startX + 8, descY + 4);
+    doc.font("Helvetica").fontSize(7).fillColor('#374151').text(r.ProblemDescription || "None recorded", startX + 8, descY + 15, { width: fullWidth - 16 });
+
+    // 4. CAUSE & EFFECT (FISHBONE 4M) DIAGRAM (Height: 220)
+    const fishY = 123;
+    const fishH = 220;
+    doc.rect(startX, fishY, fullWidth, fishH).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4) Root Cause Analysis - Ishikawa Cause & Effect (Fishbone 4M):", startX + 8, fishY + 6);
+
+    const spineY = fishY + 110;
+    const spineStartX = startX + 30;
+    const spineEndX = startX + 630;
+
+    // Center Spine Line
+    doc.lineWidth(2.5).strokeColor('#1f2937').moveTo(spineStartX, spineY).lineTo(spineEndX, spineY).stroke();
+    doc.moveTo(spineEndX, spineY).lineTo(spineEndX - 9, spineY - 5).lineTo(spineEndX - 9, spineY + 5).fill('#1f2937');
+
+    const parseFishboneSafe = (raw) => {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed.map((item, idx) =>
+          typeof item === "string" ? { text: item, side: idx % 2 === 0 ? "left" : "right" } : item
+        );
+      } catch (e) {
+        return [];
+      }
+    };
+
+    const drawBoneSubBranch = (boneX, boneY, side, text) => {
+      if (!text || text === "-") return;
+      const isLeft = side === "left";
+      const branchWidth = 45;
+
+      if (isLeft) {
+        const lineEndX = boneX;
+        const lineStartX = boneX - branchWidth;
+        doc.lineWidth(0.9).strokeColor('#4b5563').moveTo(lineStartX, boneY).lineTo(lineEndX, boneY).stroke();
+        doc.moveTo(lineEndX, boneY).lineTo(lineEndX - 4, boneY - 2.5).lineTo(lineEndX - 4, boneY + 2.5).fill('#4b5563');
+        doc.fillColor('#1f2937').font("Helvetica-Bold").fontSize(6.2)
+          .text(text, lineStartX - 105, boneY - 3.5, { width: 100, align: 'right', lineBreak: false });
+      } else {
+        const lineStartX = boneX;
+        const lineEndX = boneX + branchWidth;
+        doc.lineWidth(0.9).strokeColor('#4b5563').moveTo(lineStartX, boneY).lineTo(lineEndX, boneY).stroke();
+        doc.moveTo(lineEndX, boneY).lineTo(lineEndX + 4, boneY - 2.5).lineTo(lineEndX + 4, boneY + 2.5).fill('#4b5563');
+        doc.fillColor('#1f2937').font("Helvetica-Bold").fontSize(6.2)
+          .text(text, lineEndX + 6, boneY - 3.5, { width: 100, align: 'left', lineBreak: false });
+      }
+    };
+
+    // --- MAN (Top-Left) ---
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 150, fishY + 25).lineTo(startX + 230, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("MAN", startX + 130, fishY + 12);
+    parseFishboneSafe(r.FishboneMan).slice(0, 3).forEach((c, idx) => {
+      drawBoneSubBranch(startX + 170 + idx * 22, fishY + 45 + idx * 23, c.side || 'left', c.text);
     });
 
-    // MACHINE (Top-Right)
-    doc.lineWidth(1.5).moveTo(380, 165).lineTo(460, spineY).stroke();
-    doc.font("Helvetica-Bold").fontSize(9).text("MACHINE", 360, 155);
-    const machCauses = r.FishboneMachine ? JSON.parse(r.FishboneMachine) : [];
-    machCauses.forEach((c, idx) => {
-      doc.lineWidth(0.8).moveTo(360, 180 + idx * 16).lineTo(420, 180 + idx * 16).stroke();
-      doc.font("Helvetica").fontSize(7).text(c, 290, 175 + idx * 16, { width: 125, align: 'right' });
+    // --- MACHINE (Top-Right) ---
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 390, fishY + 25).lineTo(startX + 470, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("MACHINE", startX + 365, fishY + 12);
+    parseFishboneSafe(r.FishboneMachine).slice(0, 3).forEach((c, idx) => {
+      drawBoneSubBranch(startX + 410 + idx * 22, fishY + 45 + idx * 23, c.side || 'left', c.text);
     });
 
-    // METHOD (Bottom-Left)
-    doc.lineWidth(1.5).moveTo(140, 300).lineTo(220, spineY).stroke();
-    doc.font("Helvetica-Bold").fontSize(9).text("METHOD", 115, 305);
-    const methCauses = r.FishboneMethod ? JSON.parse(r.FishboneMethod) : [];
-    methCauses.forEach((c, idx) => {
-      doc.lineWidth(0.8).moveTo(120, 275 - idx * 16).lineTo(180, 275 - idx * 16).stroke();
-      doc.font("Helvetica").fontSize(7).text(c, 50, 270 - idx * 16, { width: 125, align: 'right' });
+    // --- METHOD (Bottom-Left) ---
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 150, fishY + 195).lineTo(startX + 230, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("METHOD", startX + 122, fishY + 198);
+    parseFishboneSafe(r.FishboneMethod).slice(0, 3).forEach((c, idx) => {
+      drawBoneSubBranch(startX + 170 + idx * 22, fishY + 175 - idx * 23, c.side || 'left', c.text);
     });
 
-    // MATERIAL (Bottom-Right)
-    doc.lineWidth(1.5).moveTo(380, 300).lineTo(460, spineY).stroke();
-    doc.font("Helvetica-Bold").fontSize(9).text("MATERIAL", 355, 305);
-    const matCauses = r.FishboneMaterial ? JSON.parse(r.FishboneMaterial) : [];
-    matCauses.forEach((c, idx) => {
-      doc.lineWidth(0.8).moveTo(360, 275 - idx * 16).lineTo(420, 275 - idx * 16).stroke();
-      doc.font("Helvetica").fontSize(7).text(c, 290, 270 - idx * 16, { width: 125, align: 'right' });
+    // --- MATERIAL (Bottom-Right) ---
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 390, fishY + 195).lineTo(startX + 470, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("MATERIAL", startX + 355, fishY + 198);
+    parseFishboneSafe(r.FishboneMaterial).slice(0, 3).forEach((c, idx) => {
+      drawBoneSubBranch(startX + 410 + idx * 22, fishY + 175 - idx * 23, c.side || 'left', c.text);
     });
 
-    // Problem Head Circle
-    doc.lineWidth(1.5).circle(680, spineY, 48).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text("PROBLEM", 640, spineY - 25, { width: 80, align: "center" });
-    doc.font("Helvetica").fontSize(7).text(r.FishboneProblem || "DEFECT", 640, spineY - 8, { width: 80, align: "center" });
+    // Problem Circle Block
+    doc.lineWidth(1.8).strokeColor('#1f2937').circle(startX + 710, spineY, 44).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8).text("PROBLEM", startX + 665, spineY - 20, { width: 90, align: "center" });
+    doc.font("Helvetica").fontSize(6.8).text(r.FishboneProblem || "ABS DEFECT", startX + 665, spineY - 6, { width: 90, align: "center" });
 
-    // Validation Table
-    let curY = 326;
-    doc.rect(20, curY, fullWidth, 200).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text("(4a) Validation of Potential Causes:", 25, curY + 4);
-    
-    // Header Row
-    doc.rect(20, curY + 16, fullWidth, 18).fillAndStroke('#e5e7eb', '#000');
+    // 5. VALIDATION TABLE (Height: 200)
+    const valY = 347;
+    doc.rect(startX, valY, fullWidth, 205).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4a) Validation of Potential Causes:", startX + 8, valY + 5);
+
+    doc.rect(startX, valY + 16, fullWidth, 16).fillAndStroke('#f3f4f6', '#1f2937');
     doc.fillColor('black').font("Helvetica-Bold").fontSize(7);
-    doc.text("Test / Simulation", 25, curY + 22, { width: 220 });
-    doc.text("Verification of Possible Causes", 250, curY + 22, { width: 300 });
-    doc.text("Date", 560, curY + 22, { width: 60 });
-    doc.text("Significant", 630, curY + 22, { width: 80 });
-    doc.text("Remarks", 720, curY + 22, { width: 80 });
+    doc.text("Test / Simulation", startX + 8, valY + 21, { width: 230 });
+    doc.text("Verification of Possible Causes", startX + 245, valY + 21, { width: 340 });
+    doc.text("Date", startX + 595, valY + 21, { width: 65, align: 'center' });
+    doc.text("Significant", startX + 670, valY + 21, { width: 65, align: 'center' });
+    doc.text("Remarks", startX + 745, valY + 21, { width: 45, align: 'center' });
 
     const valRows = r.ValidationRows ? JSON.parse(r.ValidationRows) : [];
-    let rowY = curY + 34;
-    valRows.slice(0, 8).forEach((v) => {
-      doc.rect(20, rowY, fullWidth, 18).stroke();
-      doc.font("Helvetica").fontSize(6.5);
-      doc.text(v.testSimulation || '-', 25, rowY + 5, { width: 220 });
-      doc.text(v.verification || '-', 250, rowY + 5, { width: 300 });
-      doc.text(v.date ? String(v.date).split('T')[0] : '-', 560, rowY + 5, { width: 60 });
+    let vy = valY + 32;
+    valRows.slice(0, 7).forEach((v) => {
+      doc.rect(startX, vy, fullWidth, 24).stroke();
+      doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#1f2937');
+      doc.text(v.testSimulation || '-', startX + 8, vy + 7, { width: 230, ellipsis: true });
+      doc.font("Helvetica").fontSize(6.8);
+      doc.text(v.verification || '-', startX + 245, vy + 5, { width: 340, height: 16 });
+      doc.text(v.date ? String(v.date).split('T')[0] : '-', startX + 595, vy + 7, { width: 65, align: 'center' });
       doc.font(v.significant === 'SIGNIFICANT' ? 'Helvetica-Bold' : 'Helvetica')
-        .fillColor(v.significant === 'SIGNIFICANT' ? '#dc2626' : '#000')
-        .text(v.significant || '-', 630, rowY + 5, { width: 80 });
-      doc.fillColor('#000').font("Helvetica").text(v.remarks || '-', 720, rowY + 5, { width: 80 });
-      rowY += 18;
+        .fillColor(v.significant === 'SIGNIFICANT' ? '#dc2626' : '#111827')
+        .text(v.significant || '-', startX + 670, vy + 7, { width: 65, align: 'center' });
+      doc.fillColor('#111827').font("Helvetica").text(v.remarks || '-', startX + 745, vy + 7, { width: 45, align: 'center' });
+      vy += 24;
     });
 
-    doc.font("Helvetica").fontSize(7).text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", 25, doc.page.height - 15);
-
-    // === PAGE 2 ===
+    // ============================================================
+    // ======================== PAGE 2 ============================
+    // ============================================================
     doc.addPage();
 
-    // 4b. 5-Why Analysis
-    doc.lineWidth(1).strokeColor('black').rect(20, 20, fullWidth, 140).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text("(4b) Root Cause Analysis (5-Why Analysis):", 25, 25);
+    // Page 2 Header with Top Revision Metadata (Height: 28)
+    doc.lineWidth(1).strokeColor('#1f2937');
+    doc.rect(startX, 15, 95, 28).stroke();
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, startX + 7, 18, { width: 80, height: 22 });
+    } else {
+      doc.font("Helvetica-Bold").fontSize(9).fillColor('#1f2937').text("SAKTHI AUTO", startX, 22, { width: 95, align: "center" });
+    }
 
-    const fiveWhyOcc = r.FiveWhyOccurrence ? JSON.parse(r.FiveWhyOccurrence) : {};
-    const fiveWhyDet = r.FiveWhyDetection ? JSON.parse(r.FiveWhyDetection) : {};
+    doc.rect(startX + 95, 15, fullWidth - 305, 28).stroke();
+    doc.font("Helvetica-Bold").fontSize(11).fillColor('#111827').text("8D Problem Solving Report - Analysis & Corrective Actions", startX + 95, 24, { width: fullWidth - 305, align: "center" });
 
-    doc.rect(20, 36, fullWidth, 16).fillAndStroke('#f3f4f6', '#000');
-    doc.fillColor('#000').font("Helvetica-Bold").fontSize(7);
-    doc.text("Analysis", 25, 41, { width: 80 });
-    doc.text("Why-1", 110, 41, { width: 130 });
-    doc.text("Why-2", 245, 41, { width: 130 });
-    doc.text("Why-3", 380, 41, { width: 130 });
-    doc.text("Why-4", 515, 41, { width: 130 });
-    doc.text("Why-5", 650, 41, { width: 130 });
+    // Top Right Info Box with Revision Code
+    doc.rect(startX + fullWidth - 210, 15, 210, 28).stroke();
+    doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#374151');
+    doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 18, { width: 200, align: 'center' });
+    doc.font("Helvetica").fontSize(6.8);
+    doc.text(`Part: ${r.PartNo || '-'}   |   Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}`, startX + fullWidth - 205, 28, { width: 200, align: 'center' });
 
-    // Occurrence
-    doc.rect(20, 52, fullWidth, 24).stroke();
-    doc.font("Helvetica-Bold").fontSize(7).text("Occurrence", 25, 58);
-    doc.font("Helvetica").fontSize(6.5);
-    doc.text(fiveWhyOcc.why1 || '-', 110, 56, { width: 130 });
-    doc.text(fiveWhyOcc.why2 || '-', 245, 56, { width: 130 });
-    doc.text(fiveWhyOcc.why3 || '-', 380, 56, { width: 130 });
-    doc.text(fiveWhyOcc.why4 || '-', 515, 56, { width: 130 });
-    doc.text(fiveWhyOcc.why5 || '-', 650, 56, { width: 130 });
+    // 1. (4b) Root Cause Analysis (5-Why) (Height: 184)
+    const fiveRootY = 47;
+    doc.rect(startX, fiveRootY, fullWidth, 184).stroke();
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor('#111827').text("(4b) Root Cause Analysis (5-Why Analysis):", startX + 8, fiveRootY + 6);
 
-    doc.rect(20, 76, fullWidth, 16).fillAndStroke('#fff7ed', '#000');
-    doc.fillColor('#9a3412').font("Helvetica-Bold").fontSize(7).text(`Root Cause (Occurrence): ${fiveWhyOcc.rootCause || '-'}`, 25, 80);
+    const fiveOcc = r.FiveWhyOccurrence ? JSON.parse(r.FiveWhyOccurrence) : {};
+    const fiveDet = r.FiveWhyDetection ? JSON.parse(r.FiveWhyDetection) : {};
+    const fiveSys = r.FiveWhySystem ? JSON.parse(r.FiveWhySystem) : {};
 
-    // Detection
-    doc.rect(20, 92, fullWidth, 24).stroke();
-    doc.fillColor('#000').font("Helvetica-Bold").fontSize(7).text("Detection", 25, 98);
-    doc.font("Helvetica").fontSize(6.5);
-    doc.text(fiveWhyDet.why1 || '-', 110, 96, { width: 130 });
-    doc.text(fiveWhyDet.why2 || '-', 245, 96, { width: 130 });
-    doc.text(fiveWhyDet.why3 || '-', 380, 96, { width: 130 });
-    doc.text(fiveWhyDet.why4 || '-', 515, 96, { width: 130 });
-    doc.text(fiveWhyDet.why5 || '-', 650, 96, { width: 130 });
+    // 5-Why Header
+    doc.rect(startX, fiveRootY + 18, fullWidth, 16).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(7);
+    doc.text("Analysis Category", startX + 8, fiveRootY + 23, { width: 90 });
+    doc.text("Why-1", startX + 105, fiveRootY + 23, { width: 130 });
+    doc.text("Why-2", startX + 240, fiveRootY + 23, { width: 130 });
+    doc.text("Why-3", startX + 375, fiveRootY + 23, { width: 130 });
+    doc.text("Why-4", startX + 510, fiveRootY + 23, { width: 130 });
+    doc.text("Why-5", startX + 645, fiveRootY + 23, { width: 145 });
 
-    doc.rect(20, 116, fullWidth, 16).fillAndStroke('#fff7ed', '#000');
-    doc.fillColor('#9a3412').font("Helvetica-Bold").fontSize(7).text(`Root Cause (Detection): ${fiveWhyDet.rootCause || '-'}`, 25, 120);
+    const render5WhyBlock = (yPos, title, obj) => {
+      // Why 1-5 Row (Height: 25)
+      doc.rect(startX, yPos, fullWidth, 25).stroke();
+      doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text(title, startX + 8, yPos + 8);
+      doc.font("Helvetica").fontSize(6.5).fillColor('#374151');
+      doc.text(obj.why1 || '-', startX + 105, yPos + 4, { width: 130, height: 18 });
+      doc.text(obj.why2 || '-', startX + 240, yPos + 4, { width: 130, height: 18 });
+      doc.text(obj.why3 || '-', startX + 375, yPos + 4, { width: 130, height: 18 });
+      doc.text(obj.why4 || '-', startX + 510, yPos + 4, { width: 130, height: 18 });
+      doc.text(obj.why5 || '-', startX + 645, yPos + 4, { width: 145, height: 18 });
 
-    // PFMEA
-    doc.fillColor('#000').rect(20, 132, fullWidth, 24).stroke();
-    doc.font("Helvetica-Bold").fontSize(7.5).text(`PREDICT: Included in PFMEA?  ${r.PfmeaIncluded || 'NO'}   |   RPN #: ${r.PfmeaRpn || 'N/A'}`, 25, 139);
+      // Root Cause Highlight Row (Height: 18)
+      doc.rect(startX, yPos + 25, fullWidth, 18).fillAndStroke('#fff7ed', '#1f2937');
+      doc.font("Helvetica-Bold").fontSize(7).fillColor('#9a3412')
+        .text(`Definitive Root Cause (${title}): `, startX + 8, yPos + 30, { continued: true })
+        .font("Helvetica-Bold").fillColor('#111827').text(obj.rootCause || '-');
+    };
 
-    // (5) Solutions & Corrective Actions
-    doc.rect(20, 168, fullWidth, 140).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text("(6) Permanent Corrective Actions:", 25, 173);
+    render5WhyBlock(fiveRootY + 34, "Occurrence", fiveOcc);
+    render5WhyBlock(fiveRootY + 77, "Detection", fiveDet);
+    render5WhyBlock(fiveRootY + 120, "System", fiveSys);
 
-    doc.rect(20, 185, fullWidth, 16).fillAndStroke('#f3f4f6', '#000');
-    doc.fillColor('#000').font("Helvetica-Bold").fontSize(7);
-    doc.text("Type", 25, 190, { width: 80 });
-    doc.text("Action Description", 110, 190, { width: 400 });
-    doc.text("Who", 520, 190, { width: 100 });
-    doc.text("Due Date", 630, 190, { width: 70 });
-    doc.text("Break Point", 710, 190, { width: 70 });
+    // PFMEA Row
+    doc.rect(startX, fiveRootY + 163, fullWidth, 21).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(7.2)
+      .text(`PREDICT: Included in PFMEA?  ${r.PfmeaIncluded || 'NO'}       |       RPN #: ${r.PfmeaRpn || 'N/A'}       |       Trial Run Date: ${r.TrialRunDate ? new Date(r.TrialRunDate).toLocaleDateString('en-GB') : '-'}`, startX + 8, fiveRootY + 169);
+
+    // 2. Developing Solution & Trial Run (Height: 65)
+    const solY = 236;
+    doc.rect(startX, solY, fullWidth, 65).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(5) Developing Solution & (5a) Trial Run:", startX + 8, solY + 5);
+
+    const halfSolW = (fullWidth - 8) / 2;
+    doc.rect(startX + 4, solY + 16, halfSolW, 43).stroke();
+    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("Solution Description:", startX + 8, solY + 20);
+    doc.font("Helvetica").fontSize(6.5).fillColor('#374151').text(r.DevelopingSolution || "None specified", startX + 8, solY + 30, { width: halfSolW - 14 });
+
+    doc.rect(startX + halfSolW + 4, solY + 16, halfSolW, 43).stroke();
+    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("Trial Run / Confirmation Details:", startX + halfSolW + 8, solY + 20);
+    doc.font("Helvetica").fontSize(6.5).fillColor('#374151').text(r.TrialRunDetails || "None specified", startX + halfSolW + 8, solY + 30, { width: halfSolW - 14 });
+
+    // 3. Permanent Corrective Actions (Height: 110)
+    const pcaY = 306;
+    doc.rect(startX, pcaY, fullWidth, 110).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(6) Permanent Corrective Actions (PCA):", startX + 8, pcaY + 5);
+
+    doc.rect(startX, pcaY + 16, fullWidth, 16).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(7);
+    doc.text("Type", startX + 8, pcaY + 21, { width: 70 });
+    doc.text("Action Plan Description", startX + 85, pcaY + 21, { width: 440 });
+    doc.text("Who", startX + 535, pcaY + 21, { width: 100 });
+    doc.text("Due Date", startX + 640, pcaY + 21, { width: 55, align: 'center' });
+    doc.text("Break Point", startX + 700, pcaY + 21, { width: 55, align: 'center' });
+    doc.text("Status", startX + 760, pcaY + 21, { width: 35, align: 'center' });
 
     const pcas = r.CorrectiveActions ? JSON.parse(r.CorrectiveActions) : [];
-    let pcaY = 201;
-    pcas.forEach((p) => {
-      doc.rect(20, pcaY, fullWidth, 22).stroke();
-      doc.font("Helvetica-Bold").fontSize(7).text(p.type || 'Action', 25, pcaY + 6);
-      doc.font("Helvetica").fontSize(6.5).text(p.action || '-', 110, pcaY + 4, { width: 400 });
-      doc.text(p.who || '-', 520, pcaY + 6);
-      doc.text(p.dueDate ? String(p.dueDate).split('T')[0] : '-', 630, pcaY + 6);
-      doc.text(p.breakPoint ? String(p.breakPoint).split('T')[0] : '-', 710, pcaY + 6);
-      pcaY += 22;
+    let pRowY = pcaY + 32;
+    pcas.slice(0, 3).forEach((p) => {
+      doc.rect(startX, pRowY, fullWidth, 24).stroke();
+      doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text(p.type || 'Action', startX + 8, pRowY + 7);
+      doc.font("Helvetica").fontSize(6.8).text(p.action || '-', startX + 85, pRowY + 4, { width: 440, height: 18 });
+      doc.text(p.who || '-', startX + 535, pRowY + 7);
+      doc.text(p.dueDate ? String(p.dueDate).split('T')[0] : '-', startX + 640, pRowY + 7, { width: 55, align: 'center' });
+      doc.text(p.breakPoint ? String(p.breakPoint).split('T')[0] : '-', startX + 700, pRowY + 7, { width: 55, align: 'center' });
+      doc.font("Helvetica-Bold").text(`L-${p.status || 1}`, startX + 760, pRowY + 7, { width: 35, align: 'center' });
+      pRowY += 24;
     });
 
-    // (8) Signatures Block
-    const sigY = 440;
-    doc.rect(20, sigY, fullWidth, 65).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text("(8) Closure Sign-off & Approvals:", 25, sigY + 5);
+    // 4. Signatures (Height: 52)
+    const sigY = 421;
+    const sigW = fullWidth / 4;
+    const opSig = r.Sign_ShiftIncharge || r.Sign_TeamLeader;
+    const qcSig = r.Sign_QualityHead;
+    const peSig = r.Sign_ProductionHead;
+    const hofSig = r.Sign_ProductionHead;
 
-    const sigW = fullWidth / 3;
-    doc.rect(20, sigY + 16, sigW, 49).stroke();
-    doc.text("Team Leader / Group Leader", 25, sigY + 22, { width: sigW - 10, align: 'center' });
-    if (r.Sign_TeamLeader) {
-      doc.fillColor('#16a34a').text(`APPROVED: ${r.Sign_TeamLeader}`, 25, sigY + 40, { width: sigW - 10, align: 'center' });
-    }
+    const renderSigBox = (colIdx, title, sigVal) => {
+      const bx = startX + sigW * colIdx;
+      doc.rect(bx, sigY, sigW, 52).stroke();
+      doc.fillColor('#111827').font("Helvetica-Bold").fontSize(7).text(title, bx, sigY + 6, { width: sigW, align: 'center' });
+      if (sigVal && !String(sigVal).includes('Pending')) {
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(sigVal).toUpperCase()})`, bx, sigY + 28, { width: sigW, align: 'center' });
+      } else {
+        doc.fillColor('#dc2626').font('Helvetica').fontSize(7.5).text("Pending", bx, sigY + 28, { width: sigW, align: 'center' });
+      }
+    };
 
-    doc.fillColor('#000').rect(20 + sigW, sigY + 16, sigW, 49).stroke();
-    doc.text("Production Engineer / HOF", 20 + sigW + 5, sigY + 22, { width: sigW - 10, align: 'center' });
-    if (r.Sign_ProductionHead) {
-      doc.fillColor('#16a34a').text(`APPROVED: ${r.Sign_ProductionHead}`, 20 + sigW + 5, sigY + 40, { width: sigW - 10, align: 'center' });
-    }
+    renderSigBox(0, "SHIFT SUPERVISOR (PRODUCTION)", opSig);
+    renderSigBox(1, "SHIFT SUPERVISOR (QUALITY)", qcSig);
+    renderSigBox(2, "PRODUCTION ENGINEER", peSig);
+    renderSigBox(3, "HEAD OF PRODUCTION (HOF)", hofSig);
 
-    doc.fillColor('#000').rect(20 + sigW * 2, sigY + 16, sigW, 49).stroke();
-    doc.text("Quality Controller / Quality Head", 20 + sigW * 2 + 5, sigY + 22, { width: sigW - 10, align: 'center' });
-    if (r.Sign_QualityHead) {
-      doc.fillColor('#16a34a').text(`APPROVED: ${r.Sign_QualityHead}`, 20 + sigW * 2 + 5, sigY + 40, { width: sigW - 10, align: 'center' });
-    }
-
-    doc.font("Helvetica").fontSize(7).fillColor('#000').text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", 25, doc.page.height - 15);
+    // 5. Verification Checklist & Lessons Learned (Height: 45)
+    const verY = 478;
+    doc.rect(startX, verY, fullWidth, 45).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(7) Verification Checklist & Lessons Learned:", startX + 8, verY + 4);
+    
+    const vq = r.VerificationQuestions ? JSON.parse(r.VerificationQuestions) : {};
+    doc.font("Helvetica").fontSize(6.5).fillColor('#374151')
+      .text(`SOP Updated: ${vq.q2 || 'Y'}   |   Checksheet Updated: ${vq.q4 || 'Y'}   |   PFMEA Updated: ${vq.q5 || 'Y'}   |   Changes Communicated: ${vq.q6 || 'Y'}   |   Issue Resolved: ${r.IssueResolved || 'Yes'}`, startX + 8, verY + 16);
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827')
+      .text("Lessons Learned: ", startX + 8, verY + 28, { continued: true })
+      .font("Helvetica").fillColor('#374151').text(r.LessonsLearned || 'Continuous adherence to tool setting & qualification standards maintained.', { width: fullWidth - 20, ellipsis: true });
 
     doc.end();
   } catch (err) {
@@ -539,5 +773,6 @@ module.exports = {
   getEightDReports,
   getEightDReportById,
   generateEightDPdf,
-  signEightDApproval
+  signEightDApproval,
+  getPartSets
 };

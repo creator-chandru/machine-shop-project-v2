@@ -22,6 +22,7 @@ const correctiveActionRoutes = require("./routes/correction_action_register.js")
 const jigFixtureIntimationReportRoutes=require("./routes/jig_fixture_intimation_report.js");
 const eightDProblemSolvingReportRoutes = require("./routes/8DProblemSolvingReport.js");
 const operatorAllotmentRoutes = require("./routes/OperatorAllotment.js");
+const jobSetupVerificationRoutes = require("./routes/jobSetupVerificationRoutes.js");
 const app = express();
 
 app.use(cors({
@@ -53,6 +54,7 @@ app.use('/api/mappings', partMappingRoutes);
 app.use('/api/corrective-action-register', correctiveActionRoutes);
 app.use('/api/jig-fixture-issue', jigFixtureIntimationReportRoutes);
 app.use('/api', eightDProblemSolvingReportRoutes);
+app.use('/api', jobSetupVerificationRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {

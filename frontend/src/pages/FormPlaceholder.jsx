@@ -17,6 +17,7 @@ import CorrectiveActionRegister from "./corrective_action_register";
 import JigFixtureIssueIntimation from "./jig_fixture_intimation_report";
 import EightDProblemSolvingReport from "./8DProblemSolvingReport";
 import OperatorAllotment from "./OperationAllotment";
+import JobSetupVerification from "./jobSetupVerification.jsx";
 /**
  * Central map for operator forms
  *
@@ -53,7 +54,8 @@ const formMap = {
    "corrective-action-register":<CorrectiveActionRegister />,
    "jig-fixture-intimation-report":<JigFixtureIssueIntimation/>,
    "8d-problem-solving-report":<EightDProblemSolvingReport />,
-    "operator-allotment":<OperatorAllotment />
+    "operator-allotment":<OperatorAllotment />,
+    "job-setup-verification" : <JobSetupVerification />
   // Future forms:
   // "some-form": <SomeForm />,
 };

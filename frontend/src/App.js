@@ -11,7 +11,8 @@ import ProductEngineer from "./pages/ProductEngineer";
 import GM from "./pages/GM";
 import MachineShopDashboard from "./pages/MachineShopDashboard";
 import FormPlaceholder from "./pages/FormPlaceholder";
-import QC from "./pages/qc"; // <-- Import QC
+import QC from "./pages/qc";
+import HofInspection from "./pages/HofInspection.jsx";// <-- Import new dashboard
 
 function App() {
   return (
@@ -35,7 +36,8 @@ function App() {
                   "admin",
                   "qc",
                   "QC",
-                  "qualitycontroller"
+                  "qualitycontroller",
+                  "hofinspection" // <-- Added new role here
                 ]}
               >
                 <MachineShopDashboard />
@@ -122,6 +124,16 @@ function App() {
                 ]}
               >
                 <FormPlaceholder />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* HOF Inspection Dashboard */}
+          <Route
+            path="/hof-inspection/:shopId"
+            element={
+              <ProtectedRoute allowedRoles={["hofinspection"]}>
+                <HofInspection />
               </ProtectedRoute>
             }
           />

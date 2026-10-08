@@ -150,8 +150,8 @@ const generateOperatorObservationPDF = async (req, res) => {
 
         const request = new sql.Request();
         request.input('machineShop', sql.Int, parseInt(machineShop || 3))
-               .input('employeeCode', sql.NVarChar(50), employeeCode)
-               .input('testDate', sql.Date, testDate);
+            .input('employeeCode', sql.NVarChar(50), employeeCode)
+            .input('testDate', sql.Date, testDate);
 
         const result = await request.query(`
             SELECT * FROM OperatorObservationSheet 
@@ -257,37 +257,37 @@ const generateOperatorObservationPDF = async (req, res) => {
 
                 doc.rect(startX, currentY, wSno, itemRowH).stroke();
                 doc.font("Helvetica").fontSize(8).text(String(item.slNo), startX, currentY + 5, { width: wSno, align: "center" });
-                
+
                 doc.rect(startX + wSno, currentY, wParam, itemRowH).stroke();
                 doc.text(item.parameterText, startX + wSno + 5, currentY + 5, { width: wParam - 10 });
 
                 ratingKeys.forEach((key, i) => {
                     doc.rect(startX + wSno + wParam + (i * wR), currentY, wR, itemRowH).stroke();
-                   if (item.rating === key) {
-    const cellX = startX + wSno + wParam + (i * wR);
-    const cellY = currentY;
+                    if (item.rating === key) {
+                        const cellX = startX + wSno + wParam + (i * wR);
+                        const cellY = currentY;
 
-    // Center of the rating cell
-    const centerX = cellX + (wR / 2);
-    const centerY = cellY + (itemRowH / 2);
+                        // Center of the rating cell
+                        const centerX = cellX + (wR / 2);
+                        const centerY = cellY + (itemRowH / 2);
 
-    // Green tick mark
-    doc.save();
-    doc.strokeColor('green');
-    doc.lineWidth(1.8);
+                        // Green tick mark
+                        doc.save();
+                        doc.strokeColor('green');
+                        doc.lineWidth(1.8);
 
-    // First stroke: lower-left to center
-    doc.moveTo(centerX - 7, centerY)
-       .lineTo(centerX - 2, centerY + 5)
-       .stroke();
+                        // First stroke: lower-left to center
+                        doc.moveTo(centerX - 7, centerY)
+                            .lineTo(centerX - 2, centerY + 5)
+                            .stroke();
 
-    // Second stroke: center to upper-right
-    doc.moveTo(centerX - 2, centerY + 5)
-       .lineTo(centerX + 8, centerY - 6)
-       .stroke();
+                        // Second stroke: center to upper-right
+                        doc.moveTo(centerX - 2, centerY + 5)
+                            .lineTo(centerX + 8, centerY - 6)
+                            .stroke();
 
-    doc.restore();
-}
+                        doc.restore();
+                    }
                 });
                 currentY += itemRowH;
             });
@@ -295,7 +295,7 @@ const generateOperatorObservationPDF = async (req, res) => {
 
         // 5. FOOTER
         if (currentY > doc.page.height - 80) { doc.addPage(); currentY = 20; }
-        
+
         doc.rect(startX, currentY, fullW / 2, 20).stroke();
         doc.font("Helvetica-Bold").fontSize(9).text(`Date: ${reviewDisplayDate}`, startX + 5, currentY + 6);
         doc.rect(startX + (fullW / 2), currentY, fullW / 4, 20).stroke();
@@ -311,7 +311,7 @@ const generateOperatorObservationPDF = async (req, res) => {
         doc.rect(startX, currentY, fullW, 40).stroke();
         doc.text("Operator feed back :", startX + 5, currentY + 5);
         doc.font("Helvetica").text(header.operatorFeedback || "", startX + 5, currentY + 18, { width: fullW - 10 });
-        
+
         doc.end();
     } catch (err) {
         console.error("PDF generation error:", err);

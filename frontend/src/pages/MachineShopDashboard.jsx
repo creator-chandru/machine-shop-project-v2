@@ -8,7 +8,7 @@ const MachineShopDashboard = () => {
 
   const user = JSON.parse(localStorage.getItem("user"));
   
-  // Safely convert to lowercase and remove spaces (e.g., "Shift Incharge" -> "shiftincharge", "HOF" -> "hof")
+  // Safely convert to lowercase and remove spaces
   const role = user?.role?.toLowerCase().replace(/\s+/g, '');
 
   const roleBasePath = {
@@ -19,7 +19,8 @@ const MachineShopDashboard = () => {
     hof: "/hof",
     productengineer: "/product-engineer",
     gm: "/gm",
-    qc: "/qc"
+    qc: "/qc",
+    hofinspection: "/hof-inspection" // <-- Added mapping for HOF Inspection
   };
 
   const machineShops = [
@@ -48,7 +49,6 @@ const MachineShopDashboard = () => {
             return (
               <button
                 key={shop.id}
-                // Dynamically route to the user's specific dashboard based on safe role mapping
                 onClick={() => navigate(`${roleBasePath[role] || "/"}/${shop.id}`)}
                 className="
                   group relative flex flex-col items-center justify-center p-8 

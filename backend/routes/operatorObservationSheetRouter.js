@@ -3,7 +3,8 @@ const router = express.Router();
 
 const {
     saveOperatorObservationSheet,
-    getOperatorObservationSheet
+    getOperatorObservationSheet,
+    generateOperatorObservationPDF
 } = require('../controllers/operatorObservationSheetController.js');
 
 // ============================================================
@@ -20,6 +21,14 @@ router.post(
 router.get(
     '/operator-observation-sheet',
     getOperatorObservationSheet
+);
+
+// ============================================================
+// GENERATE PDF REPORT
+// ============================================================
+router.get(
+    '/operator-observation-sheet/report',
+    generateOperatorObservationPDF
 );
 
 module.exports = router;

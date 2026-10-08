@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
+import { FileDown } from 'lucide-react'; // Removed Search icon
 
 const initialFormData = {
   formCode: "QF / 07 / MPD - 15",
@@ -142,6 +143,10 @@ export default function OperatorObservationSheet() {
   const { shopId } = useParams();
   const navigate = useNavigate();
 
+  // Get current user for approval
+  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const loggedInName = currentUser.username || currentUser.employeeId || "Authorized User";
+
   const [headerInfo, setHeaderInfo] = useState({
     employeeName: "",
     employeeCode: "",
@@ -152,6 +157,7 @@ export default function OperatorObservationSheet() {
   });
 
   const [sections, setSections] = useState(DEFAULT_SECTIONS);
+  const [isSavedRecord, setIsSavedRecord] = useState(false);
 
   const [footerInfo, setFooterInfo] = useState({
     reviewDate: getTodayISODate(),
@@ -172,9 +178,7 @@ export default function OperatorObservationSheet() {
   };
 
   const handleHeaderChange = (field, val) => {
-    // Validation for Marks % (0 - 100 with decimals)
     if (field === 'marksPercentage') {
-      // Allow empty, or valid numbers between 0 and 100
       if (val === "" || /^\d*\.?\d*$/.test(val)) {
         const num = parseFloat(val);
         if (val === "" || (!isNaN(num) && num >= 0 && num <= 100)) {
@@ -183,7 +187,6 @@ export default function OperatorObservationSheet() {
       }
       return;
     }
-
     setHeaderInfo((prev) => ({ ...prev, [field]: val }));
   };
 
@@ -215,6 +218,132 @@ export default function OperatorObservationSheet() {
     });
   };
 
+  // --- Approve Button Logic ---
+  const handleApprove = () => {
+    setFooterInfo((prev) => ({
+      ...prev,
+      reviewedBy: loggedInName,
+      approvedBy: loggedInName
+    }));
+    triggerToast("Form approved with your signature.", "success");
+  };
+
+  // Helper to map DB flat records to nested UI state
+  const populateFrontendData = (records) => {
+    const first = records[0];
+    
+    setHeaderInfo(prev => ({
+      ...prev,
+      employeeName: first.employeeName || "",
+      department: first.department || "",
+      marksPercentage: first.marksPercentage?.replace('%', '') || "",
+      method: first.method || "Practical & Demo"
+    }));
+    
+    setFooterInfo({
+      reviewDate: first.reviewDate ? first.reviewDate.split('T')[0] : first.testDate.split('T')[0],
+      reviewedBy: first.reviewedBy || "",
+      approvedBy: first.approvedBy || "",
+      operatorFeedback: first.operatorFeedback || ""
+    });
+
+    setSections(prev => {
+      const newSections = JSON.parse(JSON.stringify(DEFAULT_SECTIONS));
+      records.forEach(r => {
+        const sec = newSections.find(s => s.id === r.sectionId);
+        if (sec) {
+          const item = sec.items.find(i => i.slNo === r.slNo);
+          if (item && r.rating) {
+            item[r.rating] = "✓";
+          }
+        }
+      });
+      return newSections;
+    });
+  };
+
+  // --- NEW: AUTO-FETCH Existing Data Logic ---
+  useEffect(() => {
+    // Only attempt to fetch if both fields have values
+    if (!headerInfo.employeeCode || !headerInfo.testDate) return;
+
+    const fetchRecordData = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const params = new URLSearchParams({
+          machineShop: shopId || 3,
+          employeeCode: headerInfo.employeeCode,
+          testDate: headerInfo.testDate
+        });
+
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/operator-observation-sheet?${params.toString()}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            populateFrontendData(data);
+            setIsSavedRecord(true);
+            triggerToast("Existing record loaded.", "success");
+          } else {
+            setIsSavedRecord(false);
+            setSections(JSON.parse(JSON.stringify(DEFAULT_SECTIONS)));
+            // Clear specific footer data but leave what the user is currently typing
+            setFooterInfo(prev => ({ ...prev, reviewedBy: "", approvedBy: "", operatorFeedback: "" }));
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching record:", err);
+      }
+    };
+
+    // Debounce the fetch by 600ms so it doesn't query the DB on every single keystroke instantly
+    const delayDebounceFn = setTimeout(() => {
+      fetchRecordData();
+    }, 600);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [headerInfo.employeeCode, headerInfo.testDate, shopId]);
+
+  // --- Download PDF Logic ---
+  const handleDownloadPDF = async () => {
+    if (!headerInfo.employeeCode || !headerInfo.testDate) {
+      triggerToast("Please enter Employee Code and Test Date to download PDF.", "error");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({
+        machineShop: shopId || 3,
+        employeeCode: headerInfo.employeeCode,
+        testDate: headerInfo.testDate
+      });
+
+      const pdfRes = await fetch(`${process.env.REACT_APP_API_URL}/api/operator-observation-sheet/report?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (pdfRes.ok) {
+        const blob = await pdfRes.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = `Observation_${headerInfo.employeeCode}_${headerInfo.testDate}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        triggerToast("PDF downloaded successfully!", "success");
+      } else {
+        triggerToast("Failed to generate PDF. Record might not exist.", "error");
+      }
+    } catch (err) {
+      triggerToast("Error downloading PDF.", "error");
+    }
+  };
+
   const handleSave = async () => {
     if (!headerInfo.employeeName || !headerInfo.employeeCode) {
       triggerToast("Please fill Employee Name and Employee Code before saving.", "error");
@@ -224,13 +353,28 @@ export default function OperatorObservationSheet() {
     setIsSaving(true);
     setSaveSuccess(false);
 
+    // Map checkboxes to rating and score for the backend
+    const payloadSections = sections.map(sec => {
+      const newItems = sec.items.map(item => {
+        let rating = '';
+        let score = 0;
+        if (item.followed === '✓') { rating = 'followed'; score = 5; }
+        else if (item.partiallyFollowed === '✓') { rating = 'partiallyFollowed'; score = 3; }
+        else if (item.notFollowed === '✓') { rating = 'notFollowed'; score = 1; }
+        else if (item.notAware === '✓') { rating = 'notAware'; score = 0; }
+        
+        return { ...item, rating, score };
+      });
+      return { ...sec, items: newItems };
+    });
+
     const payload = {
       header: {
         ...headerInfo,
         machineShop: shopId || 3,
         marksPercentage: headerInfo.marksPercentage ? `${headerInfo.marksPercentage}%` : ""
       },
-      sections,
+      sections: payloadSections,
       footer: footerInfo
     };
 
@@ -304,10 +448,21 @@ export default function OperatorObservationSheet() {
               {initialFormData.title}
             </h2>
           </div>
-          <div className="text-xs text-gray-500 text-right">
-            <span>Form Code: {initialFormData.formCode}</span>
-            <span className="mx-2">|</span>
-            <span>Date: {initialFormData.revisionDate}</span>
+          
+          <div className="flex items-center gap-4">
+            <div className="text-xs text-gray-500 text-right">
+              <span>Form Code: {initialFormData.formCode}</span>
+              <span className="mx-2">|</span>
+              <span>Date: {initialFormData.revisionDate}</span>
+            </div>
+
+            {/* PREVIEW PDF BUTTON */}
+            <button
+              onClick={handleDownloadPDF}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs shadow-md transition-colors"
+            >
+              <FileDown className="w-4 h-4" /> Download PDF
+            </button>
           </div>
         </div>
 
@@ -318,18 +473,6 @@ export default function OperatorObservationSheet() {
             {/* Left Header Box */}
             <div className="p-3 space-y-2 text-sm font-semibold">
               <div className="flex items-center">
-                <label className="w-36 text-gray-700">Employee Name</label>
-                <span className="mr-2">:</span>
-                <input
-                  type="text"
-                  placeholder="e.g. M. NAGARAJAN"
-                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
-                  value={headerInfo.employeeName}
-                  onChange={(e) => handleHeaderChange('employeeName', e.target.value)}
-                />
-              </div>
-
-              <div className="flex items-center">
                 <label className="w-36 text-gray-700">Employee Code</label>
                 <span className="mr-2">:</span>
                 <input
@@ -338,6 +481,18 @@ export default function OperatorObservationSheet() {
                   className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
                   value={headerInfo.employeeCode}
                   onChange={(e) => handleHeaderChange('employeeCode', e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center">
+                <label className="w-36 text-gray-700">Employee Name</label>
+                <span className="mr-2">:</span>
+                <input
+                  type="text"
+                  placeholder="e.g. M. NAGARAJAN"
+                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
+                  value={headerInfo.employeeName}
+                  onChange={(e) => handleHeaderChange('employeeName', e.target.value)}
                 />
               </div>
 
@@ -493,7 +648,17 @@ export default function OperatorObservationSheet() {
         </div>
 
         {/* Footer Remarks / Feedback / Signatures */}
-        <div className="mt-6 border-2 border-gray-800 bg-white">
+        <div className="mt-6 border-2 border-gray-800 bg-white relative">
+          
+          {/* Approve Button floating at the top right of the footer block */}
+          <button 
+            type="button" 
+            onClick={handleApprove}
+            className="absolute -top-3 -right-3 bg-[#16a34a] hover:bg-green-700 text-white shadow-md border-2 border-white rounded-full px-4 py-1 text-xs font-bold uppercase transition-transform hover:scale-105"
+          >
+            Approve Form
+          </button>
+
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800 p-3 text-sm font-semibold">
             <div className="flex items-center gap-2">
               <label className="text-gray-700">Date:</label>
@@ -509,9 +674,9 @@ export default function OperatorObservationSheet() {
               <input
                 type="text"
                 placeholder="Sign / Name"
-                className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5"
+                className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase"
                 value={footerInfo.reviewedBy}
-                onChange={(e) => handleFooterChange('reviewedBy', e.target.value)}
+                readOnly
               />
             </div>
             <div className="flex items-center gap-2 px-2">
@@ -519,9 +684,9 @@ export default function OperatorObservationSheet() {
               <input
                 type="text"
                 placeholder="Sign / Name"
-                className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5"
+                className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase"
                 value={footerInfo.approvedBy}
-                onChange={(e) => handleFooterChange('approvedBy', e.target.value)}
+                readOnly
               />
             </div>
           </div>

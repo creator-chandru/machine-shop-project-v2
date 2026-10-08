@@ -26,6 +26,8 @@ const Toast = ({ message, type, onClose }) => {
       ? "bg-red-600"
       : type === "success"
       ? "bg-green-600"
+      : type === "info"
+      ? "bg-blue-600"
       : "bg-orange-600";
 
   return (
@@ -93,7 +95,6 @@ export default function EightDProblemSolvingReport() {
   const [isSavedRecord, setIsSavedRecord] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "" });
 
-  // When saved record exists or role is approver, everything becomes non-editable
   const isFormLocked = isSavedRecord || isReadOnlyApprover;
 
   // Master Data Dropdowns
@@ -102,6 +103,8 @@ export default function EightDProblemSolvingReport() {
   const [qcUsers, setQcUsers] = useState([]);
   const [peUsers, setPeUsers] = useState([]);
   const [hofUsers, setHofUsers] = useState([]);
+
+  const lookupSeqRef = useRef(0);
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -297,6 +300,7 @@ export default function EightDProblemSolvingReport() {
     fetchMasterData();
   }, []);
 
+  // Full reset back to a clean/fresh form when changing key combo fields
   const resetFormToBlank = (keepDate, keepShift, keepPartName, keepPartNo) => {
     setIsSavedRecord(false);
     setProblemScope("New");
@@ -312,16 +316,77 @@ export default function EightDProblemSolvingReport() {
     });
     setProblemDescription("");
     setTeamMembers(["", "", "", "", "", ""]);
+    setProcessFlow([
+      "OP10 RECEIVING INSPECTION",
+      "OP20 TURNING A&B",
+      "OP30 SBA MILLING & DRILLING",
+      "OP40 & OP50 TRA MILLING & DRILLING",
+      "OP60 CA MILLING & DRILLING",
+      "OP70 KPA SIDE MILLING & DRILLING",
+      "OP80 MACHINE TRACEABILITY",
+      "OP90 ONLINE INSPECTION",
+    ]);
     setInterimActions([{ action: "", who: "", dueDate: getTodayISODate(), breakPoint: getTodayISODate() }]);
+    setFishbone({
+      man: [
+        { text: "", side: "left" },
+        { text: "", side: "right" }
+      ],
+      machine: [
+        { text: "", side: "left" },
+        { text: "", side: "right" }
+      ],
+      method: [
+        { text: "", side: "left" },
+        { text: "", side: "right" }
+      ],
+      material: [
+        { text: "", side: "left" }
+      ],
+      problem: "",
+    });
+    setValidationRows([
+      { testSimulation: "", verification: "", date: getTodayISODate(), significant: "INSIGNIFICANT", remarks: "" }
+    ]);
+    setFiveWhy({
+      occurrence: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
+      detection: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
+      system: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
+      pfmeaIncluded: "NO",
+      pfmeaRpn: "",
+    });
     setSolution({ developingSolution: "", trialRun: "", trialRunDate: getTodayISODate(), trialRunSequence: "" });
-    setSignatures({ shiftSupervisorProduction: "", shiftSupervisorQuality: "", productionEngineer: "", hofProduction: "" });
+    setCorrectiveActions([
+      { type: "Occurrence", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+      { type: "Detection", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+      { type: "System", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+    ]);
+    setVerification({
+      q1: "N/A", q2: "Y", q3: "Y", q4: "Y", q5: "Y", q6: "Y",
+      lessonsLearned: "", issueResolved: "Yes", dateClosed: getTodayISODate(), assignedTo: "", trackingNo: "",
+      effectiveness: [
+        { month: "Jun-26", rejQty: "0", rejPct: "0%" },
+        { month: "Jul-26", rejQty: "0", rejPct: "0%" },
+        { month: "Aug-26", rejQty: "0", rejPct: "0%" },
+      ],
+      horizontalDeployment: "",
+    });
+    setSignatures({
+      shiftSupervisorProduction: "",
+      shiftSupervisorQuality: "",
+      productionEngineer: "",
+      hofProduction: "",
+    });
     setHeader((prev) => ({
       ...prev,
-      date: keepDate || prev.date,
-      shift: keepShift || prev.shift,
-      partName: keepPartName || prev.partName,
-      partNo: keepPartNo || prev.partNo,
+      date: keepDate !== undefined ? keepDate : prev.date,
+      shift: keepShift !== undefined ? keepShift : prev.shift,
+      partName: keepPartName !== undefined ? keepPartName : prev.partName,
+      partNo: keepPartNo !== undefined ? keepPartNo : prev.partNo,
       customer: "",
+      category: "Quality",
+      problemFoundBy: "Production",
+      problemFoundByOther: "",
       assignedQc: "",
       assignedPe: "",
       assignedHof: "",
@@ -365,25 +430,39 @@ export default function EightDProblemSolvingReport() {
   };
 
   // Check Existing Record (Date + Shift + PartNo)
-  const checkExistingRecord = async (partNo, date, shift) => {
-    if (!partNo || !date) return;
+  const checkExistingRecord = async (partNo, date, shift, partName) => {
+    if (!partNo || !date) {
+      resetFormToBlank(date, shift, partName, partNo);
+      return;
+    }
+
+    const seq = ++lookupSeqRef.current;
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
         `${process.env.REACT_APP_API_URL || ""}/api/8d-report?machineShop=${shopId || 3}&partNo=${encodeURIComponent(partNo)}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift || "1ST")}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      if (seq !== lookupSeqRef.current) return;
+
       if (res.ok) {
         const data = await res.json();
+        if (seq !== lookupSeqRef.current) return;
+
         if (Array.isArray(data) && data.length > 0) {
           loadRecordData(data[0]);
-          triggerToast("Existing 8D record loaded (Form is locked for editing).", "info");
+          triggerToast("Existing 8D record loaded (Form locked for editing).", "info");
         } else {
-          setIsSavedRecord(false);
+          // No record exists for this date+shift+part: reset cleanly to blank
+          resetFormToBlank(date, shift, partName, partNo);
         }
+      } else {
+        resetFormToBlank(date, shift, partName, partNo);
       }
     } catch (err) {
       console.error("Failed to check existing 8D report:", err);
+      resetFormToBlank(date, shift, partName, partNo);
     }
   };
 
@@ -395,7 +474,7 @@ export default function EightDProblemSolvingReport() {
       const qDate = searchParams.get("date");
       const qShift = searchParams.get("shift") || "1ST";
       if (qPart && qDate) {
-        checkExistingRecord(qPart, qDate, qShift);
+        checkExistingRecord(qPart, qDate, qShift, header.partName);
       }
     }
   }, [location.state, searchParams]);
@@ -407,29 +486,30 @@ export default function EightDProblemSolvingReport() {
     if (type === "partName") {
       nextPartName = value;
       const matched = partSets.find((p) => p.PartName === value);
-      if (matched) nextPartNo = matched.PartNo;
+      nextPartNo = matched ? matched.PartNo : "";
     } else if (type === "partNo") {
       nextPartNo = value;
       const matched = partSets.find((p) => p.PartNo === value);
-      if (matched) nextPartName = matched.PartName;
+      nextPartName = matched ? matched.PartName : "";
     }
 
-    setHeader((prev) => ({
-      ...prev,
-      partName: nextPartName,
-      partNo: nextPartNo,
-    }));
+    // Immediately reset non-header values and set updated part info
+    resetFormToBlank(header.date, header.shift, nextPartName, nextPartNo);
 
     if (nextPartNo && header.date) {
-      checkExistingRecord(nextPartNo, header.date, header.shift);
+      checkExistingRecord(nextPartNo, header.date, header.shift, nextPartName);
     }
   };
 
   const handleHeaderDateOrShiftChange = (field, val) => {
-    const nextHeader = { ...header, [field]: val };
-    setHeader(nextHeader);
-    if (nextHeader.partNo && nextHeader.date) {
-      checkExistingRecord(nextHeader.partNo, nextHeader.date, nextHeader.shift);
+    const nextDate = field === "date" ? val : header.date;
+    const nextShift = field === "shift" ? val : header.shift;
+
+    // Immediately reset non-header values and set updated date/shift
+    resetFormToBlank(nextDate, nextShift, header.partName, header.partNo);
+
+    if (header.partNo && nextDate) {
+      checkExistingRecord(header.partNo, nextDate, nextShift, header.partName);
     }
   };
 
@@ -558,7 +638,7 @@ export default function EightDProblemSolvingReport() {
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-      triggerToast("Single-page PDF preview ready!", "success");
+      triggerToast("PDF generated successfully!", "success");
     } catch (err) {
       triggerToast(err.message || "PDF Download Failed", "error");
     }
@@ -753,7 +833,7 @@ export default function EightDProblemSolvingReport() {
             onClick={handleDownloadPdf}
             className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors"
           >
-            <FileDown className="w-4 h-4" /> Preview PDF (1-Page)
+            <FileDown className="w-4 h-4" /> Preview PDF (2-Page)
           </button>
         </div>
 
@@ -765,12 +845,12 @@ export default function EightDProblemSolvingReport() {
               <div className="flex gap-2">
                 <input
                   type="date"
-                  className="w-1/2 border border-gray-300 p-1.5 rounded font-semibold bg-white"
+                  className="w-1/2 border border-gray-300 p-1.5 rounded font-semibold bg-white cursor-pointer"
                   value={header.date}
                   onChange={(e) => handleHeaderDateOrShiftChange("date", e.target.value)}
                 />
                 <select
-                  className="w-1/2 border border-gray-300 p-1.5 rounded font-semibold bg-white"
+                  className="w-1/2 border border-gray-300 p-1.5 rounded font-semibold bg-white cursor-pointer"
                   value={header.shift}
                   onChange={(e) => handleHeaderDateOrShiftChange("shift", e.target.value)}
                 >

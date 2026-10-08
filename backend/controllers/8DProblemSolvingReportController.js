@@ -147,23 +147,28 @@ const saveEightDReport = async (req, res) => {
     request.input('EffectivenessMonitoring', sql.NVarChar(sql.MAX), JSON.stringify(verification?.effectiveness || []));
     request.input('HorizontalDeployment', sql.NVarChar(sql.MAX), verification?.horizontalDeployment || '');
 
+    // Distinct signature mappings
     const shiftInchargeSig = signatures?.shiftSupervisorProduction || signatures?.shiftIncharge || '';
     const teamLeaderSig = signatures?.teamLeader || shiftInchargeSig;
     const qualityHeadSig = signatures?.shiftSupervisorQuality || signatures?.qualityHead || '';
-    const productionHeadSig = signatures?.hofProduction || signatures?.productionEngineer || signatures?.productionHead || '';
+    const peSignature = signatures?.productionEngineer || signatures?.productionHead || '';
+    const hofSignature = signatures?.hofProduction || '';
 
     request.input('Sign_TeamLeader', sql.NVarChar(100), teamLeaderSig);
-    request.input('Sign_ProductionHead', sql.NVarChar(100), productionHeadSig);
+    request.input('Sign_ProductionHead', sql.NVarChar(100), peSignature);
     request.input('Sign_QualityHead', sql.NVarChar(100), qualityHeadSig);
     request.input('Sign_ShiftIncharge', sql.NVarChar(100), shiftInchargeSig);
+    request.input('Sign_HOFProduction', sql.NVarChar(100), hofSignature);
 
     const isFullyApproved = Boolean(
       teamLeaderSig &&
       qualityHeadSig &&
-      productionHeadSig &&
+      peSignature &&
+      hofSignature &&
       !teamLeaderSig.includes('Pending') &&
       !qualityHeadSig.includes('Pending') &&
-      !productionHeadSig.includes('Pending')
+      !peSignature.includes('Pending') &&
+      !hofSignature.includes('Pending')
     );
     const reportStatus = isFullyApproved ? 'Completed' : 'Submitted';
     request.input('Status', sql.NVarChar(50), reportStatus);
@@ -194,6 +199,7 @@ const saveEightDReport = async (req, res) => {
           Sign_ProductionHead = @Sign_ProductionHead,
           Sign_QualityHead = @Sign_QualityHead,
           Sign_ShiftIncharge = @Sign_ShiftIncharge,
+          Sign_HOFProduction = @Sign_HOFProduction,
           assignedQc = @assignedQc,
           assignedPe = @assignedPe,
           assignedHof = @assignedHof,
@@ -213,7 +219,7 @@ const saveEightDReport = async (req, res) => {
           DevelopingSolution, TrialRunDetails, TrialRunDate, TrialRunSequence,
           CorrectiveActions, VerificationQuestions, LessonsLearned, IssueResolved, DateClosed,
           AssignedTo, TrackingNo, EffectivenessMonitoring, HorizontalDeployment,
-          Sign_TeamLeader, Sign_ProductionHead, Sign_QualityHead, Sign_ShiftIncharge,
+          Sign_TeamLeader, Sign_ProductionHead, Sign_QualityHead, Sign_ShiftIncharge, Sign_HOFProduction,
           assignedQc, assignedPe, assignedHof, Status
         ) VALUES (
           @MachineShop, @ReportDate, @Shift, @Customer, @PartName, @PartNo, @Category, @ProblemFoundBy, @ProblemFoundByOther,
@@ -225,7 +231,7 @@ const saveEightDReport = async (req, res) => {
           @DevelopingSolution, @TrialRunDetails, @TrialRunDate, @TrialRunSequence,
           @CorrectiveActions, @VerificationQuestions, @LessonsLearned, @IssueResolved, @DateClosed,
           @AssignedTo, @TrackingNo, @EffectivenessMonitoring, @HorizontalDeployment,
-          @Sign_TeamLeader, @Sign_ProductionHead, @Sign_QualityHead, @Sign_ShiftIncharge,
+          @Sign_TeamLeader, @Sign_ProductionHead, @Sign_QualityHead, @Sign_ShiftIncharge, @Sign_HOFProduction,
           @assignedQc, @assignedPe, @assignedHof, @Status
         )
       `);
@@ -343,7 +349,7 @@ const getEightDReports = async (req, res) => {
         shiftSupervisorProduction: r.Sign_ShiftIncharge || r.Sign_TeamLeader || '',
         shiftSupervisorQuality: r.Sign_QualityHead || '',
         productionEngineer: r.Sign_ProductionHead || '',
-        hofProduction: r.Sign_ProductionHead || '',
+        hofProduction: r.Sign_HOFProduction || '',
         teamLeader: r.Sign_TeamLeader || r.Sign_ShiftIncharge || '',
         productionHead: r.Sign_ProductionHead || '',
         qualityHead: r.Sign_QualityHead || '',
@@ -387,7 +393,8 @@ const signEightDApproval = async (req, res) => {
   try {
     let col = 'Sign_ShiftIncharge';
     if (role === 'qc') col = 'Sign_QualityHead';
-    if (role === 'pe' || role === 'hof') col = 'Sign_ProductionHead';
+    if (role === 'pe') col = 'Sign_ProductionHead';
+    if (role === 'hof') col = 'Sign_HOFProduction';
 
     const reqq = new sql.Request();
     reqq.input('sig', sql.NVarChar(100), signature);
@@ -400,9 +407,299 @@ const signEightDApproval = async (req, res) => {
   }
 };
 
+// ============================================================
+// 6. GET QC PENDING 8D REPORTS
+// ============================================================
+const getQcEightDReports = async (req, res) => {
+  try {
+    const { name } = req.params;
+    const shopId = req.query.shopId;
+
+    const request = new sql.Request();
+    request.input('qcName', sql.NVarChar(100), String(name || '').trim());
+
+    let shopFilter = '';
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      shopFilter = ' AND MachineShop = @machineShop';
+    }
+
+    const result = await request.query(`
+      SELECT 
+        Id AS id,
+        MachineShop AS machineShop,
+        Customer AS customer,
+        PartName AS partName,
+        PartNo AS partNo,
+        FORMAT(ReportDate, 'yyyy-MM-dd') AS reportDate,
+        Shift AS shift,
+        Sign_TeamLeader AS shiftInchargeName,
+        Sign_QualityHead AS verifiedByQcSignature,
+        Sign_ProductionHead AS peSignature,
+        Sign_HOFProduction AS hofSignature,
+        assignedQc,
+        assignedPe,
+        assignedHof,
+        'Pending' AS status
+      FROM EightDProblemSolvingReport
+      WHERE (Sign_QualityHead IS NULL OR Sign_QualityHead = '' OR Sign_QualityHead = 'Pending')
+        AND (assignedQc IS NULL OR assignedQc = '' OR LOWER(assignedQc) = LOWER(@qcName))
+        ${shopFilter}
+      ORDER BY ReportDate DESC, Id DESC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error('QC 8D Report Fetch Error:', err);
+    return res.status(500).json({ message: 'DB error' });
+  }
+};
 
 // ============================================================
-// 5. PDF GENERATOR - STRICT 2-PAGE LANDSCAPE FORMAT
+// 7. GET PE PENDING 8D REPORTS (Checks Sign_ProductionHead)
+// ============================================================
+const getPeEightDReports = async (req, res) => {
+  try {
+    const { name } = req.params;
+    const shopId = req.query.shopId;
+
+    const request = new sql.Request();
+    request.input('peName', sql.NVarChar(100), String(name || '').trim());
+
+    let shopFilter = '';
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      shopFilter = ' AND MachineShop = @machineShop';
+    }
+
+    const result = await request.query(`
+      SELECT 
+        Id AS id,
+        MachineShop AS machineShop,
+        Customer AS customer,
+        PartName AS partName,
+        PartNo AS partNo,
+        FORMAT(ReportDate, 'yyyy-MM-dd') AS reportDate,
+        Shift AS shift,
+        Sign_TeamLeader AS shiftInchargeName,
+        Sign_QualityHead AS verifiedByQcSignature,
+        Sign_ProductionHead AS peSignature,
+        Sign_HOFProduction AS hofSignature,
+        assignedQc,
+        assignedPe,
+        assignedHof,
+        'Pending' AS status
+      FROM EightDProblemSolvingReport
+      WHERE (Sign_ProductionHead IS NULL OR Sign_ProductionHead = '' OR Sign_ProductionHead = 'Pending')
+        AND (assignedPe IS NULL OR assignedPe = '' OR LOWER(assignedPe) = LOWER(@peName))
+        ${shopFilter}
+      ORDER BY ReportDate DESC, Id DESC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error('PE 8D Report Fetch Error:', err);
+    return res.status(500).json({ message: 'DB error' });
+  }
+};
+
+// ============================================================
+// 8. GET HOF PENDING 8D REPORTS (Checks Sign_HOFProduction)
+// ============================================================
+const getHofEightDReports = async (req, res) => {
+  try {
+    const { name } = req.params;
+    const shopId = req.query.shopId;
+
+    const request = new sql.Request();
+    request.input('hofName', sql.NVarChar(100), String(name || '').trim());
+
+    let shopFilter = '';
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      shopFilter = ' AND MachineShop = @machineShop';
+    }
+
+    const result = await request.query(`
+      SELECT 
+        Id AS id,
+        MachineShop AS machineShop,
+        Customer AS customer,
+        PartName AS partName,
+        PartNo AS partNo,
+        FORMAT(ReportDate, 'yyyy-MM-dd') AS reportDate,
+        Shift AS shift,
+        Sign_TeamLeader AS shiftInchargeName,
+        Sign_QualityHead AS verifiedByQcSignature,
+        Sign_ProductionHead AS peSignature,
+        Sign_HOFProduction AS hofSignature,
+        assignedQc,
+        assignedPe,
+        assignedHof,
+        'Pending' AS status
+      FROM EightDProblemSolvingReport
+      WHERE (Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending')
+        AND (assignedHof IS NULL OR assignedHof = '' OR LOWER(assignedHof) = LOWER(@hofName))
+        ${shopFilter}
+      ORDER BY ReportDate DESC, Id DESC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error('HOF 8D Report Fetch Error:', err);
+    return res.status(500).json({ message: 'DB error' });
+  }
+};
+
+// ============================================================
+// 9. SIGN QC APPROVAL FOR 8D
+// ============================================================
+const signQcEightDApproval = async (req, res) => {
+  try {
+    const { partNo, date, shift, signature, qcUsername } = req.body;
+
+    if (!partNo || !date) {
+      return res.status(400).json({ message: 'Missing partNo or date' });
+    }
+
+    const signVal = signature || qcUsername || 'Approved';
+    const cleanDate = String(date).split('T')[0];
+
+    const request = new sql.Request();
+    request.input('partNo', sql.NVarChar(100), String(partNo).trim());
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('signature', sql.NVarChar(100), signVal);
+
+    let shiftFilter = '';
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      shiftFilter = ' AND Shift = @shift';
+    }
+
+    const result = await request.query(`
+      UPDATE EightDProblemSolvingReport 
+      SET Sign_QualityHead = @signature,
+          Status = CASE WHEN (Sign_ProductionHead IS NOT NULL AND Sign_ProductionHead != '' AND Sign_ProductionHead != 'Pending'
+                              AND Sign_HOFProduction IS NOT NULL AND Sign_HOFProduction != '' AND Sign_HOFProduction != 'Pending')
+                        THEN 'Completed' ELSE 'Submitted' END,
+          UpdatedAt = GETDATE()
+      WHERE PartNo = @partNo 
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+        AND (Sign_QualityHead IS NULL OR Sign_QualityHead = '' OR Sign_QualityHead = 'Pending')
+        ${shiftFilter}
+    `);
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: 'No pending 8D records found to approve' });
+    }
+
+    return res.status(200).json({ success: true, message: '8D Report approved by QC successfully!' });
+  } catch (err) {
+    console.error('Sign QC 8D Error:', err);
+    return res.status(500).json({ message: 'Failed to approve 8D report' });
+  }
+};
+
+// ============================================================
+// 10. SIGN PE APPROVAL FOR 8D (Signs ONLY Sign_ProductionHead)
+// ============================================================
+const signPeEightDApproval = async (req, res) => {
+  try {
+    const { partNo, date, shift, signature, peUsername } = req.body;
+
+    if (!partNo || !date) {
+      return res.status(400).json({ message: 'Missing partNo or date' });
+    }
+
+    const signVal = signature || peUsername || 'Approved';
+    const cleanDate = String(date).split('T')[0];
+
+    const request = new sql.Request();
+    request.input('partNo', sql.NVarChar(100), String(partNo).trim());
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('signature', sql.NVarChar(100), signVal);
+
+    let shiftFilter = '';
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      shiftFilter = ' AND Shift = @shift';
+    }
+
+    const result = await request.query(`
+      UPDATE EightDProblemSolvingReport 
+      SET Sign_ProductionHead = @signature,
+          Status = CASE WHEN (Sign_QualityHead IS NOT NULL AND Sign_QualityHead != '' AND Sign_QualityHead != 'Pending'
+                              AND Sign_HOFProduction IS NOT NULL AND Sign_HOFProduction != '' AND Sign_HOFProduction != 'Pending')
+                        THEN 'Completed' ELSE 'Submitted' END,
+          UpdatedAt = GETDATE()
+      WHERE PartNo = @partNo 
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+        AND (Sign_ProductionHead IS NULL OR Sign_ProductionHead = '' OR Sign_ProductionHead = 'Pending')
+        ${shiftFilter}
+    `);
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: 'No pending 8D records found for PE approval' });
+    }
+
+    return res.status(200).json({ success: true, message: '8D Report approved by PE successfully!' });
+  } catch (err) {
+    console.error('Sign PE 8D Error:', err);
+    return res.status(500).json({ message: 'Failed to approve 8D report' });
+  }
+};
+
+// ============================================================
+// 11. SIGN HOF APPROVAL FOR 8D (Signs ONLY Sign_HOFProduction)
+// ============================================================
+const signHofEightDApproval = async (req, res) => {
+  try {
+    const { partNo, date, shift, signature, hofUsername } = req.body;
+
+    if (!partNo || !date) {
+      return res.status(400).json({ message: 'Missing partNo or date' });
+    }
+
+    const signVal = signature || hofUsername || 'Approved';
+    const cleanDate = String(date).split('T')[0];
+
+    const request = new sql.Request();
+    request.input('partNo', sql.NVarChar(100), String(partNo).trim());
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('signature', sql.NVarChar(100), signVal);
+
+    let shiftFilter = '';
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      shiftFilter = ' AND Shift = @shift';
+    }
+
+    const result = await request.query(`
+      UPDATE EightDProblemSolvingReport 
+      SET Sign_HOFProduction = @signature,
+          Status = CASE WHEN (Sign_QualityHead IS NOT NULL AND Sign_QualityHead != '' AND Sign_QualityHead != 'Pending'
+                              AND Sign_ProductionHead IS NOT NULL AND Sign_ProductionHead != '' AND Sign_ProductionHead != 'Pending')
+                        THEN 'Completed' ELSE 'Submitted' END,
+          UpdatedAt = GETDATE()
+      WHERE PartNo = @partNo 
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+        AND (Sign_HOFProduction IS NULL OR Sign_HOFProduction = '' OR Sign_HOFProduction = 'Pending')
+        ${shiftFilter}
+    `);
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: 'No pending 8D records found for HOF approval' });
+    }
+
+    return res.status(200).json({ success: true, message: '8D Report approved by HOF successfully!' });
+  } catch (err) {
+    console.error('Sign HOF 8D Error:', err);
+    return res.status(500).json({ message: 'Failed to approve 8D report' });
+  }
+};
+
+// ============================================================
+// 12. PDF GENERATOR - STRICT 2-PAGE LANDSCAPE FORMAT
 // ============================================================
 const generateEightDPdf = async (req, res) => {
   const { shopId, date, shift, partNo, customer } = req.query;
@@ -442,7 +739,6 @@ const generateEightDPdf = async (req, res) => {
 
     const r = result.recordset[0];
 
-    // Initialize document with autoPageBreak: false to prevent accidental page spills
     const doc = new PDFDocument({ 
       margin: 15, 
       size: "A4", 
@@ -584,7 +880,7 @@ const generateEightDPdf = async (req, res) => {
     doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8).text("PROBLEM", startX + 665, spineY - 20, { width: 90, align: "center" });
     doc.font("Helvetica").fontSize(6.8).text(r.FishboneProblem || "ABS DEFECT", startX + 665, spineY - 6, { width: 90, align: "center" });
 
-    // 5. VALIDATION TABLE (Height: 200)
+    // 5. VALIDATION TABLE (Height: 205)
     const valY = 347;
     doc.rect(startX, valY, fullWidth, 205).stroke();
     doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4a) Validation of Potential Causes:", startX + 8, valY + 5);
@@ -730,7 +1026,7 @@ const generateEightDPdf = async (req, res) => {
     const opSig = r.Sign_ShiftIncharge || r.Sign_TeamLeader;
     const qcSig = r.Sign_QualityHead;
     const peSig = r.Sign_ProductionHead;
-    const hofSig = r.Sign_ProductionHead;
+    const hofSig = r.Sign_HOFProduction;
 
     const renderSigBox = (colIdx, title, sigVal) => {
       const bx = startX + sigW * colIdx;
@@ -774,5 +1070,11 @@ module.exports = {
   getEightDReportById,
   generateEightDPdf,
   signEightDApproval,
-  getPartSets
+  getPartSets,
+  getQcEightDReports,
+  getPeEightDReports,
+  getHofEightDReports,
+  signQcEightDApproval,
+  signPeEightDApproval,
+  signHofEightDApproval
 };

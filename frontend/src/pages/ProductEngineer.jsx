@@ -10,6 +10,7 @@ import {
   Clock,
   FileSpreadsheet,
   Users,
+  FileSearch,
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -21,7 +22,7 @@ const ProductEngineer = () => {
   // ============================================================
   // TAB STATE
   // ============================================================
-  const [activeTab, setActiveTab] = useState("airgap");
+  const [activeTab, setActiveTab] = useState("airgap"); // "airgap" | "idletime" | "dailyproduction" | "significant" | "operatorallotment" | "eightd"
 
   // ============================================================
   // PENDING REPORT STATES
@@ -31,6 +32,7 @@ const ProductEngineer = () => {
   const [pendingDailyProdReports, setPendingDailyProdReports] = useState([]);
   const [pendingSignificantReports, setPendingSignificantReports] = useState([]);
   const [pendingOperatorAllotments, setPendingOperatorAllotments] = useState([]);
+  const [pendingEightDReports, setPendingEightDReports] = useState([]);
 
   // ============================================================
   // PDF REVIEW MODAL STATE
@@ -148,12 +150,31 @@ const ProductEngineer = () => {
     }
   };
 
+  const fetchPendingEightDReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/8d-report/pe/${encodeURIComponent(currentPE)}?shopId=${shopId || 3}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingEightDReports(Array.isArray(data) ? data : []);
+      } else {
+        setPendingEightDReports([]);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending 8D Reports.");
+    }
+  };
+
   const fetchAllReports = () => {
     fetchPendingAirGapReports();
     fetchPendingIdleTimeReports();
     fetchPendingDailyProdReports();
     fetchPendingSignificantReports();
     fetchPendingOperatorAllotments();
+    fetchPendingEightDReports();
   };
 
   useEffect(() => {
@@ -204,6 +225,15 @@ const ProductEngineer = () => {
           date: isoDate,
         });
         apiUrl = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/operator-allotment/report?${params.toString()}`;
+      } else if (type === "eightd") {
+        const params = new URLSearchParams({
+          shopId: String(report.machineShop || shopId || 3),
+          date: isoDate,
+          shift: report.shift || "1ST",
+          partNo: report.partNo || "",
+          customer: report.customer || "",
+        });
+        apiUrl = `${process.env.REACT_APP_API_URL || ""}/api/8d-report/pdf?${params.toString()}`;
       } else {
         const params = new URLSearchParams({
           lineCode: report.lineCode,
@@ -279,6 +309,15 @@ const ProductEngineer = () => {
           id: selectedReport.id,
           peSignature: currentPE,
         };
+      } else if (reviewReportType === "eightd") {
+        endpoint = `${process.env.REACT_APP_API_URL || ""}/api/8d-report/sign-pe`;
+        payload = {
+          partNo: selectedReport.partNo,
+          date: isoDate,
+          shift: selectedReport.shift || "1ST",
+          signature: currentPE,
+          peUsername: currentPE,
+        };
       } else {
         endpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-pe`;
         payload = {
@@ -313,6 +352,8 @@ const ProductEngineer = () => {
           ? "Significant Event Record verified and approved successfully!"
           : reviewReportType === "operatorallotment"
           ? "Operator Allotment Sheet verified and approved successfully!"
+          : reviewReportType === "eightd"
+          ? "8D Problem Solving Report verified and approved successfully!"
           : "Daily Production Report verified and approved successfully!";
 
       toast.success(successMsg, { autoClose: 2000 });
@@ -433,6 +474,21 @@ const ProductEngineer = () => {
               {pendingOperatorAllotments.length > 0 && (
                 <span className="bg-teal-600 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
                   {pendingOperatorAllotments.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("eightd")}
+              className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 ${
+                activeTab === "eightd" ? "border-amber-600 text-amber-600 bg-amber-50/50" : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <FileSearch className="w-4 h-4" />
+              <span>8D Problem Solving Reports</span>
+              {pendingEightDReports.length > 0 && (
+                <span className="bg-amber-600 text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full">
+                  {pendingEightDReports.length}
                 </span>
               )}
             </button>
@@ -664,6 +720,54 @@ const ProductEngineer = () => {
               )}
             </div>
           )}
+
+          {/* 8D PROBLEM SOLVING REPORTS */}
+          {activeTab === "eightd" && (
+            <div>
+              {pendingEightDReports.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                  <FileSearch className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                  <p className="text-gray-500 font-semibold">No 8D Problem Solving Reports pending your review.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Customer</th>
+                        <th className="p-3 border border-gray-300">Part No</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Shift</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingEightDReports.map((report) => (
+                        <tr key={`8d-${report.id}`} className="hover:bg-amber-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">{report.customer || "N/A"}</td>
+                          <td className="p-3 border border-gray-300 font-mono text-xs">{report.partNo || "N/A"}</td>
+                          <td className="p-3 border border-gray-300">{report.partName || "N/A"}</td>
+                          <td className="p-3 border border-gray-300">Shift {report.shift || "1ST"}</td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report, "eightd")}
+                              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Verify
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -685,6 +789,8 @@ const ProductEngineer = () => {
                   ? "REVIEW & SIGN SIGNIFICANT EVENT RECORD"
                   : reviewReportType === "operatorallotment"
                   ? "REVIEW & SIGN OPERATOR ALLOTMENT SHEET"
+                  : reviewReportType === "eightd"
+                  ? "REVIEW & SIGN 8D PROBLEM SOLVING REPORT"
                   : "REVIEW & SIGN IDLE TIME REPORT"}
               </h2>
               <button
@@ -728,6 +834,10 @@ const ProductEngineer = () => {
                     {selectedReport.lineCode && (
                       <p><span className="font-extrabold">Line Code:</span> {selectedReport.lineCode}</p>
                     )}
+
+                    {selectedReport.customer && (
+                      <p><span className="font-extrabold">Customer:</span> {selectedReport.customer}</p>
+                    )}
                     
                     {(selectedReport.partName || selectedReport.partNo) && (
                       <p>
@@ -752,7 +862,7 @@ const ProductEngineer = () => {
                       <p><span className="font-extrabold">Event:</span> {selectedReport.event}</p>
                     )}
 
-                    {reviewReportType !== "significant" && reviewReportType !== "operatorallotment" && (
+                    {reviewReportType !== "significant" && reviewReportType !== "operatorallotment" && reviewReportType !== "eightd" && (
                       <p><span className="font-extrabold">Shift Incharge:</span> {selectedReport.shiftInchargeName || "Shift Incharge"}</p>
                     )}
                   </div>

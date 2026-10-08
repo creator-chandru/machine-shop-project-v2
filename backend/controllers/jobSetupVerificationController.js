@@ -3,51 +3,109 @@ const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
 
-// 1. GET REUSABLE MASTER CONTROL SPECIFICATIONS
-const getControlSpecifications = async (req, res) => {
-  const { partName, operationNo, shopId } = req.query;
+// ============================================================
+// HELPERS
+// ============================================================
+const isPendingValue = (v) =>
+  !v || String(v).trim() === "" || String(v).trim().toLowerCase() === "pending";
 
-  if (!partName || !operationNo) {
-    return res.status(400).json({ error: "partName and operationNo are required" });
+const safeParse = (raw, fallback) => {
+  if (raw === null || raw === undefined || raw === "") return fallback;
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return fallback;
+  }
+};
+
+// Keep only rows that have something in them and renumber Sl.No
+const cleanSpecs = (specs) =>
+  (Array.isArray(specs) ? specs : [])
+    .map((s) => ({
+      controlName: String(s?.controlName || "").trim(),
+      specification: String(s?.specification || "").trim(),
+    }))
+    .filter((s) => s.controlName || s.specification)
+    .map((s, i) => ({ slNo: i + 1, ...s }));
+
+// ============================================================
+// 1. GET MASTER CONTROL SPECIFICATIONS (BY PART NAME ONLY)
+// ============================================================
+const getControlSpecifications = async (req, res) => {
+  const { partName } = req.query;
+
+  if (!partName) {
+    return res.status(400).json({ error: "partName is required" });
   }
 
   try {
     const request = new sql.Request();
     request.input("partName", sql.NVarChar(255), String(partName).trim());
-    request.input("operationNo", sql.NVarChar(100), String(operationNo).trim());
-    request.input("shopId", sql.VarChar(50), String(shopId || "3"));
 
     const result = await request.query(`
-      SELECT TOP 1 OperationDescription, ControlSpecifications
-      FROM dbo.JobSetupVerification
-      WHERE PartName = @partName 
-        AND OperationNo = @operationNo 
-        AND (IsMasterTemplate = 1 OR ControlSpecifications IS NOT NULL)
-      ORDER BY IsMasterTemplate DESC, Id DESC
+      SELECT TOP 1 PartNo, ControlSpecifications, UpdatedBy, UpdatedAt
+      FROM dbo.JobSetupControlMaster
+      WHERE PartName = @partName
     `);
 
-    if (result.recordset.length > 0 && result.recordset[0].ControlSpecifications) {
-      const raw = result.recordset[0].ControlSpecifications;
-      const specs = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return res.status(200).json({
-        operationDescription: result.recordset[0].OperationDescription || "",
-        specifications: specs,
-      });
+    if (!result.recordset.length) {
+      return res.status(200).json({ partName, partNo: "", specifications: [] });
     }
 
-    return res.status(200).json({ operationDescription: "", specifications: [] });
+    const row = result.recordset[0];
+    return res.status(200).json({
+      partName,
+      partNo: row.PartNo || "",
+      specifications: safeParse(row.ControlSpecifications, []),
+      updatedBy: row.UpdatedBy || "",
+      updatedAt: row.UpdatedAt,
+    });
   } catch (err) {
     console.error("Get specifications error:", err);
     return res.status(500).json({ error: "Failed to fetch control specifications" });
   }
 };
 
-// 2. SAVE OR UPDATE MASTER CONTROL SPECIFICATIONS
-const saveControlSpecifications = async (req, res) => {
-  const { machineShop, partName, partNo, operationNo, operationDescription, specifications } = req.body;
+// ============================================================
+// 2. LIST ALL PARTS THAT HAVE MASTER SPECIFICATIONS CONFIGURED
+// ============================================================
+const listMasterSpecifications = async (req, res) => {
+  try {
+    const result = await new sql.Request().query(`
+      SELECT PartName, PartNo, ControlSpecifications, UpdatedBy, UpdatedAt
+      FROM dbo.JobSetupControlMaster
+      ORDER BY PartName ASC
+    `);
 
-  if (!partName || !operationNo) {
-    return res.status(400).json({ error: "partName and operationNo are required" });
+    const list = result.recordset.map((r) => ({
+      partName: r.PartName,
+      partNo: r.PartNo || "",
+      controlCount: safeParse(r.ControlSpecifications, []).length,
+      updatedBy: r.UpdatedBy || "",
+      updatedAt: r.UpdatedAt,
+    }));
+
+    return res.status(200).json(list);
+  } catch (err) {
+    console.error("List master specs error:", err);
+    return res.status(500).json({ error: "Failed to list master specifications" });
+  }
+};
+
+// ============================================================
+// 3. SAVE / UPDATE MASTER CONTROL SPECIFICATIONS (BY PART NAME ONLY)
+// ============================================================
+const saveControlSpecifications = async (req, res) => {
+  const { partName, partNo, specifications, username } = req.body;
+
+  if (!partName || !String(partName).trim()) {
+    return res.status(400).json({ error: "partName is required" });
+  }
+
+  const cleaned = cleanSpecs(specifications);
+  if (cleaned.length === 0) {
+    return res.status(400).json({ error: "At least one control / specification row is required" });
   }
 
   let transaction;
@@ -56,45 +114,41 @@ const saveControlSpecifications = async (req, res) => {
     await transaction.begin();
 
     const checkReq = transaction.request();
-    checkReq.input("partName", sql.NVarChar(255), partName);
-    checkReq.input("operationNo", sql.NVarChar(100), operationNo);
-
+    checkReq.input("partName", sql.NVarChar(255), String(partName).trim());
     const checkRes = await checkReq.query(`
-      SELECT Id FROM dbo.JobSetupVerification 
-      WHERE PartName = @partName AND OperationNo = @operationNo AND IsMasterTemplate = 1
+      SELECT Id FROM dbo.JobSetupControlMaster WITH (UPDLOCK, HOLDLOCK)
+      WHERE PartName = @partName
     `);
 
     const request = transaction.request();
-    request.input("machineShop", sql.VarChar(50), String(machineShop || "3"));
-    request.input("partName", sql.NVarChar(255), partName);
+    request.input("partName", sql.NVarChar(255), String(partName).trim());
     request.input("partNo", sql.NVarChar(100), partNo || "");
-    request.input("operationNo", sql.NVarChar(100), operationNo);
-    request.input("operationDescription", sql.NVarChar(1000), operationDescription || "");
-    request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(specifications || []));
+    request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(cleaned));
+    request.input("updatedBy", sql.NVarChar(100), username || "");
 
     if (checkRes.recordset.length > 0) {
       request.input("id", sql.Int, checkRes.recordset[0].Id);
       await request.query(`
-        UPDATE dbo.JobSetupVerification SET
-          OperationDescription = @operationDescription,
+        UPDATE dbo.JobSetupControlMaster SET
+          PartNo = @partNo,
           ControlSpecifications = @controlSpecifications,
+          UpdatedBy = @updatedBy,
           UpdatedAt = GETDATE()
         WHERE Id = @id
       `);
     } else {
       await request.query(`
-        INSERT INTO dbo.JobSetupVerification (
-          MachineShop, PartName, PartNo, OperationNo, OperationDescription,
-          ControlSpecifications, IsMasterTemplate, Status
-        ) VALUES (
-          @machineShop, @partName, @partNo, @operationNo, @operationDescription,
-          @controlSpecifications, 1, 'MasterTemplate'
-        )
+        INSERT INTO dbo.JobSetupControlMaster (PartName, PartNo, ControlSpecifications, UpdatedBy)
+        VALUES (@partName, @partNo, @controlSpecifications, @updatedBy)
       `);
     }
 
     await transaction.commit();
-    return res.status(200).json({ success: true, message: "Control specifications saved successfully" });
+    return res.status(200).json({
+      success: true,
+      count: cleaned.length,
+      message: "Control specifications saved successfully",
+    });
   } catch (err) {
     if (transaction) try { await transaction.rollback(); } catch (e) {}
     console.error("Save specs error:", err);
@@ -102,10 +156,47 @@ const saveControlSpecifications = async (req, res) => {
   }
 };
 
-// 3. SAVE ACTUAL JOB SETUP VERIFICATION RECORD
+// ============================================================
+// 4. GET EXISTING FILLED RECORD FOR PART NAME + DATE
+// ============================================================
+const getJobSetupRecord = async (req, res) => {
+  const { partName, date, shopId } = req.query;
+
+  if (!partName || !date) {
+    return res.status(400).json({ error: "partName and date are required" });
+  }
+
+  try {
+    const request = new sql.Request();
+    request.input("partName", sql.NVarChar(255), String(partName).trim());
+    request.input("reportDate", sql.NVarChar(50), String(date).split("T")[0]);
+
+    let query = `
+      SELECT TOP 1 *, CONVERT(varchar(10), ReportDate, 23) AS ReportDateStr
+      FROM dbo.JobSetupVerification
+      WHERE IsMasterTemplate = 0
+        AND PartName = @partName
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+    `;
+    if (shopId) {
+      request.input("machineShop", sql.VarChar(50), String(shopId));
+      query += ` AND MachineShop = @machineShop`;
+    }
+    query += ` ORDER BY Id DESC`;
+
+    const result = await request.query(query);
+    return res.status(200).json({ record: result.recordset[0] || null });
+  } catch (err) {
+    console.error("Get job setup record error:", err);
+    return res.status(500).json({ error: "Failed to fetch job setup record" });
+  }
+};
+
+// ============================================================
+// 5. SAVE JOB SETUP VERIFICATION (CREATE ONLY - LOCKED AFTERWARDS)
+// ============================================================
 const saveJobSetupVerification = async (req, res) => {
   const {
-    id,
     machineShop,
     partName,
     partNo,
@@ -137,23 +228,60 @@ const saveJobSetupVerification = async (req, res) => {
     actualInspectionData,
     signatures,
     assignedQc,
-    assignedPe,
+    assignedHofInspection,
     assignedHof,
   } = req.body;
+
+  if (!partName || !date) {
+    return res.status(400).json({ error: "partName and date are required" });
+  }
+  if (!Array.isArray(actualInspectionData) || actualInspectionData.length === 0) {
+    return res.status(400).json({ error: "No control specifications to record. Configure the part first." });
+  }
+  if (!assignedQc || !assignedHofInspection || !assignedHof) {
+    return res.status(400).json({ error: "QC, HOF-INSPN and HOF must be assigned" });
+  }
+  if (isPendingValue(signatures?.shiftIncharge)) {
+    return res.status(400).json({ error: "Shift Incharge must sign before submitting" });
+  }
 
   let transaction;
   try {
     transaction = new sql.Transaction();
     await transaction.begin();
 
+    const reportDate = String(date).split("T")[0];
+    const shopVal = String(machineShop || "3");
+
+    // Locked record check: a part name + date combination can only be filled once
+    const existReq = transaction.request();
+    existReq.input("machineShop", sql.VarChar(50), shopVal);
+    existReq.input("partName", sql.NVarChar(255), String(partName).trim());
+    existReq.input("reportDate", sql.NVarChar(50), reportDate);
+    const existing = await existReq.query(`
+      SELECT TOP 1 Id FROM dbo.JobSetupVerification WITH (UPDLOCK, HOLDLOCK)
+      WHERE IsMasterTemplate = 0
+        AND MachineShop = @machineShop
+        AND PartName = @partName
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+    `);
+
+    if (existing.recordset.length > 0) {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "A record already exists for this Part Name and Date. It cannot be modified.",
+        id: existing.recordset[0].Id,
+      });
+    }
+
     const request = transaction.request();
-    request.input("machineShop", sql.VarChar(50), String(machineShop || "3"));
-    request.input("partName", sql.NVarChar(255), partName || "");
+    request.input("machineShop", sql.VarChar(50), shopVal);
+    request.input("partName", sql.NVarChar(255), String(partName).trim());
     request.input("partNo", sql.NVarChar(100), partNo || "");
     request.input("operationNo", sql.NVarChar(100), operationNo || "");
     request.input("operationDescription", sql.NVarChar(1000), operationDescription || "");
 
-    request.input("reportDate", sql.Date, date ? String(date).split("T")[0] : null);
+    request.input("reportDate", sql.Date, reportDate);
     request.input("shift", sql.NVarChar(50), shift || "1st");
     request.input("setterName", sql.NVarChar(255), setterName || "");
     request.input("reasonForSetup", sql.NVarChar(1000), reasonForSetup || "");
@@ -182,61 +310,40 @@ const saveJobSetupVerification = async (req, res) => {
     request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(controlSpecifications || []));
     request.input("actualInspectionData", sql.NVarChar(sql.MAX), JSON.stringify(actualInspectionData || []));
 
-    request.input("signInspector", sql.NVarChar(100), signatures?.inspector || "");
-    request.input("signShiftIncharge", sql.NVarChar(100), signatures?.shiftIncharge || "");
-    request.input("signHofInspection", sql.NVarChar(100), signatures?.hofInspection || "");
-    request.input("signHofProduction", sql.NVarChar(100), signatures?.hofProduction || "");
-    request.input("assignedQc", sql.NVarChar(100), assignedQc || "");
-    request.input("assignedPe", sql.NVarChar(100), assignedPe || "");
-    request.input("assignedHof", sql.NVarChar(100), assignedHof || "");
+    // Shift Incharge signs directly; the other three go out for approval
+    request.input("signInspector", sql.NVarChar(100), "Pending");
+    request.input("signShiftIncharge", sql.NVarChar(100), signatures.shiftIncharge);
+    request.input("signHofInspection", sql.NVarChar(100), "Pending");
+    request.input("signHofProduction", sql.NVarChar(100), "Pending");
+    request.input("assignedQc", sql.NVarChar(100), assignedQc);
+    request.input("assignedHofInspection", sql.NVarChar(100), assignedHofInspection);
+    request.input("assignedHofProduction", sql.NVarChar(100), assignedHof);
+    request.input("status", sql.NVarChar(50), "Submitted");
 
-    const statusVal = (signatures?.hofInspection && signatures?.hofProduction) ? "Completed" : "Submitted";
-    request.input("status", sql.NVarChar(50), statusVal);
+    const insertResult = await request.query(`
+      INSERT INTO dbo.JobSetupVerification (
+        MachineShop, PartName, PartNo, OperationNo, OperationDescription,
+        ReportDate, Shift, SetterName, ReasonForSetup,
+        SettingStartedAt, InspectionTimeStage, SettingFinishedAt, SettingTime, InspectionTimeMetrology, TotalTime,
+        RunningItem, RunningMachineNo, RunningFixtureNo, RunningOperationChange, RunningSignificantBreakdown, RunningMcNo, RunningDetail,
+        ChangeToItem, ChangeToMachineNo, ChangeToFixtureNo, ChangeToOperationChange, ChangeToSignificantBreakdown,
+        ControlSpecifications, ActualInspectionData, IsMasterTemplate,
+        Sign_Inspector, Sign_ShiftIncharge, Sign_HofInspection, Sign_HofProduction,
+        AssignedQc, AssignedHofInspection, AssignedHofProduction, Status
+      ) VALUES (
+        @machineShop, @partName, @partNo, @operationNo, @operationDescription,
+        @reportDate, @shift, @setterName, @reasonForSetup,
+        @settingStartedAt, @inspectionTimeStage, @settingFinishedAt, @settingTime, @inspectionTimeMetrology, @totalTime,
+        @runningItem, @runningMachineNo, @runningFixtureNo, @runningOperationChange, @runningSignificantBreakdown, @runningMcNo, @runningDetail,
+        @changeToItem, @changeToMachineNo, @changeToFixtureNo, @changeToOperationChange, @changeToSignificantBreakdown,
+        @controlSpecifications, @actualInspectionData, 0,
+        @signInspector, @signShiftIncharge, @signHofInspection, @signHofProduction,
+        @assignedQc, @assignedHofInspection, @assignedHofProduction, @status
+      );
+      SELECT SCOPE_IDENTITY() AS NewId;
+    `);
 
-    let savedId = id;
-    if (id) {
-      request.input("id", sql.Int, id);
-      await request.query(`
-        UPDATE dbo.JobSetupVerification SET
-          MachineShop = @machineShop, PartName = @partName, PartNo = @partNo, OperationNo = @operationNo, OperationDescription = @operationDescription,
-          ReportDate = @reportDate, Shift = @shift, SetterName = @setterName, ReasonForSetup = @reasonForSetup,
-          SettingStartedAt = @settingStartedAt, InspectionTimeStage = @inspectionTimeStage, SettingFinishedAt = @settingFinishedAt,
-          SettingTime = @settingTime, InspectionTimeMetrology = @inspectionTimeMetrology, TotalTime = @totalTime,
-          RunningItem = @runningItem, RunningMachineNo = @runningMachineNo, RunningFixtureNo = @runningFixtureNo,
-          RunningOperationChange = @runningOperationChange, RunningSignificantBreakdown = @runningSignificantBreakdown,
-          RunningMcNo = @runningMcNo, RunningDetail = @runningDetail,
-          ChangeToItem = @changeToItem, ChangeToMachineNo = @changeToMachineNo, ChangeToFixtureNo = @changeToFixtureNo,
-          ChangeToOperationChange = @changeToOperationChange, ChangeToSignificantBreakdown = @changeToSignificantBreakdown,
-          ControlSpecifications = @controlSpecifications, ActualInspectionData = @actualInspectionData,
-          Sign_Inspector = @signInspector, Sign_ShiftIncharge = @signShiftIncharge,
-          Sign_HofInspection = @signHofInspection, Sign_HofProduction = @signHofProduction,
-          Status = @status, UpdatedAt = GETDATE()
-        WHERE Id = @id
-      `);
-    } else {
-      const insertResult = await request.query(`
-        INSERT INTO dbo.JobSetupVerification (
-          MachineShop, PartName, PartNo, OperationNo, OperationDescription,
-          ReportDate, Shift, SetterName, ReasonForSetup,
-          SettingStartedAt, InspectionTimeStage, SettingFinishedAt, SettingTime, InspectionTimeMetrology, TotalTime,
-          RunningItem, RunningMachineNo, RunningFixtureNo, RunningOperationChange, RunningSignificantBreakdown, RunningMcNo, RunningDetail,
-          ChangeToItem, ChangeToMachineNo, ChangeToFixtureNo, ChangeToOperationChange, ChangeToSignificantBreakdown,
-          ControlSpecifications, ActualInspectionData, IsMasterTemplate,
-          Sign_Inspector, Sign_ShiftIncharge, Sign_HofInspection, Sign_HofProduction, Status
-        ) VALUES (
-          @machineShop, @partName, @partNo, @operationNo, @operationDescription,
-          @reportDate, @shift, @setterName, @reasonForSetup,
-          @settingStartedAt, @inspectionTimeStage, @settingFinishedAt, @settingTime, @inspectionTimeMetrology, @totalTime,
-          @runningItem, @runningMachineNo, @runningFixtureNo, @runningOperationChange, @runningSignificantBreakdown, @runningMcNo, @runningDetail,
-          @changeToItem, @changeToMachineNo, @changeToFixtureNo, @changeToOperationChange, @changeToSignificantBreakdown,
-          @controlSpecifications, @actualInspectionData, 0,
-          @signInspector, @signShiftIncharge, @signHofInspection, @signHofProduction, @status
-        );
-        SELECT SCOPE_IDENTITY() AS NewId;
-      `);
-      savedId = insertResult.recordset[0].NewId;
-    }
-
+    const savedId = insertResult.recordset[0].NewId;
     await transaction.commit();
     return res.status(200).json({ success: true, id: savedId, message: "Job Setup Verification saved successfully" });
   } catch (err) {
@@ -246,7 +353,9 @@ const saveJobSetupVerification = async (req, res) => {
   }
 };
 
-// 4. GET SINGLE VERIFICATION RECORD BY ID
+// ============================================================
+// 6. GET SINGLE VERIFICATION RECORD BY ID
+// ============================================================
 const getJobSetupVerificationById = async (req, res) => {
   const { id } = req.params;
   try {
@@ -258,31 +367,175 @@ const getJobSetupVerificationById = async (req, res) => {
   }
 };
 
-// 5. PDF REPORT GENERATOR
+// ============================================================
+// 7. HOF-INSPECTION USERS (NEW ROLE) FOR DROPDOWN
+// ============================================================
+const getHofInspectionUsers = async (req, res) => {
+  try {
+    const r = await sql.query`
+      SELECT username AS name, username, employeeId
+      FROM dbo.MachineShopUsers
+      WHERE LOWER(role) IN ('hofinspection', 'hofinspn', 'hofinspector', 'hofinsp')
+      ORDER BY username ASC
+    `;
+
+    const list = r.recordset.length > 0
+      ? r.recordset
+      : [{ name: "hofinspection", username: "hofinspection", employeeId: "hofinspection" }];
+
+    return res.status(200).json({ hofInspectionList: list });
+  } catch (err) {
+    console.error("Error fetching HOF Inspection users:", err);
+    return res.status(500).json({ error: "Failed to fetch HOF Inspection list" });
+  }
+};
+
+// ============================================================
+// 8. PENDING LISTS (QC / HOF-INSPN / HOF-PRODN)
+// ============================================================
+const makePendingHandler = (signCol, assignedCol, label) => async (req, res) => {
+  try {
+    const { name } = req.params;
+    const shopId = req.query.shopId;
+
+    const request = new sql.Request();
+    request.input("assignedName", sql.NVarChar(100), String(name || "").trim());
+
+    let shopFilter = "";
+    if (shopId) {
+      request.input("machineShop", sql.VarChar(50), String(shopId));
+      shopFilter = " AND MachineShop = @machineShop";
+    }
+
+    const result = await request.query(`
+      SELECT
+        Id AS id,
+        MachineShop AS machineShop,
+        PartName AS partName,
+        PartNo AS partNo,
+        OperationNo AS operationNo,
+        CONVERT(varchar(10), ReportDate, 23) AS reportDate,
+        Shift AS shift,
+        SetterName AS shiftInchargeName,
+        Sign_Inspector AS verifiedByQcSignature,
+        Sign_HofInspection AS hofInspectionSignature,
+        Sign_HofProduction AS hofProductionSignature,
+        'Pending' AS status
+      FROM dbo.JobSetupVerification
+      WHERE IsMasterTemplate = 0
+        AND ReportDate IS NOT NULL
+        AND (${signCol} IS NULL OR ${signCol} = '' OR ${signCol} = 'Pending')
+        AND LOWER(ISNULL(${assignedCol}, '')) = LOWER(@assignedName)
+        ${shopFilter}
+      ORDER BY ReportDate DESC, Id DESC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error(`${label} Job Setup Dashboard Fetch Error:`, err);
+    return res.status(500).json({ message: "DB error" });
+  }
+};
+
+const getQcPending = makePendingHandler("Sign_Inspector", "AssignedQc", "QC");
+const getHofInspectionPending = makePendingHandler("Sign_HofInspection", "AssignedHofInspection", "HOF-INSPN");
+const getHofProductionPending = makePendingHandler("Sign_HofProduction", "AssignedHofProduction", "HOF-PRODN");
+
+// ============================================================
+// 9. SIGN ENDPOINTS (QC = Inspector, HOF-INSPN, HOF-PRODN)
+// ============================================================
+const doneExpr = (col) => `(ISNULL(${col}, '') NOT IN ('', 'Pending'))`;
+
+const makeSignHandler = ({ signCol, assignedCol, otherCols, label }) => async (req, res) => {
+  try {
+    const { id, signature, username, qcUsername, hofUsername } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ message: "Missing record id" });
+    }
+
+    const signer = String(username || qcUsername || hofUsername || signature || "").trim();
+    if (!signer) {
+      return res.status(400).json({ message: "Missing signer username" });
+    }
+    const signVal = signature || signer;
+
+    const request = new sql.Request();
+    request.input("id", sql.Int, id);
+    request.input("signature", sql.NVarChar(100), signVal);
+    request.input("signer", sql.NVarChar(100), signer);
+
+    const allOthersDone = otherCols.map(doneExpr).join(" AND ");
+
+    const result = await request.query(`
+      UPDATE dbo.JobSetupVerification
+      SET ${signCol} = @signature,
+          Status = CASE WHEN ${allOthersDone} THEN 'Completed' ELSE 'Submitted' END,
+          UpdatedAt = GETDATE()
+      WHERE Id = @id
+        AND IsMasterTemplate = 0
+        AND (${signCol} IS NULL OR ${signCol} = '' OR ${signCol} = 'Pending')
+        AND LOWER(ISNULL(${assignedCol}, '')) = LOWER(@signer)
+    `);
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: `No pending record found for ${label} approval` });
+    }
+
+    return res.status(200).json({ success: true, message: `Job Setup Verification approved by ${label} successfully!` });
+  } catch (err) {
+    console.error(`Sign ${label} Error:`, err);
+    return res.status(500).json({ message: "Failed to approve report" });
+  }
+};
+
+const signQcApproval = makeSignHandler({
+  signCol: "Sign_Inspector",
+  assignedCol: "AssignedQc",
+  otherCols: ["Sign_ShiftIncharge", "Sign_HofInspection", "Sign_HofProduction"],
+  label: "QC",
+});
+
+const signHofInspectionApproval = makeSignHandler({
+  signCol: "Sign_HofInspection",
+  assignedCol: "AssignedHofInspection",
+  otherCols: ["Sign_Inspector", "Sign_ShiftIncharge", "Sign_HofProduction"],
+  label: "HOF-INSPN",
+});
+
+const signHofProductionApproval = makeSignHandler({
+  signCol: "Sign_HofProduction",
+  assignedCol: "AssignedHofProduction",
+  otherCols: ["Sign_Inspector", "Sign_ShiftIncharge", "Sign_HofInspection"],
+  label: "HOF-PRODN",
+});
+
+// ============================================================
+// 10. PDF REPORT GENERATOR (PART NAME + DATE)
+// ============================================================
 const generatePdfReport = async (req, res) => {
   try {
-    const { partName, operationNo, date, shift, shopId } = req.query;
+    const { partName, date, shopId } = req.query;
 
-    if (!partName || !operationNo) {
-      return res.status(400).send("partName and operationNo are required.");
+    if (!partName || !date) {
+      return res.status(400).send("partName and date are required.");
     }
 
     const request = new sql.Request();
-    request.input("partName", sql.NVarChar(255), partName);
-    request.input("operationNo", sql.NVarChar(100), operationNo);
+    request.input("partName", sql.NVarChar(255), String(partName).trim());
+    request.input("reportDate", sql.NVarChar(50), String(date).split("T")[0]);
 
     let query = `
-      SELECT TOP 1 * FROM dbo.JobSetupVerification
-      WHERE PartName = @partName AND OperationNo = @operationNo AND IsMasterTemplate = 0
+      SELECT TOP 1 *, CONVERT(varchar(10), ReportDate, 23) AS ReportDateStr
+      FROM dbo.JobSetupVerification
+      WHERE PartName = @partName
+        AND IsMasterTemplate = 0
+        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
     `;
 
-    if (date) {
-      request.input("reportDate", sql.NVarChar(50), String(date).split("T")[0]);
-      query += ` AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)`;
-    }
-    if (shift) {
-      request.input("shift", sql.NVarChar(50), shift);
-      query += ` AND Shift = @shift`;
+    if (shopId) {
+      request.input("machineShop", sql.VarChar(50), String(shopId));
+      query += ` AND MachineShop = @machineShop`;
     }
 
     query += ` ORDER BY Id DESC`;
@@ -294,9 +547,17 @@ const generatePdfReport = async (req, res) => {
       return res.status(404).send("No inspection record found to generate PDF.");
     }
 
+    let displayDate = "-";
+    if (record.ReportDateStr) {
+      const [yy, mm, dd] = String(record.ReportDateStr).split("-");
+      displayDate = `${dd}/${mm}/${yy}`;
+    }
+
+    const safeName = String(partName).replace(/[^\w.-]+/g, "_");
+
     const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=Job_Setup_Verification_${partName}.pdf`);
+    res.setHeader("Content-Disposition", `inline; filename=Job_Setup_Verification_${safeName}.pdf`);
     doc.pipe(res);
 
     const totalWidth = doc.page.width - 40;
@@ -317,7 +578,7 @@ const generatePdfReport = async (req, res) => {
     doc.font("Helvetica-Bold").fontSize(13).text("RECORD OF JOB SETUP VERIFICATION", startX + 100, 32, { width: totalWidth - 240, align: "center" });
 
     doc.rect(startX + totalWidth - 140, 20, 140, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text(`Date: ${record.ReportDate ? new Date(record.ReportDate).toLocaleDateString("en-GB") : "-"} | Shift: ${record.Shift || "1st"}`, startX + totalWidth - 140, 26, { width: 140, align: "center" });
+    doc.font("Helvetica-Bold").fontSize(8).text(`Date: ${displayDate} | Shift: ${record.Shift || "1st"}`, startX + totalWidth - 140, 26, { width: 140, align: "center" });
     doc.font("Helvetica").fontSize(7).text("QF/07/MPD-03, Rev.No: 03", startX + totalWidth - 140, 40, { width: 140, align: "center" });
 
     // Sub-header details
@@ -349,13 +610,14 @@ const generatePdfReport = async (req, res) => {
 
     tableY = drawHeader(tableY);
 
-    const actualRows = record.ActualInspectionData ? JSON.parse(record.ActualInspectionData) : [];
+    const actualRows = safeParse(record.ActualInspectionData, []);
     actualRows.forEach((r, idx) => {
       if (tableY + 16 > doc.page.height - 70) {
         doc.addPage();
         tableY = drawHeader(20);
       }
 
+      doc.lineWidth(0.5).strokeColor("black");
       doc.rect(startX, tableY, totalWidth, 16).stroke();
       let x = startX;
       doc.fillColor("black").font("Helvetica").fontSize(6.5);
@@ -375,7 +637,7 @@ const generatePdfReport = async (req, res) => {
       ];
 
       values.forEach((v, i) => {
-        doc.text(v, x + 2, tableY + 4, { width: colWidths[i] - 4, align: i === 1 || i === 2 ? "left" : "center" });
+        doc.text(v, x + 2, tableY + 4, { width: colWidths[i] - 4, height: 10, lineBreak: false, ellipsis: true, align: i === 1 || i === 2 ? "left" : "center" });
         x += colWidths[i];
       });
 
@@ -386,13 +648,16 @@ const generatePdfReport = async (req, res) => {
     let sigY = Math.max(tableY + 10, doc.page.height - 50);
     const sigColW = totalWidth / 4;
 
+    doc.lineWidth(0.5).strokeColor("black");
     doc.rect(startX, sigY, totalWidth, 30).stroke();
-    doc.font("Helvetica-Bold").fontSize(7);
+    doc.font("Helvetica-Bold").fontSize(7).fillColor("black");
 
-    doc.text(`INSPECTOR: ${record.Sign_Inspector || "Pending"}`, startX + 5, sigY + 10, { width: sigColW, align: "center" });
-    doc.text(`SHIFT INCHARGE: ${record.Sign_ShiftIncharge || "Pending"}`, startX + sigColW, sigY + 10, { width: sigColW, align: "center" });
-    doc.text(`HOF-INSPN: ${record.Sign_HofInspection || "Pending"}`, startX + sigColW * 2, sigY + 10, { width: sigColW, align: "center" });
-    doc.text(`HOF-PRODN: ${record.Sign_HofProduction || "Pending"}`, startX + sigColW * 3, sigY + 10, { width: sigColW, align: "center" });
+    const sigText = (label, val) => `${label}: ${isPendingValue(val) ? "Pending" : val}`;
+
+    doc.text(sigText("INSPECTOR", record.Sign_Inspector), startX + 5, sigY + 10, { width: sigColW, align: "center" });
+    doc.text(sigText("SHIFT INCHARGE", record.Sign_ShiftIncharge), startX + sigColW, sigY + 10, { width: sigColW, align: "center" });
+    doc.text(sigText("HOF-INSPN", record.Sign_HofInspection), startX + sigColW * 2, sigY + 10, { width: sigColW, align: "center" });
+    doc.text(sigText("HOF-PRODN", record.Sign_HofProduction), startX + sigColW * 3, sigY + 10, { width: sigColW, align: "center" });
 
     doc.end();
   } catch (err) {
@@ -404,8 +669,17 @@ const generatePdfReport = async (req, res) => {
 
 module.exports = {
   getControlSpecifications,
+  listMasterSpecifications,
   saveControlSpecifications,
+  getJobSetupRecord,
   saveJobSetupVerification,
   getJobSetupVerificationById,
-  generatePdfReport
+  getHofInspectionUsers,
+  getQcPending,
+  getHofInspectionPending,
+  getHofProductionPending,
+  signQcApproval,
+  signHofInspectionApproval,
+  signHofProductionApproval,
+  generatePdfReport,
 };

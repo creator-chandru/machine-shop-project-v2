@@ -8,7 +8,8 @@ import {
   X, 
   FileSpreadsheet, 
   Wrench, 
-  FileText 
+  FileText,
+  FileSearch
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -17,9 +18,10 @@ const QC = () => {
   const navigate = useNavigate();
   const { shopId } = useParams();
 
-  const [activeFormType, setActiveFormType] = useState("tool-change"); // "tool-change" | "daily-production" | "significant"
+  const [activeFormType, setActiveFormType] = useState("tool-change"); // "tool-change" | "daily-production" | "significant" | "8d-report"
   const [pendingReports, setPendingReports] = useState([]);
   const [pendingSignificantReports, setPendingSignificantReports] = useState([]);
+  const [pendingEightDReports, setPendingEightDReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
@@ -72,9 +74,30 @@ const QC = () => {
     }
   };
 
+  const fetchPendingEightDReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/8d-report/qc/${encodeURIComponent(currentQC)}?shopId=${shopId || 3}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingEightDReports(Array.isArray(data) ? data : []);
+      } else {
+        setPendingEightDReports([]);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending 8D Reports.");
+      setPendingEightDReports([]);
+    }
+  };
+
   useEffect(() => {
     if (activeFormType === "significant") {
       fetchPendingSignificantReports();
+    } else if (activeFormType === "8d-report") {
+      fetchPendingEightDReports();
     } else {
       fetchPendingReports();
     }
@@ -108,6 +131,13 @@ const QC = () => {
         params.append("event", report.event || "");
         params.append("shift", report.shift || "");
         reportPath = `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-report?${params.toString()}`;
+      } else if (activeFormType === "8d-report") {
+        params.append("shopId", String(report.machineShop || shopId || 3));
+        params.append("date", isoDate);
+        params.append("shift", report.shift || "1ST");
+        params.append("partNo", report.partNo || "");
+        params.append("customer", report.customer || "");
+        reportPath = `${process.env.REACT_APP_API_URL || ""}/api/8d-report/pdf?${params.toString()}`;
       } else {
         params.append("lineCode", report.lineCode);
         params.append("date", isoDate);
@@ -162,6 +192,15 @@ const QC = () => {
           event: selectedReport.event,
           shift: selectedReport.shift || "I",
         };
+      } else if (activeFormType === "8d-report") {
+        signEndpoint = `${process.env.REACT_APP_API_URL || ""}/api/8d-report/sign-qc`;
+        payload = {
+          partNo: selectedReport.partNo,
+          date: isoDate,
+          shift: selectedReport.shift || "1ST",
+          signature: currentQC,
+          qcUsername: currentQC,
+        };
       } else {
         signEndpoint =
           activeFormType === "tool-change"
@@ -203,6 +242,8 @@ const QC = () => {
         setSelectedReport(null);
         if (activeFormType === "significant") {
           fetchPendingSignificantReports();
+        } else if (activeFormType === "8d-report") {
+          fetchPendingEightDReports();
         } else {
           fetchPendingReports();
         }
@@ -234,6 +275,7 @@ const QC = () => {
                 onClick={() => {
                   fetchPendingReports();
                   fetchPendingSignificantReports();
+                  fetchPendingEightDReports();
                 }}
                 className="p-2 text-gray-500 hover:text-orange-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                 title="Refresh"
@@ -247,7 +289,7 @@ const QC = () => {
           </div>
 
           {/* Form Selection Tabs */}
-          <div className="flex gap-4 mb-6">
+          <div className="flex gap-4 mb-6 flex-wrap">
             <button
               onClick={() => setActiveFormType("tool-change")}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
@@ -286,10 +328,26 @@ const QC = () => {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveFormType("8d-report")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeFormType === "8d-report"
+                  ? "bg-orange-500 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <FileSearch className="w-4 h-4" />
+              8D Problem Solving Reports
+              {pendingEightDReports.length > 0 && (
+                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
+                  {pendingEightDReports.length}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* TAB CONTENT: Tool Change & Daily Production */}
-          {activeFormType !== "significant" && (
+          {(activeFormType === "tool-change" || activeFormType === "daily-production") && (
             <div>
               {pendingReports.length === 0 ? (
                 <p className="text-gray-500 italic py-6">
@@ -415,6 +473,77 @@ const QC = () => {
               )}
             </div>
           )}
+
+          {/* TAB CONTENT: 8D Problem Solving Reports */}
+          {activeFormType === "8d-report" && (
+            <div>
+              {pendingEightDReports.length === 0 ? (
+                <p className="text-gray-500 italic py-6">
+                  No 8D Problem Solving Records pending your review.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300 w-16 text-center">ID</th>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Customer</th>
+                        <th className="p-3 border border-gray-300">Part No</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Shift</th>
+                        <th className="p-3 border border-gray-300">Status</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingEightDReports.map((report) => (
+                        <tr key={`8d-${report.id}`} className="hover:bg-orange-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
+                            #{report.id}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">
+                            {report.customer || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-mono text-xs">
+                            {report.partNo || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">
+                            {report.shift || "1ST"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
+                              <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
+                                ✓ Verified
+                              </span>
+                            ) : (
+                              <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
+                                Pending QC
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report)}
+                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Sign
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -423,7 +552,15 @@ const QC = () => {
         <div className="fixed inset-0 z-[9999] bg-white flex flex-col overflow-hidden animate-fade-in">
           <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
             <h3 className="font-bold text-xl uppercase tracking-wider">
-              Review & Sign {activeFormType === "tool-change" ? "Tool Change Record" : activeFormType === "significant" ? "Significant Event Record" : "Daily Production Report"}
+              Review & Sign {
+                activeFormType === "tool-change" 
+                  ? "Tool Change Record" 
+                  : activeFormType === "significant" 
+                  ? "Significant Event Record" 
+                  : activeFormType === "8d-report"
+                  ? "8D Problem Solving Report"
+                  : "Daily Production Report"
+              }
             </h3>
             <button
               onClick={() => {
@@ -451,9 +588,21 @@ const QC = () => {
             <div className="w-full lg:w-[400px] bg-gray-50 border-l border-gray-300 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
               <div className="p-6 flex-1 flex flex-col">
                 <div className="bg-orange-100 p-4 rounded-xl border border-orange-200 mb-6 text-sm flex flex-col gap-2 shadow-sm text-orange-900">
-                  <p>
-                    <span className="font-bold">Line Code:</span> {selectedReport.lineCode}
-                  </p>
+                  {selectedReport.lineCode && (
+                    <p>
+                      <span className="font-bold">Line Code:</span> {selectedReport.lineCode}
+                    </p>
+                  )}
+                  {selectedReport.customer && (
+                    <p>
+                      <span className="font-bold">Customer:</span> {selectedReport.customer}
+                    </p>
+                  )}
+                  {selectedReport.partNo && (
+                    <p>
+                      <span className="font-bold">Part No:</span> {selectedReport.partNo}
+                    </p>
+                  )}
                   <p>
                     <span className="font-bold">Part Details:</span> {selectedReport.partName || "N/A"}
                   </p>

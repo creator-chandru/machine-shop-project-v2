@@ -3,7 +3,8 @@ import { useParams } from "react-router-dom";
 import Header from "../components/Header";
 import EditPartMapping from "../components/EditPartMapping";
 import JobSetupMasterConfigurator from "../components/jobSetupMasterConfigurator";
-import { RefreshCw, Loader, X, ClipboardList, Settings2 } from "lucide-react";
+import AddPartSetModal from "../components/AddPartSetModal.jsx";
+import { RefreshCw, Loader, X, ClipboardList, Settings2, Layers, ChevronRight } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -15,6 +16,7 @@ const Hod = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isAddPartSetOpen, setIsAddPartSetOpen] = useState(false);
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentHOD = currentUser.username || currentUser.employeeId || "HOD";
@@ -107,7 +109,7 @@ const Hod = () => {
     <div className="min-h-screen w-full bg-[#2d2d2d] font-sans pb-10">
       <Header />
       <ToastContainer position="top-right" autoClose={2000} />
-      <div className="p-8 max-w-7xl mx-auto">
+      <div className="p-8 max-w-7xl mx-auto space-y-8">
 
         <h1 className="text-3xl font-black text-white tracking-widest uppercase text-center mb-2">
           HOD Dashboard
@@ -115,15 +117,15 @@ const Hod = () => {
         <p className="text-gray-400 text-center mb-8">Managing Machine Shop - {shopId}</p>
 
         {/* Pending Reports Section */}
-        <div className="bg-white rounded-xl shadow-2xl p-8 mb-8 border-t-4 border-indigo-500">
-          <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 border-t-4 border-indigo-500">
+          <div className="flex justify-between items-center mb-6 border-b pb-4 flex-wrap gap-4">
             <div>
               <h2 className="text-xl font-bold text-gray-800">
                 {activeTab === "four-m" ? "Pending 4M Checksheets" : "Set Job Verification Set Up"}
               </h2>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={fetchPendingReports} className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh">
+              <button onClick={fetchPendingReports} className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer" title="Refresh">
                 <RefreshCw className="w-5 h-5" />
               </button>
               <span className="bg-indigo-100 text-indigo-800 px-4 py-2 rounded font-bold uppercase shadow-sm">
@@ -187,7 +189,7 @@ const Hod = () => {
                           <td className="p-3 border border-gray-300 text-center">
                             <button
                               onClick={() => handleOpenReviewModal(report)}
-                              className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors"
+                              className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors cursor-pointer"
                             >
                               Review & Verify
                             </button>
@@ -204,13 +206,47 @@ const Hod = () => {
           {activeTab === "job-setup-master" && <JobSetupMasterConfigurator shopId={shopId} />}
         </div>
 
-        {/* Existing Part Mapping Component */}
-        <div className="bg-white rounded-xl shadow-2xl p-8 border-t-4 border-gray-500">
+        {/* Existing Part Mapping & Add Part Sets Section */}
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl shadow-2xl p-8 border-t-4 border-gray-500">
             <h2 className="text-xl font-bold text-gray-800 mb-6 border-b pb-4">Line & Part Mappings</h2>
             <EditPartMapping shopId={shopId} />
+          </div>
+
+          {/* Add Part Sets Action Card */}
+          <button
+            type="button"
+            onClick={() => setIsAddPartSetOpen(true)}
+            className="w-full group relative flex items-center justify-between p-6 bg-[#383838] border border-[#4a4a4a] rounded-2xl shadow-[0_8px_20px_rgba(0,0,0,0.3)] hover:border-transparent hover:bg-gradient-to-r hover:from-[#ff9100] hover:to-[#e68200] hover:shadow-[0_12px_28px_rgba(255,145,0,0.3)] hover:-translate-y-1 active:translate-y-0 transition-all duration-300 ease-out cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-5">
+              <div className="p-4 bg-[#2d2d2d] group-hover:bg-white/20 rounded-xl border border-[#4a4a4a] group-hover:border-white/30 shadow-inner transition-colors duration-300">
+                <Layers className="w-7 h-7 text-[#ff9100] group-hover:text-white transition-colors duration-300" strokeWidth={2.2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                  Add Part Sets
+                </h3>
+                <p className="text-xs text-gray-400 group-hover:text-white/90 font-medium transition-colors">
+                  Create and register new Part IDs and Part Names for Machine Shop - {shopId || 3}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-full bg-white/5 group-hover:bg-white/20 transition-colors">
+              <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-white group-hover:translate-x-1 transition-all" />
+            </div>
+          </button>
         </div>
 
       </div>
+
+      {/* Add Part Set Modal */}
+      <AddPartSetModal
+        isOpen={isAddPartSetOpen}
+        onClose={() => setIsAddPartSetOpen(false)}
+        defaultShopId={shopId || "3"}
+      />
 
       {/* FULL-SCREEN SPLIT MODAL FOR REVIEW */}
       {selectedReport && (
@@ -219,7 +255,7 @@ const Hod = () => {
             <h3 className="font-bold text-xl uppercase tracking-wider">
               Verify 4M Checksheet
             </h3>
-            <button onClick={() => { setSelectedReport(null); setPdfUrl(null); }} className="text-gray-400 hover:text-red-400 transition-colors">
+            <button onClick={() => { setSelectedReport(null); setPdfUrl(null); }} className="text-gray-400 hover:text-red-400 transition-colors cursor-pointer">
               <X size={28} />
             </button>
           </div>
@@ -238,7 +274,7 @@ const Hod = () => {
                 </div>
 
                 <div className="mt-auto">
-                  <button onClick={submitHODSignature} className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1">
+                  <button onClick={submitHODSignature} className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1 cursor-pointer">
                     Verify & Approve
                   </button>
                 </div>

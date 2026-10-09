@@ -3,7 +3,19 @@ import { useParams } from "react-router-dom";
 import Header from "../components/Header";
 import EditPartMapping from "../components/EditPartMapping";
 import JobSetupMasterConfigurator from "../components/jobSetupMasterConfigurator.jsx";
-import { RefreshCw, Loader, X, FileSpreadsheet, FileText, FileSearch, ClipboardCheck, Settings2 } from "lucide-react";
+import AddPartSetModal from "../components/AddPartSetModal.jsx";
+import { 
+  RefreshCw, 
+  Loader, 
+  X, 
+  FileSpreadsheet, 
+  FileText, 
+  FileSearch, 
+  ClipboardCheck, 
+  Settings2, 
+  Layers, 
+  ChevronRight 
+} from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -18,6 +30,7 @@ const Hof = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isAddPartSetOpen, setIsAddPartSetOpen] = useState(false);
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentHOF = currentUser.username || currentUser.employeeId || "hof";
@@ -271,7 +284,7 @@ const Hof = () => {
 
         {/* Pending Approvals Table Card */}
         <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-2xl p-8 border-t-4 border-orange-500">
-          <div className="flex justify-between items-center mb-6 border-b pb-4">
+          <div className="flex justify-between items-center mb-6 border-b pb-4 flex-wrap gap-4">
             <div>
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 HOF Verification Dashboard
@@ -280,6 +293,7 @@ const Hof = () => {
                 Machine Shop-{shopId || 3} Approvals
               </p>
             </div>
+            
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -657,10 +671,42 @@ const Hof = () => {
         </div>
 
         {/* Existing Part Mapping Component */}
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-6xl mx-auto space-y-4">
           <EditPartMapping shopId={shopId} />
+
+          {/* Add Part Sets Action (Styled Exactly like EditPartMapping Button) */}
+          <button
+            type="button"
+            onClick={() => setIsAddPartSetOpen(true)}
+            className="w-full group relative flex items-center justify-between p-6 bg-[#383838] border border-[#4a4a4a] rounded-2xl shadow-[0_8px_20px_rgba(0,0,0,0.3)] hover:border-transparent hover:bg-gradient-to-r hover:from-[#ff9100] hover:to-[#e68200] hover:shadow-[0_12px_28px_rgba(255,145,0,0.3)] hover:-translate-y-1 active:translate-y-0 transition-all duration-300 ease-out cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-5">
+              <div className="p-4 bg-[#2d2d2d] group-hover:bg-white/20 rounded-xl border border-[#4a4a4a] group-hover:border-white/30 shadow-inner transition-colors duration-300">
+                <Layers className="w-7 h-7 text-[#ff9100] group-hover:text-white transition-colors duration-300" strokeWidth={2.2} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                  Add Part Sets
+                </h3>
+                <p className="text-xs text-gray-400 group-hover:text-white/90 font-medium transition-colors">
+                  Create and register new Part IDs and Part Names for Machine Shop - {shopId || 3}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-full bg-white/5 group-hover:bg-white/20 transition-colors">
+              <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-white group-hover:translate-x-1 transition-all" />
+            </div>
+          </button>
         </div>
       </div>
+
+      {/* Add Part Set Modal */}
+      <AddPartSetModal
+        isOpen={isAddPartSetOpen}
+        onClose={() => setIsAddPartSetOpen(false)}
+        defaultShopId={shopId || "3"}
+      />
 
       {/* FULL-SCREEN SPLIT REVIEW MODAL */}
       {selectedReport && (

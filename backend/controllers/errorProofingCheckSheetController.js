@@ -249,8 +249,8 @@ const generateErrorProofingReport = async (req, res) => {
 
         doc.font("Helvetica").fontSize(7.5).fillColor('black')
            .text(`PART NO: ${first.partNo || '-'}`, rightX + rightPad, headerY + 25, { 
-               width: textW,
-               ellipsis: true
+               width: textW, 
+               ellipsis: true 
            });
 
         doc.font("Helvetica").fontSize(7.5).fillColor('black')
@@ -324,6 +324,16 @@ const generateErrorProofingReport = async (req, res) => {
 
         const sigColWidth = totalWidth / 2;
 
+        // Helper formatter for signature text
+        const formatSigText = (sig) => {
+            if (!sig) return "";
+            const trimmed = String(sig).trim();
+            if (trimmed.toUpperCase() === "APPROVED") {
+                return "APPROVED";
+            }
+            return `APPROVED (${trimmed.toUpperCase()})`;
+        };
+
         // Operator Signature
         doc.lineWidth(0.5).strokeColor('black');
         doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Operator Signature", startX, sigY, { width: sigColWidth - 10, align: "center" });
@@ -331,7 +341,7 @@ const generateErrorProofingReport = async (req, res) => {
         const opSig = first.operatorSignature;
         if (opSig) {
             doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(startX + 20, sigY + 26).lineTo(startX + 24, sigY + 31).lineTo(startX + 30, sigY + 20).stroke();
-            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(opSig).toUpperCase()})`, startX + 34, sigY + 22);
+            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(formatSigText(opSig), startX + 34, sigY + 22);
         } else {
             doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", startX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
         }
@@ -344,7 +354,7 @@ const generateErrorProofingReport = async (req, res) => {
         const incSig = first.shiftInchargeSignature;
         if (incSig) {
             doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(inchargeX + 20, sigY + 26).lineTo(inchargeX + 24, sigY + 31).lineTo(inchargeX + 30, sigY + 20).stroke();
-            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(incSig).toUpperCase()})`, inchargeX + 34, sigY + 22);
+            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(formatSigText(incSig), inchargeX + 34, sigY + 22);
         } else {
             doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", inchargeX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
         }

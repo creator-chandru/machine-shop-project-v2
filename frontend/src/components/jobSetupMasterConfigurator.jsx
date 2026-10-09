@@ -14,6 +14,8 @@ export default function JobSetupMasterConfigurator({ shopId }) {
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "";
 
+  const [partSets, setPartSets] = useState([]);
+  const [loadingParts, setLoadingParts] = useState(true);
   const [machineDetails, setMachineDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [masters, setMasters] = useState([]);
@@ -28,14 +30,18 @@ export default function JobSetupMasterConfigurator({ shopId }) {
 
   const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 
-  // Same part list the shift incharge form uses
+  // Derive distinct Part Names from M{shopId}PartSets (fallback to legacy if empty)
   const partOptions = Array.from(
-    new Set([
-      ...machineDetails.map((m) => m.partName).filter(Boolean),
-      ...lineMappings.map((m) => m.partSet).filter(Boolean),
-      "KNUCKLE - STRG, FR LH/RH(XBA MY19)",
-      "PIVOT SUSPENSION GOA CC21 (078) LH/RH",
-    ])
+    new Set(
+      partSets.length > 0
+        ? partSets.map((p) => p.partName).filter(Boolean)
+        : [
+            ...machineDetails.map((m) => m.partName).filter(Boolean),
+            ...lineMappings.map((m) => m.partSet).filter(Boolean),
+            "KNUCKLE - STRG, FR LH/RH(XBA MY19)",
+            "PIVOT SUSPENSION GOA CC21 (078) LH/RH",
+          ]
+    )
   );
 
   const fetchMasters = async () => {
@@ -53,6 +59,18 @@ export default function JobSetupMasterConfigurator({ shopId }) {
   useEffect(() => {
     const load = async () => {
       try {
+        setLoadingParts(true);
+        const currentShop = shopId || "3";
+
+        // Fetch from dynamic M{shopId}PartSets endpoint
+        const partRes = await fetch(`${API}/api/job-setup-verification/parts/${currentShop}`, {
+          headers: authHeaders(),
+        }).catch(() => null);
+        if (partRes && partRes.ok) {
+          const partData = await partRes.json();
+          setPartSets(Array.isArray(partData) ? partData : []);
+        }
+
         if (shopId) {
           const res = await fetch(`${API}/api/machine-shop/${shopId}/details`, { headers: authHeaders() }).catch(() => null);
           if (res && res.ok) setMachineDetails((await res.json()) || []);
@@ -61,6 +79,8 @@ export default function JobSetupMasterConfigurator({ shopId }) {
         }
       } catch (e) {
         /* ignore */
+      } finally {
+        setLoadingParts(false);
       }
     };
     load();
@@ -145,9 +165,10 @@ export default function JobSetupMasterConfigurator({ shopId }) {
       return;
     }
 
-    const matched = machineDetails.find((m) => m.partName === partName);
+    const matchedPartSet = partSets.find((p) => p.partName === partName);
+    const matchedMachine = machineDetails.find((m) => m.partName === partName);
     const mappingMatch = lineMappings.find((m) => m.partSet === partName);
-    const partNo = matched?.partNo || mappingMatch?.idSet || "";
+    const partNo = matchedPartSet?.partId || matchedMachine?.partNo || mappingMatch?.idSet || "";
 
     setIsSaving(true);
     try {
@@ -187,7 +208,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
             value={partName}
             onChange={(e) => handlePartChange(e.target.value)}
           >
-            <option value="">-- Select Part Name --</option>
+            <option value="">{loadingParts ? "-- Loading Parts... --" : "-- Select Part Name --"}</option>
             {partOptions.map((p) => (
               <option key={p} value={p}>
                 {configuredNames.has(p) ? `✓ ${p}` : p}

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const {
+  getShopPartSets, // <-- added
   getControlSpecifications,
   listMasterSpecifications,
   saveControlSpecifications,
@@ -16,6 +17,9 @@ const {
   signHofProductionApproval,
   generatePdfReport,
 } = require("../controllers/jobSetupVerificationController");
+
+// Add route to get part sets for the shop
+router.get("/job-setup-verification/parts/:shopId", getShopPartSets);
 
 // NOTE: all static routes must be declared BEFORE "/job-setup-verification/:id"
 

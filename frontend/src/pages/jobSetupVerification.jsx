@@ -74,6 +74,7 @@ export default function JobSetupVerification() {
   const [toast, setToast] = useState({ message: "", type: "" });
 
   // Master Data Dropdowns
+  const [partSets, setPartSets] = useState([]);
   const [machineDetails, setMachineDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [loadingMasterData, setLoadingMasterData] = useState(true);
@@ -143,7 +144,6 @@ export default function JobSetupVerification() {
     rowsRef.current = rows;
   }, [rows]);
 
-  // Fetch Master Data (Parts, Mappings, Approvers)
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -151,6 +151,13 @@ export default function JobSetupVerification() {
         const headers = { Authorization: `Bearer ${token}` };
 
         if (shopId) {
+          // Fetch from M{shopId}PartSets endpoint
+          const partRes = await fetch(`${API}/api/job-setup-verification/parts/${shopId}`, { headers }).catch(() => null);
+          if (partRes && partRes.ok) {
+            const partData = await partRes.json();
+            setPartSets(partData || []);
+          }
+
           const res = await fetch(`${API}/api/machine-shop/${shopId}/details`, { headers }).catch(() => null);
           if (res && res.ok) {
             const data = await res.json();
@@ -198,16 +205,17 @@ export default function JobSetupVerification() {
     fetchData();
   }, [shopId]);
 
-  // Derive distinct Part Names from master data or line mappings
+// Derive distinct Part Names from M{shopId}PartSets
   const partOptions = Array.from(
-    new Set([
-      ...machineDetails.map((m) => m.partName).filter(Boolean),
-      ...lineMappings.map((m) => m.partSet).filter(Boolean),
-      "KNUCKLE - STRG, FR LH/RH(XBA MY19)",
-      "PIVOT SUSPENSION GOA CC21 (078) LH/RH",
-    ])
+    new Set(
+      partSets.length > 0
+        ? partSets.map((p) => p.partName).filter(Boolean)
+        : [
+            ...machineDetails.map((m) => m.partName).filter(Boolean),
+            ...lineMappings.map((m) => m.partSet).filter(Boolean)
+          ]
+    )
   );
-
   const operationOptions = [
     "OP-010",
     "OP-020",
@@ -390,9 +398,12 @@ export default function JobSetupVerification() {
   };
 
   // Part change
+  // Part change
   const handlePartNameChange = (val) => {
-    const matched = machineDetails.find((m) => m.partName === val);
-    const partNoVal = matched?.partNo || "";
+    const matchedPartSet = partSets.find((p) => p.partName === val);
+    const matchedMachine = machineDetails.find((m) => m.partName === val);
+    const partNoVal = matchedPartSet?.partId || matchedMachine?.partNo || "";
+
     setForm((prev) => ({ ...prev, partName: val, partNo: partNoVal }));
     if (setLineSet) {
       setLineSet((prev) => ({ ...prev, partName: val, partNo: partNoVal }));

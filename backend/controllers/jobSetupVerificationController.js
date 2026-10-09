@@ -667,6 +667,46 @@ const generatePdfReport = async (req, res) => {
   }
 };
 
+
+// ============================================================
+// GET PART SETS DYNAMICALLY BY SHOP ID: dbo.[M{shopId}PartSets]
+// ============================================================
+const getShopPartSets = async (req, res) => {
+  const { shopId } = req.params;
+
+  // Sanitize shopId so it only contains alphanumeric characters (e.g., "3", "1", "2")
+  const shopIdClean = String(shopId || "3").replace(/[^a-zA-Z0-9]/g, "");
+  const tableName = `M${shopIdClean}PartSets`;
+
+  try {
+    const request = new sql.Request();
+    request.input("tblName", sql.NVarChar(128), tableName);
+
+    // Verify table existence first to prevent SQL errors if the table hasn't been created yet
+    const tableCheck = await request.query(`
+      SELECT TABLE_NAME 
+      FROM INFORMATION_SCHEMA.TABLES 
+      WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @tblName
+    `);
+
+    if (tableCheck.recordset.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    const result = await new sql.Request().query(`
+      SELECT DISTINCT partId, partName
+      FROM dbo.[${tableName}]
+      WHERE partName IS NOT NULL AND LTRIM(RTRIM(partName)) <> ''
+      ORDER BY partName ASC
+    `);
+
+    return res.status(200).json(result.recordset);
+  } catch (err) {
+    console.error(`Error fetching parts from ${tableName}:`, err);
+    return res.status(500).json({ error: `Failed to fetch parts from ${tableName}` });
+  }
+};
+
 module.exports = {
   getControlSpecifications,
   listMasterSpecifications,
@@ -682,4 +722,5 @@ module.exports = {
   signHofInspectionApproval,
   signHofProductionApproval,
   generatePdfReport,
+  getShopPartSets
 };

@@ -50,7 +50,8 @@ const ShiftIncharge = () => {
     //{ name: "Jig / Fixture Issue Intimation Report", path: `/shift-incharge/${shopId}/jig-fixture-intimation-report`, icon: Wrench },
     { name: "8D Problem Solving Report", path:`/shift-incharge/${shopId}/8d-problem-solving-report`, icon: Clock},
     { name: "Operator Allotment", path:`/shift-incharge/${shopId}/operator-allotment`, icon: ClipboardCheck },
-    { name: "Job Setup Verification", path:`/shift-incharge/${shopId}/job-setup-verification`, icon: ShieldCheck}
+    { name: "Job Setup Verification", path:`/shift-incharge/${shopId}/job-setup-verification`, icon: ShieldCheck},
+    {name:"competency-exam" , path:`/shift-incharge/${shopId}/competency-exam`, icon: ShieldCheck}
   ];
 
   return (

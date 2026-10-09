@@ -18,6 +18,7 @@ import JigFixtureIssueIntimation from "./jig_fixture_intimation_report";
 import EightDProblemSolvingReport from "./8DProblemSolvingReport";
 import OperatorAllotment from "./OperationAllotment";
 import JobSetupVerification from "./jobSetupVerification.jsx";
+import CompetencyExam from "./CompetencyExam.jsx";
 /**
  * Central map for operator forms
  *
@@ -55,7 +56,8 @@ const formMap = {
    "jig-fixture-intimation-report":<JigFixtureIssueIntimation/>,
    "8d-problem-solving-report":<EightDProblemSolvingReport />,
     "operator-allotment":<OperatorAllotment />,
-    "job-setup-verification" : <JobSetupVerification />
+    "job-setup-verification" : <JobSetupVerification />,
+    "competency-exam" : <CompetencyExam />
   // Future forms:
   // "some-form": <SomeForm />,
 };

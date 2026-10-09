@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
-import { ArrowLeft, FileDown, Save } from "lucide-react";
+import { ArrowLeft, FileDown, Save, Plus, Trash2 } from "lucide-react";
 import Header from "../components/Header";
 
 const API = process.env.REACT_APP_API_URL || "";
@@ -32,11 +32,27 @@ const REASONS = [
   "Every 3 months JSV to be done for continuous running line",
 ];
 
-// keeps disabled (locked) fields readable
+const SPECIAL_CHARS = ["Ø", "±", "°", "×", "≤", "≥", "⌀", "⊥", "∥", "√", "Ra", "~", "'", '"', "µm", "R", "C"];
+
 const lockedTextCls =
   "[&_input:disabled]:text-gray-900 [&_select:disabled]:text-gray-900 [&_textarea:disabled]:text-gray-900";
 
 const emptySignatures = { inspector: "", shiftIncharge: "", hofInspection: "", hofProduction: "" };
+
+const createEmptyInspectionRow = (slNo = 1) => ({
+  slNo,
+  controlName: "",
+  specification: "",
+  LH1: "",
+  RH1: "",
+  LH2: "",
+  RH2: "",
+  LH3: "",
+  RH3: "",
+  status: "OK",
+  remarks: "",
+  isExisting: false,
+});
 
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
@@ -87,21 +103,28 @@ export default function JobSetupVerification() {
   const isSavedRef = useRef(false);
   const rowsRef = useRef([]);
   const lookupSeqRef = useRef(0);
+  const activeFieldRef = useRef({ idx: null, field: null, element: null });
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
     setTimeout(() => setToast({ message: "", type: "" }), 4000);
   };
 
-  const buildFreshForm = ({ partName = "", partNo = "", date = getTodayISODate() } = {}) => ({
+  const buildFreshForm = ({
+    partName = "",
+    partNo = "",
+    date = getTodayISODate(),
+    shift = "1st",
+    operationNo = "",
+  } = {}) => ({
     id: null,
     machineShop: shopId || "3",
     partName,
     partNo,
-    operationNo: "",
+    operationNo,
     operationDescription: "",
     date,
-    shift: "1st",
+    shift,
     setterName: isShiftIncharge && currentUsername !== "Unknown" ? currentUsername : "",
     selectedReasons: ["Item change"],
     settingStartedAt: "",
@@ -130,7 +153,7 @@ export default function JobSetupVerification() {
   // 1. Basic Form Information
   const [form, setForm] = useState(() => buildFreshForm());
 
-  // 2. Inspection rows - ONLY loaded from the master (control + specification); no add / delete
+  // 2. Inspection rows
   const [rows, setRows] = useState([]);
 
   // 3. Signatures State
@@ -151,7 +174,6 @@ export default function JobSetupVerification() {
         const headers = { Authorization: `Bearer ${token}` };
 
         if (shopId) {
-          // Fetch from M{shopId}PartSets endpoint
           const partRes = await fetch(`${API}/api/job-setup-verification/parts/${shopId}`, { headers }).catch(() => null);
           if (partRes && partRes.ok) {
             const partData = await partRes.json();
@@ -205,17 +227,17 @@ export default function JobSetupVerification() {
     fetchData();
   }, [shopId]);
 
-// Derive distinct Part Names from M{shopId}PartSets
   const partOptions = Array.from(
     new Set(
       partSets.length > 0
         ? partSets.map((p) => p.partName).filter(Boolean)
         : [
             ...machineDetails.map((m) => m.partName).filter(Boolean),
-            ...lineMappings.map((m) => m.partSet).filter(Boolean)
+            ...lineMappings.map((m) => m.partSet).filter(Boolean),
           ]
     )
   );
+
   const operationOptions = [
     "OP-010",
     "OP-020",
@@ -303,7 +325,9 @@ export default function JobSetupVerification() {
           typeof record.ActualInspectionData === "string"
             ? JSON.parse(record.ActualInspectionData)
             : record.ActualInspectionData;
-        if (Array.isArray(parsed)) setRows(parsed);
+        if (Array.isArray(parsed)) {
+          setRows(parsed.map((r, i) => ({ ...r, slNo: i + 1, isExisting: true })));
+        }
       } catch (e) {}
     }
 
@@ -315,7 +339,7 @@ export default function JobSetupVerification() {
     });
   };
 
-  // Load the master Control + Specification rows for a part (by part name only)
+  // Load the master Control + Specification rows for a part (strictly by part name)
   const fetchControlSpecifications = async (partName, seq) => {
     if (!partName) {
       setRows([]);
@@ -332,26 +356,29 @@ export default function JobSetupVerification() {
       if (res.ok) {
         const data = await res.json();
         const specs = Array.isArray(data.specifications) ? data.specifications : [];
-        setRows(
-          specs.map((spec, idx) => ({
-            slNo: idx + 1,
-            controlName: spec.controlName || "",
-            specification: spec.specification || "",
-            LH1: "",
-            RH1: "",
-            LH2: "",
-            RH2: "",
-            LH3: "",
-            RH3: "",
-            status: "OK",
-            remarks: "",
-          }))
-        );
-        setSpecsMissing(specs.length === 0);
         if (specs.length > 0) {
+          setRows(
+            specs.map((spec, idx) => ({
+              slNo: idx + 1,
+              controlName: spec.controlName || "",
+              specification: spec.specification || "",
+              LH1: "",
+              RH1: "",
+              LH2: "",
+              RH2: "",
+              LH3: "",
+              RH3: "",
+              status: "OK",
+              remarks: "",
+              isExisting: true,
+            }))
+          );
+          setSpecsMissing(false);
           triggerToast(`Loaded ${specs.length} Control Specifications.`, "success");
         } else {
-          triggerToast("No control specifications are set for this part. Ask HOD / HOF to set them up.", "info");
+          setRows([createEmptyInspectionRow(1)]);
+          setSpecsMissing(true);
+          triggerToast("No pre-configured specifications. You can add them below.", "info");
         }
       }
     } catch (err) {
@@ -359,17 +386,25 @@ export default function JobSetupVerification() {
     }
   };
 
-  // Look for a filled record for part + date. Found -> locked. Not found -> fresh form.
-  const loadSelection = async (partName, partNo, date, forceSpecs = false) => {
+  // Look for a filled record for part + date + shift + operationNo.
+  // Specifications for the Part Name remain loaded when switching forms.
+  const loadSelection = async (partName, partNo, date, shift, operationNo, forceSpecs = false) => {
     if (!partName || !date) return;
     const seq = ++lookupSeqRef.current;
     let record = null;
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(
-        `${API}/api/job-setup-verification/record?partName=${encodeURIComponent(partName)}&date=${encodeURIComponent(date)}&shopId=${shopId || 3}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const params = new URLSearchParams({
+        partName,
+        date,
+        shopId: String(shopId || 3),
+      });
+      if (shift) params.append("shift", shift);
+      if (operationNo) params.append("operationNo", operationNo);
+
+      const res = await fetch(`${API}/api/job-setup-verification/record?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (res.ok) {
         const data = await res.json();
         record = data.record || null;
@@ -384,20 +419,33 @@ export default function JobSetupVerification() {
       return;
     }
 
-    const wasSaved = isSavedRef.current;
-    if (wasSaved) {
-      setForm(buildFreshForm({ partName, partNo, date }));
-      setSignatures(emptySignatures);
-    }
+    // Record does not exist: show fresh form while keeping specs loaded
+    setForm(buildFreshForm({ partName, partNo, date, shift, operationNo }));
+    setSignatures(emptySignatures);
     setIsSavedRecord(false);
     setSaveSuccess(false);
 
-    if (forceSpecs || wasSaved || rowsRef.current.length === 0) {
+    if (forceSpecs || isSavedRef.current || rowsRef.current.length === 0) {
       await fetchControlSpecifications(partName, seq);
+    } else {
+      // Clear inspection measurements while preserving control specs
+      setRows((prev) =>
+        prev.map((r, i) => ({
+          ...r,
+          slNo: i + 1,
+          LH1: "",
+          RH1: "",
+          LH2: "",
+          RH2: "",
+          LH3: "",
+          RH3: "",
+          status: "OK",
+          remarks: "",
+        }))
+      );
     }
   };
 
-  // Part change
   // Part change
   const handlePartNameChange = (val) => {
     const matchedPartSet = partSets.find((p) => p.partName === val);
@@ -412,26 +460,39 @@ export default function JobSetupVerification() {
       lookupSeqRef.current += 1;
       setRows([]);
       setSpecsMissing(false);
-      if (isSavedRef.current) {
-        setForm(buildFreshForm({ partName: "", partNo: "", date: form.date }));
-        setSignatures(emptySignatures);
-        setIsSavedRecord(false);
-        setSaveSuccess(false);
-      }
+      setForm(buildFreshForm({ partName: "", partNo: "", date: form.date, shift: form.shift, operationNo: form.operationNo }));
+      setSignatures(emptySignatures);
+      setIsSavedRecord(false);
+      setSaveSuccess(false);
       return;
     }
-    loadSelection(val, partNoVal, form.date, true);
+    loadSelection(val, partNoVal, form.date, form.shift, form.operationNo, true);
   };
 
   // Date change
   const handleDateChange = (val) => {
     setForm((prev) => ({ ...prev, date: val }));
     if (form.partName && val) {
-      loadSelection(form.partName, form.partNo, val, false);
+      loadSelection(form.partName, form.partNo, val, form.shift, form.operationNo, false);
     }
   };
 
-  // Sync with LineSetContext if active (initial part selection)
+  // Shift change: updates the form state and queries record, keeping control specs unchanged
+  const handleShiftChange = (val) => {
+    setForm((prev) => ({ ...prev, shift: val }));
+    if (form.partName && form.date) {
+      loadSelection(form.partName, form.partNo, form.date, val, form.operationNo, false);
+    }
+  };
+
+  // Operation No change: updates the form state and queries record, keeping control specs unchanged
+  const handleOperationNoChange = (val) => {
+    setForm((prev) => ({ ...prev, operationNo: val }));
+    if (form.partName && form.date) {
+      loadSelection(form.partName, form.partNo, form.date, form.shift, val, false);
+    }
+  };
+
   useEffect(() => {
     if (lineSet?.partName && !form.partName) {
       setForm((prev) => ({
@@ -439,19 +500,22 @@ export default function JobSetupVerification() {
         partName: lineSet.partName || prev.partName,
         partNo: lineSet.partNo || prev.partNo,
       }));
-      loadSelection(lineSet.partName, lineSet.partNo || "", form.date, true);
+      loadSelection(lineSet.partName, lineSet.partNo || "", form.date, form.shift, form.operationNo, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineSet]);
 
-  // URL params lookup
   useEffect(() => {
     const qPart = searchParams.get("partName");
     const qDate = searchParams.get("date");
+    const qShift = searchParams.get("shift");
+    const qOp = searchParams.get("operationNo");
     if (qPart) {
       const dateVal = qDate || getTodayISODate();
-      setForm((prev) => ({ ...prev, partName: qPart, date: dateVal }));
-      loadSelection(qPart, "", dateVal, true);
+      const shiftVal = qShift || "1st";
+      const opVal = qOp || "";
+      setForm((prev) => ({ ...prev, partName: qPart, date: dateVal, shift: shiftVal, operationNo: opVal }));
+      loadSelection(qPart, "", dateVal, shiftVal, opVal, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -461,6 +525,41 @@ export default function JobSetupVerification() {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: val } : r)));
   };
 
+  const insertSymbol = (e, char) => {
+    e.preventDefault();
+    if (isSavedRecord) return;
+    const { idx, field, element } = activeFieldRef.current;
+    if (idx === null || !field) {
+      triggerToast("Click on a field in the inspection table first to insert a symbol.", "info");
+      return;
+    }
+    const cur = rows[idx]?.[field] || "";
+    const start = element && typeof element.selectionStart === "number" ? element.selectionStart : cur.length;
+    const end = element && typeof element.selectionEnd === "number" ? element.selectionEnd : cur.length;
+    const next = cur.slice(0, start) + char + cur.slice(end);
+    updateRow(idx, field, next);
+
+    setTimeout(() => {
+      if (element) {
+        element.focus();
+        element.setSelectionRange(start + char.length, start + char.length);
+      }
+    }, 0);
+  };
+
+  const handleAddRow = () => {
+    if (isSavedRecord) return;
+    setRows((prev) => [...prev, createEmptyInspectionRow(prev.length + 1)]);
+  };
+
+  const handleDeleteRow = (idx) => {
+    if (isSavedRecord) return;
+    setRows((prev) => {
+      const updated = prev.filter((_, i) => i !== idx);
+      return updated.map((r, i) => ({ ...r, slNo: i + 1 }));
+    });
+  };
+
   // PDF Download Handler
   const handleDownloadPdf = async () => {
     if (!form.partName || !form.date) {
@@ -468,7 +567,7 @@ export default function JobSetupVerification() {
       return;
     }
     if (!isSavedRecord) {
-      triggerToast("No saved record found for this part and date. Submit the form first to preview.", "error");
+      triggerToast("No saved record found for this setup. Submit the form first to preview.", "error");
       return;
     }
 
@@ -478,6 +577,8 @@ export default function JobSetupVerification() {
         shopId: String(shopId || 3),
         partName: form.partName,
         date: form.date,
+        shift: form.shift,
+        operationNo: form.operationNo,
       });
 
       const res = await fetch(`${API}/api/job-setup-verification/report?${params.toString()}`, {
@@ -490,7 +591,7 @@ export default function JobSetupVerification() {
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `Job_Setup_Verification_${form.partName}_${form.date}.pdf`;
+      link.download = `Job_Setup_Verification_${form.partName}_${form.date}_${form.shift}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -503,18 +604,35 @@ export default function JobSetupVerification() {
     }
   };
 
-  // Shift Incharge signs directly
+  // Shift Incharge signs directly - with validation checks
   const handleApproveShiftIncharge = () => {
     if (isSavedRecord) return;
     if (!isShiftIncharge) {
       triggerToast("Only Shift Incharge can approve this.", "error");
       return;
     }
+    if (!form.partName) {
+      triggerToast("Please select Part Name before approving.", "error");
+      return;
+    }
+    if (!form.date) {
+      triggerToast("Please select Date before approving.", "error");
+      return;
+    }
+    if (!form.shift) {
+      triggerToast("Please select Shift before approving.", "error");
+      return;
+    }
+    if (!form.operationNo) {
+      triggerToast("Please select Operation No before approving.", "error");
+      return;
+    }
+
     setSignatures((prev) => ({ ...prev, shiftIncharge: currentUsername }));
     triggerToast("Shift Incharge Approved!", "success");
   };
 
-  // Save Verification Record
+  // Save Verification Record - with complete validations
   const handleSaveVerification = async () => {
     if (isSavedRecord) return;
 
@@ -522,14 +640,29 @@ export default function JobSetupVerification() {
       triggerToast("Please select a Part Name.", "error");
       return;
     }
+    if (!form.date) {
+      triggerToast("Please select a Date.", "error");
+      return;
+    }
+    if (!form.shift) {
+      triggerToast("Please select a Shift.", "error");
+      return;
+    }
+    if (!form.operationNo) {
+      triggerToast("Please select an Operation No.", "error");
+      return;
+    }
     if (!isShiftIncharge) {
       triggerToast("Only Shift Incharge can submit this record.", "error");
       return;
     }
-    if (rows.length === 0) {
-      triggerToast("No control specifications are set for this part. Ask HOD / HOF to set them up.", "error");
+
+    const validRows = rows.filter((r) => r.controlName.trim() || r.specification.trim());
+    if (validRows.length === 0) {
+      triggerToast("Please add at least one Control Specification.", "error");
       return;
     }
+
     if (!signatures.shiftIncharge) {
       triggerToast("Please click 'Approve Incharge' under SHIFT INCHARGE before submitting.", "error");
       return;
@@ -552,13 +685,14 @@ export default function JobSetupVerification() {
 
     const payload = {
       ...form,
+      username: currentUsername,
       machineShop: shopId || "3",
       reasonForSetup: form.selectedReasons.join(","),
-      actualInspectionData: rows,
-      controlSpecifications: rows.map((r) => ({
-        slNo: r.slNo,
-        controlName: r.controlName,
-        specification: r.specification,
+      actualInspectionData: validRows.map((r, i) => ({ ...r, slNo: i + 1 })),
+      controlSpecifications: validRows.map((r, i) => ({
+        slNo: i + 1,
+        controlName: r.controlName.trim(),
+        specification: r.specification.trim(),
       })),
       signatures: {
         shiftIncharge: signatures.shiftIncharge,
@@ -581,8 +715,7 @@ export default function JobSetupVerification() {
         setIsSaving(false);
         triggerToast(errBody.error || "Save operation failed", "error");
         if (res.status === 409) {
-          // someone already filled this part + date -> show the locked record
-          loadSelection(form.partName, form.partNo, form.date, false);
+          loadSelection(form.partName, form.partNo, form.date, form.shift, form.operationNo, false);
         }
         return;
       }
@@ -592,6 +725,7 @@ export default function JobSetupVerification() {
       setIsSaving(false);
       setSaveSuccess(true);
       setIsSavedRecord(true);
+      setRows(validRows.map((r, i) => ({ ...r, slNo: i + 1, isExisting: true })));
       setSignatures((prev) => ({
         ...prev,
         inspector: "Pending",
@@ -599,7 +733,7 @@ export default function JobSetupVerification() {
         hofProduction: "Pending",
       }));
       if (result.id) setForm((prev) => ({ ...prev, id: result.id }));
-      triggerToast("Job Setup Verification submitted for QC, HOF-INSPN & HOF approval!", "success");
+      triggerToast("Job Setup Verification submitted and Control Specifications updated!", "success");
     } catch (err) {
       setIsSaving(false);
       triggerToast(err.message || "Failed to save verification record", "error");
@@ -612,7 +746,6 @@ export default function JobSetupVerification() {
   const isHofInspectionApproved = isApproved(signatures.hofInspection);
   const isHofProductionApproved = isApproved(signatures.hofProduction);
 
-  // Shared cell for the three approver columns (approved / pending after save / dropdown before save)
   const renderApproverCell = ({ approved, signedBy, assigned, field, users, placeholder }) => {
     if (approved) {
       return (
@@ -738,8 +871,7 @@ export default function JobSetupVerification() {
         <div className="grid grid-cols-1 lg:grid-cols-2 border border-gray-800 text-xs rounded overflow-hidden">
           {/* Left Column: Job Information */}
           <div className="p-3.5 border-b lg:border-b-0 lg:border-r border-gray-800 space-y-2.5 bg-white">
-
-            {/* Part Name Dropdown (always selectable - switches the record) */}
+            {/* Part Name Dropdown (Always selectable) */}
             <div className="flex items-center">
               <label className="w-36 font-bold text-gray-800">Part Name:</label>
               <select
@@ -756,6 +888,7 @@ export default function JobSetupVerification() {
               </select>
             </div>
 
+            {/* Date / Shift (Always selectable to switch records) */}
             <div className="flex items-center gap-2">
               <label className="w-36 font-bold text-gray-800">Date / Shift:</label>
               <div className="flex-1 flex gap-2">
@@ -766,10 +899,9 @@ export default function JobSetupVerification() {
                   onChange={(e) => handleDateChange(e.target.value)}
                 />
                 <select
-                  className="border-b border-gray-400 p-1 font-bold bg-transparent outline-none w-28"
+                  className="border-b border-gray-400 p-1 font-bold bg-transparent outline-none w-28 cursor-pointer"
                   value={form.shift}
-                  disabled={isSavedRecord}
-                  onChange={(e) => setForm({ ...form, shift: e.target.value })}
+                  onChange={(e) => handleShiftChange(e.target.value)}
                 >
                   <option value="1st">1st Shift</option>
                   <option value="2nd">2nd Shift</option>
@@ -778,6 +910,26 @@ export default function JobSetupVerification() {
               </div>
             </div>
 
+            {/* Operation No Dropdown (Always selectable to switch records) */}
+            <div className="flex items-center">
+              <label className="w-36 font-bold text-gray-800">Operation No:</label>
+              <div className="flex-1 flex gap-2">
+                <select
+                  className="w-full border-b border-gray-400 p-1 font-bold text-orange-700 bg-white uppercase outline-none cursor-pointer"
+                  value={form.operationNo}
+                  onChange={(e) => handleOperationNoChange(e.target.value)}
+                >
+                  <option value="">-- Select Operation No --</option>
+                  {operationOptions.map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Locked fields once saved */}
             <fieldset disabled={isSavedRecord} className="space-y-2.5 min-w-0">
               <div className="flex items-center">
                 <label className="w-36 font-bold text-gray-800">Setter Name:</label>
@@ -788,25 +940,6 @@ export default function JobSetupVerification() {
                   value={form.setterName}
                   onChange={(e) => setForm({ ...form, setterName: e.target.value })}
                 />
-              </div>
-
-              {/* Operation No Dropdown */}
-              <div className="flex items-center">
-                <label className="w-36 font-bold text-gray-800">Operation No:</label>
-                <div className="flex-1 flex gap-2">
-                  <select
-                    className="w-full border-b border-gray-400 p-1 font-bold text-orange-700 bg-white uppercase outline-none cursor-pointer"
-                    value={form.operationNo}
-                    onChange={(e) => setForm({ ...form, operationNo: e.target.value })}
-                  >
-                    <option value="">-- Select Operation No --</option>
-                    {operationOptions.map((op) => (
-                      <option key={op} value={op}>
-                        {op}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
               <div className="flex items-start">
@@ -1011,32 +1144,63 @@ export default function JobSetupVerification() {
           ⚠️ Before setting change clear all the running items after completion of all operation from the hand.
         </div>
 
-        {/* SECTION 4: ACTUAL VALUES INSPECTION TABLE (rows come from the part's master specifications) */}
+        {/* SECTION 4: ACTUAL VALUES INSPECTION TABLE */}
         <div className="space-y-2">
+          {/* SPECIAL SYMBOLS TOOLBAR */}
+          {!isSavedRecord && (
+            <div className="bg-orange-50 border border-orange-200 p-2.5 rounded flex flex-wrap items-center gap-1.5 text-xs shadow-inner">
+              <span className="font-bold text-gray-800 mr-2 uppercase text-[11px]">
+                Insert Symbol:
+              </span>
+              {SPECIAL_CHARS.map((char) => (
+                <button
+                  key={char}
+                  type="button"
+                  onMouseDown={(e) => insertSymbol(e, char)}
+                  className="bg-white hover:bg-orange-500 hover:text-white border border-gray-300 rounded px-2.5 py-1 font-bold text-gray-800 shadow-sm transition-all cursor-pointer"
+                >
+                  {char}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex justify-between items-center px-1">
             <span className="font-black text-gray-900 uppercase text-xs">
               ACTUAL VALUES (Minimum two pieces required) — {rows.length} Rows
             </span>
-            {isSavedRecord && (
-              <span className="text-[11px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full uppercase">
-                Submitted · Locked
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {!isSavedRecord && form.partName && (
+                <button
+                  type="button"
+                  onClick={handleAddRow}
+                  className="flex items-center gap-1 bg-gray-800 hover:bg-gray-900 text-white px-2.5 py-1 rounded text-xs font-bold transition-all shadow cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Control Row
+                </button>
+              )}
+              {isSavedRecord && (
+                <span className="text-[11px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full uppercase">
+                  Submitted · Locked
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto max-h-[600px] border-2 border-gray-800 rounded">
             <fieldset disabled={isSavedRecord} className="min-w-0">
-              <table className="w-full border-collapse text-xs text-center min-w-[1250px]">
+              <table className="w-full border-collapse text-xs text-center min-w-[1300px]">
                 <thead className="sticky top-0 z-20 bg-gray-100 border-b-2 border-gray-800">
                   <tr className="font-bold text-gray-800">
                     <th rowSpan={2} className="border border-gray-800 p-2 w-[4%]">Sl.No</th>
                     <th rowSpan={2} className="border border-gray-800 p-2 w-[18%]">Control</th>
                     <th rowSpan={2} className="border border-gray-800 p-2 w-[22%]">Control Specification (Refer W.I)</th>
-                    <th colSpan={2} className="border border-gray-800 p-1 w-[14%] bg-gray-200">First piece</th>
-                    <th colSpan={2} className="border border-gray-800 p-1 w-[14%] bg-gray-200">Second Piece</th>
-                    <th colSpan={2} className="border border-gray-800 p-1 w-[14%] bg-gray-200">Third Piece</th>
-                    <th rowSpan={2} className="border border-gray-800 p-2 w-[7%]">Status</th>
-                    <th rowSpan={2} className="border border-gray-800 p-2 w-[7%]">Remarks</th>
+                    <th colSpan={2} className="border border-gray-800 p-1 w-[13%] bg-gray-200">First piece</th>
+                    <th colSpan={2} className="border border-gray-800 p-1 w-[13%] bg-gray-200">Second Piece</th>
+                    <th colSpan={2} className="border border-gray-800 p-1 w-[13%] bg-gray-200">Third Piece</th>
+                    <th rowSpan={2} className="border border-gray-800 p-2 w-[6%]">Status</th>
+                    <th rowSpan={2} className="border border-gray-800 p-2 w-[6%]">Remarks</th>
+                    {!isSavedRecord && <th rowSpan={2} className="border border-gray-800 p-2 w-[5%]">Action</th>}
                   </tr>
                   <tr className="bg-gray-50 text-[11px] font-bold">
                     <th className="border border-gray-800 p-1">LH 1</th>
@@ -1050,78 +1214,112 @@ export default function JobSetupVerification() {
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="border border-gray-800 p-6 text-gray-500 italic font-semibold">
-                        {!form.partName
-                          ? "Select a Part Name to load its control specifications."
-                          : specsMissing
-                          ? "No control specifications are set for this part. Please ask HOD / HOF to set them up."
-                          : "Loading..."}
+                      <td colSpan={isSavedRecord ? 11 : 12} className="border border-gray-800 p-6 text-gray-500 italic font-semibold">
+                        {!form.partName ? "Select a Part Name to load its control specifications." : "No rows yet. Click 'Add Control Row' above to begin."}
                       </td>
                     </tr>
                   )}
-                  {rows.map((r, idx) => (
-                    <tr key={`row-${idx}`} className="h-9 hover:bg-orange-50/30">
-                      <td className="border border-gray-800 p-1 font-bold bg-gray-50">{r.slNo || idx + 1}</td>
+                  {rows.map((r, idx) => {
+                    const isControlLocked = isSavedRecord || r.isExisting;
 
-                      {/* Control Name (from master, read only) */}
-                      <td className="border border-gray-800 p-0 text-left px-1.5 font-bold uppercase text-[11px] bg-gray-50/50">
-                        <input
-                          type="text"
-                          readOnly
-                          className="w-full bg-transparent font-bold outline-none uppercase"
-                          value={r.controlName}
-                        />
-                      </td>
+                    return (
+                      <tr key={`row-${idx}`} className="h-9 hover:bg-orange-50/30">
+                        <td className="border border-gray-800 p-1 font-bold bg-gray-50">{r.slNo || idx + 1}</td>
 
-                      {/* Control Specification (from master, read only) */}
-                      <td className="border border-gray-800 p-0 text-left px-1.5 font-bold text-gray-900 bg-gray-50/80">
-                        <input
-                          type="text"
-                          readOnly
-                          className="w-full bg-transparent font-semibold outline-none text-gray-900"
-                          value={r.specification}
-                        />
-                      </td>
-
-                      {/* Actual Values LH1 to RH3 (filled by shift incharge) */}
-                      {["LH1", "RH1", "LH2", "RH2", "LH3", "RH3"].map((f) => (
-                        <td key={f} className="border border-gray-800 p-0">
+                        {/* Control Name */}
+                        <td className={`border border-gray-800 p-0 text-left px-1.5 font-bold uppercase text-[11px] ${isControlLocked ? "bg-gray-50/50" : "bg-white"}`}>
                           <input
                             type="text"
-                            placeholder="-"
-                            className="w-full h-full text-center p-1 outline-none font-semibold"
-                            value={r[f]}
-                            onChange={(e) => updateRow(idx, f, e.target.value)}
+                            readOnly={isControlLocked}
+                            placeholder="Enter Control"
+                            className={`w-full font-bold outline-none uppercase ${isControlLocked ? "bg-transparent cursor-not-allowed text-gray-800" : "p-1 border border-orange-200 rounded"}`}
+                            value={r.controlName}
+                            onFocus={(e) => {
+                              activeFieldRef.current = { idx, field: "controlName", element: e.target };
+                            }}
+                            onChange={(e) => updateRow(idx, "controlName", e.target.value)}
                           />
                         </td>
-                      ))}
 
-                      {/* OK / NOT OK Status */}
-                      <td className="border border-gray-800 p-1">
-                        <select
-                          className={`w-full text-center font-bold text-xs p-1 rounded outline-none ${
-                            r.status === "OK" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                          }`}
-                          value={r.status || "OK"}
-                          onChange={(e) => updateRow(idx, "status", e.target.value)}
-                        >
-                          <option value="OK">OK</option>
-                          <option value="NOT OK">NOT OK</option>
-                        </select>
-                      </td>
+                        {/* Control Specification */}
+                        <td className={`border border-gray-800 p-0 text-left px-1.5 font-bold text-gray-900 ${isControlLocked ? "bg-gray-50/80" : "bg-white"}`}>
+                          <input
+                            type="text"
+                            readOnly={isControlLocked}
+                            placeholder="Enter Specification"
+                            className={`w-full font-semibold outline-none text-gray-900 ${isControlLocked ? "bg-transparent cursor-not-allowed text-gray-800" : "p-1 border border-orange-200 rounded"}`}
+                            value={r.specification}
+                            onFocus={(e) => {
+                              activeFieldRef.current = { idx, field: "specification", element: e.target };
+                            }}
+                            onChange={(e) => updateRow(idx, "specification", e.target.value)}
+                          />
+                        </td>
 
-                      {/* Remarks */}
-                      <td className="border border-gray-800 p-0">
-                        <input
-                          type="text"
-                          placeholder="Remarks"
-                          className="w-full h-full p-1 text-center outline-none font-medium text-[11px]"
-                          value={r.remarks}
-                          onChange={(e) => updateRow(idx, "remarks", e.target.value)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
+                        {/* Actual Values LH1 to RH3 */}
+                        {["LH1", "RH1", "LH2", "RH2", "LH3", "RH3"].map((f) => (
+                          <td key={f} className="border border-gray-800 p-0">
+                            <input
+                              type="text"
+                              placeholder="-"
+                              className="w-full h-full text-center p-1 outline-none font-semibold"
+                              value={r[f]}
+                              onFocus={(e) => {
+                                activeFieldRef.current = { idx, field: f, element: e.target };
+                              }}
+                              onChange={(e) => updateRow(idx, f, e.target.value)}
+                            />
+                          </td>
+                        ))}
+
+                        {/* OK / NOT OK Status */}
+                        <td className="border border-gray-800 p-1">
+                          <select
+                            className={`w-full text-center font-bold text-xs p-1 rounded outline-none ${
+                              r.status === "OK" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                            }`}
+                            value={r.status || "OK"}
+                            onChange={(e) => updateRow(idx, "status", e.target.value)}
+                          >
+                            <option value="OK">OK</option>
+                            <option value="NOT OK">NOT OK</option>
+                          </select>
+                        </td>
+
+                        {/* Remarks */}
+                        <td className="border border-gray-800 p-0">
+                          <input
+                            type="text"
+                            placeholder="Remarks"
+                            className="w-full h-full p-1 text-center outline-none font-medium text-[11px]"
+                            value={r.remarks}
+                            onFocus={(e) => {
+                              activeFieldRef.current = { idx, field: "remarks", element: e.target };
+                            }}
+                            onChange={(e) => updateRow(idx, "remarks", e.target.value)}
+                          />
+                        </td>
+
+                        {/* Action Column for Non-saved forms */}
+                        {!isSavedRecord && (
+                          <td className="border border-gray-800 p-1">
+                            {!r.isExisting ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRow(idx)}
+                                className="text-red-500 hover:text-red-700 p-1 transition-colors cursor-pointer"
+                                title="Delete row"
+                              >
+                                <Trash2 className="w-4 h-4 mx-auto" />
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-gray-400 font-bold">Locked</span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </fieldset>
@@ -1151,7 +1349,6 @@ export default function JobSetupVerification() {
             </thead>
             <tbody>
               <tr className="h-16">
-                {/* 1. Inspector -> sent to QC */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {renderApproverCell({
                     approved: isInspectorApproved,
@@ -1163,7 +1360,6 @@ export default function JobSetupVerification() {
                   })}
                 </td>
 
-                {/* 2. Shift Incharge -> signs directly */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {isShiftInchargeApproved ? (
                     <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
@@ -1187,7 +1383,6 @@ export default function JobSetupVerification() {
                   )}
                 </td>
 
-                {/* 3. HOF-INSPN (new role) */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {renderApproverCell({
                     approved: isHofInspectionApproved,
@@ -1199,7 +1394,6 @@ export default function JobSetupVerification() {
                   })}
                 </td>
 
-                {/* 4. HOF-PRODN -> sent to HOF */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {renderApproverCell({
                     approved: isHofProductionApproved,

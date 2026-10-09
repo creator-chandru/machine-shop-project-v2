@@ -157,10 +157,10 @@ const saveControlSpecifications = async (req, res) => {
 };
 
 // ============================================================
-// 4. GET EXISTING FILLED RECORD FOR PART NAME + DATE
+// 4. GET EXISTING RECORD FOR PART NAME + DATE (+ SHIFT + OP NO)
 // ============================================================
 const getJobSetupRecord = async (req, res) => {
-  const { partName, date, shopId } = req.query;
+  const { partName, date, shopId, shift, operationNo } = req.query;
 
   if (!partName || !date) {
     return res.status(400).json({ error: "partName and date are required" });
@@ -178,10 +178,22 @@ const getJobSetupRecord = async (req, res) => {
         AND PartName = @partName
         AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
     `;
+
     if (shopId) {
       request.input("machineShop", sql.VarChar(50), String(shopId));
       query += ` AND MachineShop = @machineShop`;
     }
+
+    if (shift) {
+      request.input("shift", sql.NVarChar(50), String(shift));
+      query += ` AND Shift = @shift`;
+    }
+
+    if (operationNo) {
+      request.input("operationNo", sql.NVarChar(100), String(operationNo));
+      query += ` AND OperationNo = @operationNo`;
+    }
+
     query += ` ORDER BY Id DESC`;
 
     const result = await request.query(query);
@@ -193,7 +205,7 @@ const getJobSetupRecord = async (req, res) => {
 };
 
 // ============================================================
-// 5. SAVE JOB SETUP VERIFICATION (CREATE ONLY - LOCKED AFTERWARDS)
+// 5. SAVE JOB SETUP VERIFICATION (SYNC SPECS BY PART NAME ONLY)
 // ============================================================
 const saveJobSetupVerification = async (req, res) => {
   const {
@@ -230,13 +242,17 @@ const saveJobSetupVerification = async (req, res) => {
     assignedQc,
     assignedHofInspection,
     assignedHof,
+    username,
   } = req.body;
 
   if (!partName || !date) {
     return res.status(400).json({ error: "partName and date are required" });
   }
+  if (!shift || !operationNo) {
+    return res.status(400).json({ error: "Shift and Operation No are required" });
+  }
   if (!Array.isArray(actualInspectionData) || actualInspectionData.length === 0) {
-    return res.status(400).json({ error: "No control specifications to record. Configure the part first." });
+    return res.status(400).json({ error: "No inspection specifications entered." });
   }
   if (!assignedQc || !assignedHofInspection || !assignedHof) {
     return res.status(400).json({ error: "QC, HOF-INSPN and HOF must be assigned" });
@@ -253,27 +269,86 @@ const saveJobSetupVerification = async (req, res) => {
     const reportDate = String(date).split("T")[0];
     const shopVal = String(machineShop || "3");
 
-    // Locked record check: a part name + date combination can only be filled once
+    // Uniqueness checked per Part Name + Date + Shift + Operation No
     const existReq = transaction.request();
     existReq.input("machineShop", sql.VarChar(50), shopVal);
     existReq.input("partName", sql.NVarChar(255), String(partName).trim());
     existReq.input("reportDate", sql.NVarChar(50), reportDate);
+    existReq.input("shift", sql.NVarChar(50), String(shift));
+    existReq.input("operationNo", sql.NVarChar(100), String(operationNo));
+
     const existing = await existReq.query(`
       SELECT TOP 1 Id FROM dbo.JobSetupVerification WITH (UPDLOCK, HOLDLOCK)
       WHERE IsMasterTemplate = 0
         AND MachineShop = @machineShop
         AND PartName = @partName
         AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+        AND Shift = @shift
+        AND OperationNo = @operationNo
     `);
 
     if (existing.recordset.length > 0) {
       await transaction.rollback();
       return res.status(409).json({
-        error: "A record already exists for this Part Name and Date. It cannot be modified.",
+        error: "A record already exists for this Part Name, Date, Shift, and Operation No.",
         id: existing.recordset[0].Id,
       });
     }
 
+    // Sync specs to master (strictly keyed by PartName)
+    const cleanedIncoming = cleanSpecs(controlSpecifications);
+    if (cleanedIncoming.length > 0) {
+      const masterCheckReq = transaction.request();
+      masterCheckReq.input("partName", sql.NVarChar(255), String(partName).trim());
+      const masterCheckRes = await masterCheckReq.query(`
+        SELECT Id, ControlSpecifications FROM dbo.JobSetupControlMaster WITH (UPDLOCK, HOLDLOCK)
+        WHERE PartName = @partName
+      `);
+
+      if (masterCheckRes.recordset.length > 0) {
+        const existingMasterSpecs = safeParse(masterCheckRes.recordset[0].ControlSpecifications, []);
+        const merged = [...existingMasterSpecs];
+
+        cleanedIncoming.forEach((inc) => {
+          const exists = merged.some(
+            (m) =>
+              m.controlName.toLowerCase().trim() === inc.controlName.toLowerCase().trim() &&
+              m.specification.toLowerCase().trim() === inc.specification.toLowerCase().trim()
+          );
+          if (!exists) {
+            merged.push({ controlName: inc.controlName, specification: inc.specification });
+          }
+        });
+
+        const reindexed = merged.map((m, i) => ({ slNo: i + 1, ...m }));
+
+        const updateMasterReq = transaction.request();
+        updateMasterReq.input("id", sql.Int, masterCheckRes.recordset[0].Id);
+        updateMasterReq.input("partNo", sql.NVarChar(100), partNo || "");
+        updateMasterReq.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(reindexed));
+        updateMasterReq.input("updatedBy", sql.NVarChar(100), username || setterName || "Shift Incharge");
+        await updateMasterReq.query(`
+          UPDATE dbo.JobSetupControlMaster SET
+            PartNo = CASE WHEN @partNo <> '' THEN @partNo ELSE PartNo END,
+            ControlSpecifications = @controlSpecifications,
+            UpdatedBy = @updatedBy,
+            UpdatedAt = GETDATE()
+          WHERE Id = @id
+        `);
+      } else {
+        const insertMasterReq = transaction.request();
+        insertMasterReq.input("partName", sql.NVarChar(255), String(partName).trim());
+        insertMasterReq.input("partNo", sql.NVarChar(100), partNo || "");
+        insertMasterReq.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(cleanedIncoming));
+        insertMasterReq.input("updatedBy", sql.NVarChar(100), username || setterName || "Shift Incharge");
+        await insertMasterReq.query(`
+          INSERT INTO dbo.JobSetupControlMaster (PartName, PartNo, ControlSpecifications, UpdatedBy)
+          VALUES (@partName, @partNo, @controlSpecifications, @updatedBy)
+        `);
+      }
+    }
+
+    // Insert new record
     const request = transaction.request();
     request.input("machineShop", sql.VarChar(50), shopVal);
     request.input("partName", sql.NVarChar(255), String(partName).trim());
@@ -310,7 +385,6 @@ const saveJobSetupVerification = async (req, res) => {
     request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(controlSpecifications || []));
     request.input("actualInspectionData", sql.NVarChar(sql.MAX), JSON.stringify(actualInspectionData || []));
 
-    // Shift Incharge signs directly; the other three go out for approval
     request.input("signInspector", sql.NVarChar(100), "Pending");
     request.input("signShiftIncharge", sql.NVarChar(100), signatures.shiftIncharge);
     request.input("signHofInspection", sql.NVarChar(100), "Pending");
@@ -368,7 +442,7 @@ const getJobSetupVerificationById = async (req, res) => {
 };
 
 // ============================================================
-// 7. HOF-INSPECTION USERS (NEW ROLE) FOR DROPDOWN
+// 7. HOF-INSPECTION USERS
 // ============================================================
 const getHofInspectionUsers = async (req, res) => {
   try {
@@ -391,7 +465,7 @@ const getHofInspectionUsers = async (req, res) => {
 };
 
 // ============================================================
-// 8. PENDING LISTS (QC / HOF-INSPN / HOF-PRODN)
+// 8. PENDING LISTS
 // ============================================================
 const makePendingHandler = (signCol, assignedCol, label) => async (req, res) => {
   try {
@@ -442,7 +516,7 @@ const getHofInspectionPending = makePendingHandler("Sign_HofInspection", "Assign
 const getHofProductionPending = makePendingHandler("Sign_HofProduction", "AssignedHofProduction", "HOF-PRODN");
 
 // ============================================================
-// 9. SIGN ENDPOINTS (QC = Inspector, HOF-INSPN, HOF-PRODN)
+// 9. SIGN ENDPOINTS
 // ============================================================
 const doneExpr = (col) => `(ISNULL(${col}, '') NOT IN ('', 'Pending'))`;
 
@@ -511,11 +585,11 @@ const signHofProductionApproval = makeSignHandler({
 });
 
 // ============================================================
-// 10. PDF REPORT GENERATOR (PART NAME + DATE)
+// 10. PDF REPORT GENERATOR
 // ============================================================
 const generatePdfReport = async (req, res) => {
   try {
-    const { partName, date, shopId } = req.query;
+    const { partName, date, shopId, shift, operationNo } = req.query;
 
     if (!partName || !date) {
       return res.status(400).send("partName and date are required.");
@@ -536,6 +610,16 @@ const generatePdfReport = async (req, res) => {
     if (shopId) {
       request.input("machineShop", sql.VarChar(50), String(shopId));
       query += ` AND MachineShop = @machineShop`;
+    }
+
+    if (shift) {
+      request.input("shift", sql.NVarChar(50), String(shift));
+      query += ` AND Shift = @shift`;
+    }
+
+    if (operationNo) {
+      request.input("operationNo", sql.NVarChar(100), String(operationNo));
+      query += ` AND OperationNo = @operationNo`;
     }
 
     query += ` ORDER BY Id DESC`;
@@ -667,14 +751,11 @@ const generatePdfReport = async (req, res) => {
   }
 };
 
-
 // ============================================================
-// GET PART SETS DYNAMICALLY BY SHOP ID: dbo.[M{shopId}PartSets]
+// 11. GET PART SETS DYNAMICALLY BY SHOP ID
 // ============================================================
 const getShopPartSets = async (req, res) => {
   const { shopId } = req.params;
-
-  // Sanitize shopId so it only contains alphanumeric characters (e.g., "3", "1", "2")
   const shopIdClean = String(shopId || "3").replace(/[^a-zA-Z0-9]/g, "");
   const tableName = `M${shopIdClean}PartSets`;
 
@@ -682,7 +763,6 @@ const getShopPartSets = async (req, res) => {
     const request = new sql.Request();
     request.input("tblName", sql.NVarChar(128), tableName);
 
-    // Verify table existence first to prevent SQL errors if the table hasn't been created yet
     const tableCheck = await request.query(`
       SELECT TABLE_NAME 
       FROM INFORMATION_SCHEMA.TABLES 
@@ -722,5 +802,5 @@ module.exports = {
   signHofInspectionApproval,
   signHofProductionApproval,
   generatePdfReport,
-  getShopPartSets
+  getShopPartSets,
 };

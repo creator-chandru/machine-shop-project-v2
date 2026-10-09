@@ -2,25 +2,51 @@ const express = require("express");
 const router = express.Router();
 const {
   getControlSpecifications,
+  listMasterSpecifications,
   saveControlSpecifications,
+  getJobSetupRecord,
   saveJobSetupVerification,
   getJobSetupVerificationById,
-  generatePdfReport
+  getHofInspectionUsers,
+  getQcPending,
+  getHofInspectionPending,
+  getHofProductionPending,
+  signQcApproval,
+  signHofInspectionApproval,
+  signHofProductionApproval,
+  generatePdfReport,
 } = require("../controllers/jobSetupVerificationController");
 
-// 1. Fetch reusable master control specifications
+// NOTE: all static routes must be declared BEFORE "/job-setup-verification/:id"
+
+// 1. Master control specifications (keyed by part name only)
 router.get("/job-setup-verification/specifications", getControlSpecifications);
-
-// 2. Save or update master control specifications
 router.put("/job-setup-verification/specifications", saveControlSpecifications);
+router.get("/job-setup-verification/masters", listMasterSpecifications);
 
-// 3. Save / Update actual verification record
+// 2. Approver dropdown for the new HOF-Inspection role
+router.get("/job-setup-verification/hof-inspection-users", getHofInspectionUsers);
+
+// 3. Existing filled record lookup (part name + date)
+router.get("/job-setup-verification/record", getJobSetupRecord);
+
+// 4. PDF preview
+router.get("/job-setup-verification/report", generatePdfReport);
+
+// 5. Pending lists + sign (QC = Inspector, HOF-INSPN, HOF-PRODN)
+router.get("/job-setup-verification/qc/:name", getQcPending);
+router.post("/job-setup-verification/sign-qc", signQcApproval);
+
+router.get("/job-setup-verification/hof-inspn/:name", getHofInspectionPending);
+router.post("/job-setup-verification/sign-hof-inspn", signHofInspectionApproval);
+
+router.get("/job-setup-verification/hof/:name", getHofProductionPending);
+router.post("/job-setup-verification/sign-hof", signHofProductionApproval);
+
+// 6. Save verification record (create only; locked afterwards)
 router.post("/job-setup-verification", saveJobSetupVerification);
 
-// 4. Retrieve single verification record by ID
+// 7. Single record by ID (keep last)
 router.get("/job-setup-verification/:id", getJobSetupVerificationById);
-
-// 5. PDF Report Generation & Preview (Matches exampleRoutes.js)
-router.get("/job-setup-verification/report", generatePdfReport);
 
 module.exports = router;

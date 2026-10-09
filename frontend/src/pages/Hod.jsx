@@ -2,13 +2,15 @@ import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import Header from "../components/Header";
 import EditPartMapping from "../components/EditPartMapping";
-import { RefreshCw, Loader, X } from "lucide-react";
+import JobSetupMasterConfigurator from "../components/jobSetupMasterConfigurator";
+import { RefreshCw, Loader, X, ClipboardList, Settings2 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 const Hod = () => {
   const { shopId } = useParams();
-  
+
+  const [activeTab, setActiveTab] = useState("four-m"); // "four-m" | "job-setup-master"
   const [pendingReports, setPendingReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
@@ -106,7 +108,7 @@ const Hod = () => {
       <Header />
       <ToastContainer position="top-right" autoClose={2000} />
       <div className="p-8 max-w-7xl mx-auto">
-        
+
         <h1 className="text-3xl font-black text-white tracking-widest uppercase text-center mb-2">
           HOD Dashboard
         </h1>
@@ -116,7 +118,9 @@ const Hod = () => {
         <div className="bg-white rounded-xl shadow-2xl p-8 mb-8 border-t-4 border-indigo-500">
           <div className="flex justify-between items-center mb-6 border-b pb-4">
             <div>
-              <h2 className="text-xl font-bold text-gray-800">Pending 4M Checksheets</h2>
+              <h2 className="text-xl font-bold text-gray-800">
+                {activeTab === "four-m" ? "Pending 4M Checksheets" : "Set Job Verification Set Up"}
+              </h2>
             </div>
             <div className="flex items-center gap-3">
               <button onClick={fetchPendingReports} className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh">
@@ -128,39 +132,76 @@ const Hod = () => {
             </div>
           </div>
 
-          {pendingReports.length === 0 ? (
-            <p className="text-gray-500 italic py-6">No 4M Checksheets pending your review.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-gray-300">
-                <thead className="bg-gray-800 text-white">
-                  <tr>
-                    <th className="p-3 border border-gray-300">Line Code</th>
-                    <th className="p-3 border border-gray-300">Part Name</th>
-                    <th className="p-3 border border-gray-300">Submission Batch</th>
-                    <th className="p-3 border border-gray-300 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingReports.map((report, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="p-3 border border-gray-300 font-bold">{report.lineCode}</td>
-                      <td className="p-3 border border-gray-300">{report.partName}</td>
-                      <td className="p-3 border border-gray-300 text-gray-500 text-sm">Last Entry: {report.reportDate}</td>
-                      <td className="p-3 border border-gray-300 text-center">
-                        <button
-                          onClick={() => handleOpenReviewModal(report)}
-                          className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors"
-                        >
-                          Review & Verify
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {/* Tabs */}
+          <div className="flex gap-4 mb-6 flex-wrap">
+            <button
+              onClick={() => setActiveTab("four-m")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeTab === "four-m"
+                  ? "bg-indigo-500 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <ClipboardList className="w-4 h-4" />
+              4M Checksheets
+              {pendingReports.length > 0 && (
+                <span className="bg-white text-indigo-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
+                  {pendingReports.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("job-setup-master")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeTab === "job-setup-master"
+                  ? "bg-indigo-500 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <Settings2 className="w-4 h-4" />
+              Set Job Verification Set Up
+            </button>
+          </div>
+
+          {activeTab === "four-m" && (
+            <>
+              {pendingReports.length === 0 ? (
+                <p className="text-gray-500 italic py-6">No 4M Checksheets pending your review.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Line Code</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Submission Batch</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingReports.map((report, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="p-3 border border-gray-300 font-bold">{report.lineCode}</td>
+                          <td className="p-3 border border-gray-300">{report.partName}</td>
+                          <td className="p-3 border border-gray-300 text-gray-500 text-sm">Last Entry: {report.reportDate}</td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report)}
+                              className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors"
+                            >
+                              Review & Verify
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
+
+          {activeTab === "job-setup-master" && <JobSetupMasterConfigurator shopId={shopId} />}
         </div>
 
         {/* Existing Part Mapping Component */}

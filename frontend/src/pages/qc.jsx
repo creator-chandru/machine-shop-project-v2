@@ -18,10 +18,11 @@ const QC = () => {
   const navigate = useNavigate();
   const { shopId } = useParams();
 
-  const [activeFormType, setActiveFormType] = useState("tool-change"); // "tool-change" | "daily-production" | "significant" | "8d-report"
+  const [activeFormType, setActiveFormType] = useState("tool-change"); // "tool-change" | "daily-production" | "significant" | "8d-report" | "job-setup"
   const [pendingReports, setPendingReports] = useState([]);
   const [pendingSignificantReports, setPendingSignificantReports] = useState([]);
   const [pendingEightDReports, setPendingEightDReports] = useState([]);
+  const [pendingJobSetupReports, setPendingJobSetupReports] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
@@ -93,11 +94,32 @@ const QC = () => {
     }
   };
 
+  const fetchPendingJobSetupReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/qc/${encodeURIComponent(currentQC)}?shopId=${shopId || 3}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingJobSetupReports(Array.isArray(data) ? data : []);
+      } else {
+        setPendingJobSetupReports([]);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending Job Setup Verifications.");
+      setPendingJobSetupReports([]);
+    }
+  };
+
   useEffect(() => {
     if (activeFormType === "significant") {
       fetchPendingSignificantReports();
     } else if (activeFormType === "8d-report") {
       fetchPendingEightDReports();
+    } else if (activeFormType === "job-setup") {
+      fetchPendingJobSetupReports();
     } else {
       fetchPendingReports();
     }
@@ -138,6 +160,11 @@ const QC = () => {
         params.append("partNo", report.partNo || "");
         params.append("customer", report.customer || "");
         reportPath = `${process.env.REACT_APP_API_URL || ""}/api/8d-report/pdf?${params.toString()}`;
+      } else if (activeFormType === "job-setup") {
+        params.append("partName", report.partName || "");
+        params.append("date", isoDate);
+        params.append("shopId", String(report.machineShop || shopId || 3));
+        reportPath = `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/report?${params.toString()}`;
       } else {
         params.append("lineCode", report.lineCode);
         params.append("date", isoDate);
@@ -201,6 +228,13 @@ const QC = () => {
           signature: currentQC,
           qcUsername: currentQC,
         };
+      } else if (activeFormType === "job-setup") {
+        signEndpoint = `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/sign-qc`;
+        payload = {
+          id: selectedReport.id,
+          signature: currentQC,
+          username: currentQC,
+        };
       } else {
         signEndpoint =
           activeFormType === "tool-change"
@@ -244,6 +278,8 @@ const QC = () => {
           fetchPendingSignificantReports();
         } else if (activeFormType === "8d-report") {
           fetchPendingEightDReports();
+        } else if (activeFormType === "job-setup") {
+          fetchPendingJobSetupReports();
         } else {
           fetchPendingReports();
         }
@@ -276,6 +312,7 @@ const QC = () => {
                   fetchPendingReports();
                   fetchPendingSignificantReports();
                   fetchPendingEightDReports();
+                  fetchPendingJobSetupReports();
                 }}
                 className="p-2 text-gray-500 hover:text-orange-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                 title="Refresh"
@@ -341,6 +378,22 @@ const QC = () => {
               {pendingEightDReports.length > 0 && (
                 <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
                   {pendingEightDReports.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveFormType("job-setup")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeFormType === "job-setup"
+                  ? "bg-orange-500 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <ClipboardCheck className="w-4 h-4" />
+              Job Setup Verification
+              {pendingJobSetupReports.length > 0 && (
+                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
+                  {pendingJobSetupReports.length}
                 </span>
               )}
             </button>
@@ -544,6 +597,71 @@ const QC = () => {
               )}
             </div>
           )}
+
+          {/* TAB CONTENT: Job Setup Verification (Inspector sign) */}
+          {activeFormType === "job-setup" && (
+            <div>
+              {pendingJobSetupReports.length === 0 ? (
+                <p className="text-gray-500 italic py-6">
+                  No Job Setup Verification records pending your review.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300 w-16 text-center">ID</th>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Part Name</th>
+                        <th className="p-3 border border-gray-300">Operation No</th>
+                        <th className="p-3 border border-gray-300">Shift</th>
+                        <th className="p-3 border border-gray-300">Setter</th>
+                        <th className="p-3 border border-gray-300">Status</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingJobSetupReports.map((report) => (
+                        <tr key={`js-${report.id}`} className="hover:bg-orange-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
+                            #{report.id}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {report.partName || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">
+                            {report.operationNo || "N/A"}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">
+                            {report.shift || "1st"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            {report.shiftInchargeName || "Shift Incharge"}
+                          </td>
+                          <td className="p-3 border border-gray-300">
+                            <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
+                              Pending Review
+                            </span>
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report)}
+                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Sign
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -559,6 +677,8 @@ const QC = () => {
                   ? "Significant Event Record" 
                   : activeFormType === "8d-report"
                   ? "8D Problem Solving Report"
+                  : activeFormType === "job-setup"
+                  ? "Job Setup Verification (Inspector)"
                   : "Daily Production Report"
               }
             </h3>
@@ -606,6 +726,11 @@ const QC = () => {
                   <p>
                     <span className="font-bold">Part Details:</span> {selectedReport.partName || "N/A"}
                   </p>
+                  {activeFormType === "job-setup" && selectedReport.operationNo && (
+                    <p>
+                      <span className="font-bold">Operation No:</span> {selectedReport.operationNo}
+                    </p>
+                  )}
                   <p>
                     <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate || selectedReport.recordDate)}
                   </p>

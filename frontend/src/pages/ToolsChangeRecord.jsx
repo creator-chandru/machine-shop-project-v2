@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
-import { ArrowLeft, FileDown, Save } from "lucide-react";
+import { ArrowLeft, FileDown } from "lucide-react";
 import Header from "../components/Header";
 
 const CHUNK_SIZE = 3;
@@ -29,6 +29,7 @@ const getTodayISODate = () => {
 const createEmptySection = (
   defaultMachineNo = "",
   defaultDate = "",
+  defaultShift = "I",
   numRows = INITIAL_ROWS
 ) => ({
   partTraceability: "",
@@ -36,7 +37,7 @@ const createEmptySection = (
   mcNo: defaultMachineNo,
   opNo: "",
   date: defaultDate || getTodayISODate(),
-  shift: "I",
+  shift: defaultShift || "I",
   from: "",
   to: "",
   assignedQc: "",
@@ -103,6 +104,7 @@ export default function ToolChangeRecord() {
     machineNo: "",
     opNo: "",
     date: getTodayISODate(),
+    shift: "I",
   });
 
   const [recordId, setRecordId] = useState(null);
@@ -114,20 +116,14 @@ export default function ToolChangeRecord() {
 
   const [sections, setSections] = useState(
     Array.from({ length: INITIAL_SECTIONS }, () =>
-      createEmptySection("", getTodayISODate(), INITIAL_ROWS)
+      createEmptySection("", getTodayISODate(), "I", INITIAL_ROWS)
     )
   );
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "" });
-  const isSavedRecordRef = useRef(false);
   const lookupSeqRef = useRef(0);
-  const didInitialLookupRef = useRef(false);
-
-  useEffect(() => {
-    isSavedRecordRef.current = isSavedRecord;
-  }, [isSavedRecord]);
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -143,30 +139,40 @@ export default function ToolChangeRecord() {
     setIsSavedRecord(true);
 
     if (record.header) {
-      setHeaderInfo({
+      setHeaderInfo((prev) => ({
+        ...prev,
         lineCode: record.header.lineCode || "",
         partName: record.header.partName || "",
         partNo: record.header.partNo || "",
         machineNo: record.header.machineNo || "",
         opNo: record.header.opNo || "",
         date: record.header.date || getTodayISODate(),
-      });
+        shift: record.sections?.[0]?.shift || prev.shift || "I",
+      }));
     }
 
     if (record.sections && record.sections.length > 0) {
       setSections(
         record.sections.map((s) => ({
-          ...createEmptySection("", getTodayISODate(), 0),
+          ...createEmptySection("", getTodayISODate(), "I", 0),
           ...s,
           rows:
             s.rows && s.rows.length > 0
               ? s.rows
-              : createEmptySection("", "", INITIAL_ROWS).rows,
+              : createEmptySection("", "", "I", INITIAL_ROWS).rows,
           toolChangedBy: { signature: s.toolChangedBy?.signature || "" },
           verifiedByQc: { signature: s.verifiedByQc?.signature || "" },
         }))
       );
     }
+  };
+
+  // Clears form state to clean template
+  const resetToEmptyForm = (lineCode, date, machineNo = "", shift = "I") => {
+    setRecordId(null);
+    setIsSavedRecord(false);
+    setSections([createEmptySection(machineNo, date, shift, INITIAL_ROWS)]);
+    fetchPartTraceability(lineCode, date, shift, 0);
   };
 
   // Fetch QC user accounts for the dropdown
@@ -190,32 +196,6 @@ export default function ToolChangeRecord() {
     };
     fetchQcList();
   }, []);
-
-  // Check if a record was passed via navigation state or search params
-  useEffect(() => {
-    if (location.state?.record) {
-      loadRecordData(location.state.record);
-    } else {
-      const qRecordId = searchParams.get("recordId") || location.state?.recordId;
-      if (qRecordId) {
-        const fetchRecordById = async () => {
-          try {
-            const token = localStorage.getItem("token");
-            const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/${qRecordId}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              loadRecordData(data);
-            }
-          } catch (err) {
-            console.error("Failed to fetch record by ID:", err);
-          }
-        };
-        fetchRecordById();
-      }
-    }
-  }, [location.state, searchParams]);
 
   // Fetch Part Traceability
   const fetchPartTraceability = async (lineCode, date, shift, secIdx) => {
@@ -247,31 +227,22 @@ export default function ToolChangeRecord() {
     }
   };
 
-  // Clears a previously loaded saved record (rows, signatures, approval state)
-  const resetToEmptyForm = (lineCode, date, machineNo = "") => {
-    if (!isSavedRecordRef.current) return; // keep unsaved drafts untouched
-    isSavedRecordRef.current = false;
-    setRecordId(null);
-    setIsSavedRecord(false);
-    setSections([createEmptySection(machineNo, date, INITIAL_ROWS)]);
-    fetchPartTraceability(lineCode, date, "I", 0);
-  };
+  // ==========================================================
+  // COMBO CHECK: date + lineCode + machineNo + shift
+  // ==========================================================
+  const checkExistingRecord = async (lineCode, date, machineNo = "", shift = "I") => {
+    if (!lineCode || !date || !machineNo || !shift) {
+      resetToEmptyForm(lineCode, date, machineNo, shift);
+      return;
+    }
 
-  // Fetch existing submitted record for a lineCode + date + machineNo
-  const checkExistingRecord = async (lineCode, date, machineNo = "") => {
-    if (!lineCode || !date) return;
-
-    const seq = ++lookupSeqRef.current; // ignore out-of-order responses
+    const seq = ++lookupSeqRef.current;
 
     try {
       const token = localStorage.getItem("token");
-      let url = `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record?machineShop=${shopId || 3}&lineCode=${encodeURIComponent(
+      const url = `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record?machineShop=${shopId || 3}&lineCode=${encodeURIComponent(
         lineCode
-      )}&date=${encodeURIComponent(date)}`;
-
-      if (machineNo) {
-        url += `&machineNo=${encodeURIComponent(machineNo)}`;
-      }
+      )}&date=${encodeURIComponent(date)}&machineNo=${encodeURIComponent(machineNo)}&shift=${encodeURIComponent(shift)}`;
 
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -286,8 +257,9 @@ export default function ToolChangeRecord() {
         const found = Array.isArray(data) && data.length > 0 ? data[0] : null;
         if (found && found.sections && found.sections.length > 0) {
           loadRecordData(found);
+          triggerToast("Existing record loaded for this combo.", "success");
         } else {
-          resetToEmptyForm(lineCode, date, machineNo);
+          resetToEmptyForm(lineCode, date, machineNo, shift);
         }
       }
     } catch (err) {
@@ -295,20 +267,37 @@ export default function ToolChangeRecord() {
     }
   };
 
-  // Sync with LineSetContext
+  // Check if a record was passed via navigation state or search params
   useEffect(() => {
-    if (didInitialLookupRef.current || !lineSet?.lineCode) return;
-    didInitialLookupRef.current = true;
+    if (location.state?.record) {
+      loadRecordData(location.state.record);
+    } else {
+      const qRecordId = searchParams.get("recordId") || location.state?.recordId;
+      if (qRecordId) {
+        const fetchRecordById = async () => {
+          try {
+            const token = localStorage.getItem("token");
+            const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/${qRecordId}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              loadRecordData(data);
+            }
+          } catch (err) {
+            console.error("Failed to fetch record by ID:", err);
+          }
+        };
+        fetchRecordById();
+      }
+    }
+  }, [location.state, searchParams]);
 
-    if (location.state?.record || location.state?.recordId || searchParams.get("recordId")) return;
-
-    checkExistingRecord(lineSet.lineCode, headerInfo.date, lineSet.machineNo || "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lineSet]);
-  
+  // Sync with LineSetContext
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || headerInfo.lineCode;
+      const newMc = lineSet.machineNo || headerInfo.machineNo;
 
       setHeaderInfo((prev) => ({
         ...prev,
@@ -320,7 +309,7 @@ export default function ToolChangeRecord() {
 
       if (lineSet.machineNo) {
         setSections((prev) => {
-          if (prev.length > 0 && !prev[0].mcNo) {
+          if (prev.length > 0) {
             const next = [...prev];
             next[0] = { ...next[0], mcNo: lineSet.machineNo };
             return next;
@@ -329,15 +318,8 @@ export default function ToolChangeRecord() {
         });
       }
 
-      if (newLineCode) {
-        sections.forEach((sec, idx) => {
-          fetchPartTraceability(
-            newLineCode,
-            sec.date || headerInfo.date,
-            sec.shift,
-            idx
-          );
-        });
+      if (newLineCode && newMc) {
+        checkExistingRecord(newLineCode, headerInfo.date, newMc, headerInfo.shift);
       }
     }
   }, [lineSet]);
@@ -394,12 +376,7 @@ export default function ToolChangeRecord() {
     setHeaderInfo((prev) => ({ ...prev, date: newDate }));
     setSections((prev) => prev.map((sec) => ({ ...sec, date: newDate })));
 
-    if (headerInfo.lineCode) {
-      checkExistingRecord(headerInfo.lineCode, newDate, headerInfo.machineNo);
-      sections.forEach((sec, idx) => {
-        fetchPartTraceability(headerInfo.lineCode, newDate, sec.shift, idx);
-      });
-    }
+    checkExistingRecord(headerInfo.lineCode, newDate, headerInfo.machineNo, headerInfo.shift);
   };
 
   const handleLineChange = (lineCode) => {
@@ -426,23 +403,19 @@ export default function ToolChangeRecord() {
       machineNo: "",
     });
 
-    checkExistingRecord(lineCode, headerInfo.date, "");
-
-    sections.forEach((sec, idx) => {
-      fetchPartTraceability(lineCode, sec.date || headerInfo.date, sec.shift, idx);
-    });
+    checkExistingRecord(lineCode, headerInfo.date, "", headerInfo.shift);
   };
 
   const handleAddColumn = () => {
     if (isQC) return;
     const currentNumRows = sections[0]?.rows?.length || INITIAL_ROWS;
     const defaultDate = headerInfo.date || getTodayISODate();
-    const defaultShift = "I";
+    const defaultShift = headerInfo.shift || "I";
     const newIdx = sections.length;
 
     setSections((prev) => [
       ...prev,
-      createEmptySection(headerInfo.machineNo, defaultDate, currentNumRows),
+      createEmptySection(headerInfo.machineNo, defaultDate, defaultShift, currentNumRows),
     ]);
 
     if (headerInfo.lineCode) {
@@ -457,20 +430,30 @@ export default function ToolChangeRecord() {
 
   const handleSectionMetaChange = (secIdx, field, val) => {
     if (isQC) return;
+
     setSections((prev) =>
       prev.map((sec, idx) => (idx === secIdx ? { ...sec, [field]: val } : sec))
     );
 
-    if (field === "mcNo" && secIdx === 0) {
-      setHeaderInfo((prev) => ({ ...prev, machineNo: val }));
-      checkExistingRecord(headerInfo.lineCode, headerInfo.date, val);
+    const targetDate = field === "date" ? val : sections[secIdx]?.date || headerInfo.date;
+    const targetShift = field === "shift" ? val : sections[secIdx]?.shift || headerInfo.shift;
+    const targetMc = field === "mcNo" ? val : sections[secIdx]?.mcNo || headerInfo.machineNo;
+
+    if (secIdx === 0) {
+      if (field === "mcNo") {
+        setHeaderInfo((prev) => ({ ...prev, machineNo: val }));
+      }
+      if (field === "shift") {
+        setHeaderInfo((prev) => ({ ...prev, shift: val }));
+      }
+      if (field === "date") {
+        setHeaderInfo((prev) => ({ ...prev, date: val }));
+      }
+      checkExistingRecord(headerInfo.lineCode, targetDate, targetMc, targetShift);
     }
 
     if (field === "date" || field === "shift") {
-      const currentSection = sections[secIdx];
-      const date = field === "date" ? val : currentSection?.date || headerInfo.date;
-      const shift = field === "shift" ? val : currentSection?.shift || "I";
-      fetchPartTraceability(headerInfo.lineCode, date, shift, secIdx);
+      fetchPartTraceability(headerInfo.lineCode, targetDate, targetShift, secIdx);
     }
   };
 
@@ -509,11 +492,21 @@ export default function ToolChangeRecord() {
 
   // Shift Incharge Approves Tool Changed By
   const handleApproveToolChangedBy = (secIdx) => {
+    const sec = sections[secIdx];
+    const mc = sec.mcNo || headerInfo.machineNo;
+    const dt = sec.date || headerInfo.date;
+    const sh = sec.shift || headerInfo.shift;
+
+    if (!headerInfo.lineCode || !mc || !dt || !sh) {
+      triggerToast("Please select Line Code, Machine No, Date, and Shift before approving.", "error");
+      return;
+    }
+
     setSections((prev) =>
-      prev.map((sec, idx) =>
+      prev.map((s, idx) =>
         idx === secIdx
-          ? { ...sec, toolChangedBy: { signature: currentUsername || "Approved" } }
-          : sec
+          ? { ...s, toolChangedBy: { signature: currentUsername || "Approved" } }
+          : s
       )
     );
     triggerToast("Tool change signed successfully.", "success");
@@ -573,9 +566,8 @@ export default function ToolChangeRecord() {
     });
   };
 
-  // PDF Download / Preview (generated by the backend)
+  // PDF Download / Preview
   const handleDownloadPdf = async () => {
-    // Only available for dates/lines that already have a saved record
     if (!isSavedRecord) {
       triggerToast("No saved record found for this date. Submit the form first to preview.", "error");
       return;
@@ -614,6 +606,7 @@ export default function ToolChangeRecord() {
     }
   };
 
+  // Save handler: no inner table cell checks, strict signature allocation check
   const handleSave = async () => {
     if (!headerInfo.lineCode) {
       triggerToast("Please select Line Code.", "error");
@@ -623,7 +616,7 @@ export default function ToolChangeRecord() {
     if (isShiftIncharge) {
       const unapprovedToolChange = sections.some((sec) => !sec.toolChangedBy?.signature);
       if (unapprovedToolChange) {
-        triggerToast("Please click 'Approve' under TOOL CHANGED BY before submitting.", "error");
+        triggerToast("Please click 'Approve' under TOOL CHANGED BY for all columns before submitting.", "error");
         return;
       }
 
@@ -844,7 +837,7 @@ export default function ToolChangeRecord() {
           </div>
         </div>
 
-        {/* Action Controls for Columns and Rows (Disabled for QC) */}
+        {/* Action Controls for Columns and Rows */}
         {!isQC && (
           <div className="flex flex-wrap justify-between items-center px-1 gap-2">
             <div className="flex items-center gap-2">
@@ -1267,7 +1260,7 @@ export default function ToolChangeRecord() {
                       ))}
                     </tr>
 
-                    {/* VERIFIED BY QC (DROPDOWN + APPROVAL WORKFLOW) */}
+                    {/* VERIFIED BY QC */}
                     <tr>
                       {chunk.map(({ sec, globalIdx }) => {
                         const isQcApproved = Boolean(
@@ -1285,7 +1278,6 @@ export default function ToolChangeRecord() {
                               colSpan={2}
                               className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
                             >
-                              {/* 1. QC has already approved */}
                               {isQcApproved ? (
                                 <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
                                   <span className="text-[10px] font-bold text-green-600 uppercase">
@@ -1296,7 +1288,6 @@ export default function ToolChangeRecord() {
                                   </span>
                                 </div>
                               ) : isQC ? (
-                                /* 2. QC is viewing to verify */
                                 <div className="flex flex-col items-center justify-center gap-1">
                                   <button
                                     type="button"
@@ -1312,7 +1303,6 @@ export default function ToolChangeRecord() {
                                   )}
                                 </div>
                               ) : isSavedRecord ? (
-                                /* 3. Record was submitted by Shift Incharge, awaiting QC approval */
                                 <div className="flex flex-col items-center justify-center">
                                   <span className="text-red-600 text-xs font-bold uppercase">
                                     pending
@@ -1324,7 +1314,6 @@ export default function ToolChangeRecord() {
                                   )}
                                 </div>
                               ) : (
-                                /* 4. Active drafting: Shift Incharge chooses QC from dropdown */
                                 <div className="flex flex-col items-center gap-1 w-full">
                                   <select
                                     className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center"

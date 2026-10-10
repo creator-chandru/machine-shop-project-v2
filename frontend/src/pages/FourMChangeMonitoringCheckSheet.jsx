@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { FileDown } from "lucide-react";
+import { FileDown, Calendar, X } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import Header from "../components/Header";
@@ -13,11 +13,19 @@ const formMeta = {
   company: "SAKTHI AUTO"
 };
 
-const emptyRow = () => ({
-  date: "",
-  shift: "I",
-  dateShift: "",
-  mcNo: "",
+const getTodayISODate = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const emptyRow = (dateVal = getTodayISODate(), shiftVal = "I", mcVal = "") => ({
+  date: dateVal,
+  shift: shiftVal,
+  dateShift: `${dateVal} ${shiftVal}`.trim(),
+  mcNo: mcVal,
   typeOf4M: "",
   description: "",
   firstPart: "",
@@ -50,6 +58,12 @@ export default function FourMChangeMonitoringCheckSheet() {
   const [hodSign, setHodSign] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
+
+  // PDF Date Range Modal States
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfFromDate, setPdfFromDate] = useState("");
+  const [pdfToDate, setPdfToDate] = useState("");
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const lookupSeqRef = useRef(0);
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
@@ -90,14 +104,18 @@ export default function FourMChangeMonitoringCheckSheet() {
   }, [shopId]);
 
   // ==========================================================
-  // FETCH EXISTING RECORD BY LINE CODE, MACHINE NO & DATE
+  // TRACK CURRENT LINE, MACHINE, DATE, AND SHIFT COMBO
   // ==========================================================
   const firstRowDate = rows[0]?.date || "";
+  const firstRowShift = rows[0]?.shift || "I";
   const selectedMachineNo = rows.find(r => r.mcNo)?.mcNo || headerInfo.machineNo || "";
 
   useEffect(() => {
     const checkExistingRecord = async () => {
-      if (!headerInfo.lineCode || !selectedMachineNo || !firstRowDate) {
+      // Must have all parts of the combo
+      if (!headerInfo.lineCode || !selectedMachineNo || !firstRowDate || !firstRowShift) {
+        setIsSavedRecord(false);
+        setHodSign("");
         return;
       }
 
@@ -108,7 +126,8 @@ export default function FourMChangeMonitoringCheckSheet() {
           machineShop: shopId || "3",
           lineCode: headerInfo.lineCode,
           machineNo: selectedMachineNo,
-          date: firstRowDate
+          date: firstRowDate,
+          shift: firstRowShift
         });
 
         const res = await fetch(
@@ -128,9 +147,12 @@ export default function FourMChangeMonitoringCheckSheet() {
             if (record.hodSign) {
               setHodSign(record.hodSign);
             }
-            triggerToast("Existing 4M record loaded for this date & machine.", "success");
+            triggerToast("Existing 4M record loaded for this combo.", "success");
           } else {
+            // Fresh combo with no record: reset rows to clean state with chosen combo
             setIsSavedRecord(false);
+            setHodSign("");
+            setRows([emptyRow(firstRowDate, firstRowShift, selectedMachineNo)]);
           }
         }
       } catch (err) {
@@ -139,7 +161,7 @@ export default function FourMChangeMonitoringCheckSheet() {
     };
 
     checkExistingRecord();
-  }, [shopId, headerInfo.lineCode, selectedMachineNo, firstRowDate]);
+  }, [shopId, headerInfo.lineCode, selectedMachineNo, firstRowDate, firstRowShift]);
 
   const lineCodes = lineMappings.length > 0
     ? lineMappings.map((m) => m.lineCode)
@@ -154,16 +176,44 @@ export default function FourMChangeMonitoringCheckSheet() {
       ...prev, lineCode, partName: autoPartName, partNo: autoPartNo, machineNo: ""
     }));
 
-    setRows((prev) => prev.map((row) => ({ ...row, mcNo: "" })));
+    // Reset rows to clean state on line change
+    setRows([emptyRow(firstRowDate || getTodayISODate(), firstRowShift || "I", "")]);
+    setHodSign("");
     setIsSavedRecord(false);
   };
 
   const handleMachineNoChange = (rowIdx, machineNo) => {
-    handleRowChange(rowIdx, "mcNo", machineNo);
     setHeaderInfo((prev) => ({ ...prev, machineNo }));
+    setRows((prev) => {
+      const next = [...prev];
+      next[rowIdx] = { ...emptyRow(next[rowIdx]?.date || getTodayISODate(), next[rowIdx]?.shift || "I", machineNo) };
+      return next;
+    });
+    setHodSign("");
+    setIsSavedRecord(false);
   };
 
-  const handleAddRow = () => setRows((prev) => [...prev, emptyRow()]);
+  const handleDateChange = (rowIdx, newDate) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[rowIdx] = { ...emptyRow(newDate, next[rowIdx]?.shift || "I", next[rowIdx]?.mcNo || selectedMachineNo) };
+      return next;
+    });
+    setHodSign("");
+    setIsSavedRecord(false);
+  };
+
+  const handleShiftChange = (rowIdx, newShift) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[rowIdx] = { ...emptyRow(next[rowIdx]?.date || getTodayISODate(), newShift, next[rowIdx]?.mcNo || selectedMachineNo) };
+      return next;
+    });
+    setHodSign("");
+    setIsSavedRecord(false);
+  };
+
+  const handleAddRow = () => setRows((prev) => [...prev, emptyRow(firstRowDate || getTodayISODate(), firstRowShift || "I", selectedMachineNo)]);
   const handleRemoveRow = () => setRows((prev) => prev.length > 1 ? prev.slice(0, -1) : prev);
 
   const handleRowChange = (rowIdx, field, val) => {
@@ -174,45 +224,78 @@ export default function FourMChangeMonitoringCheckSheet() {
     });
   };
 
-  const handleDownloadPdf = async () => {
-    if (!headerInfo.lineCode || !headerInfo.partName) {
-      triggerToast("Please ensure Line Code and Part Name are selected.", "error");
+  // Strictly validated approval handler
+  const handleApproveIncharge = (rIdx) => {
+    const row = rows[rIdx];
+    const mc = row.mcNo || selectedMachineNo;
+
+    if (!headerInfo.lineCode || !row.date || !mc || !row.shift) {
+      triggerToast("Please select Line Code, Date, Machine No, and Shift first.", "error");
       return;
     }
 
+    const hasData = Boolean(
+      row.typeOf4M || row.description || row.firstPart || row.lastPart ||
+      row.inspectionFrequency || row.retroChecking || row.quarantine ||
+      row.partIdentification || row.internalCommunication
+    );
+
+    if (!hasData) {
+      triggerToast("Please fill row parameters before approving.", "error");
+      return;
+    }
+
+    handleRowChange(rIdx, "inchargeSign", currentUser);
+    triggerToast("Incharge signature approved successfully!", "success");
+  };
+
+  // Download PDF Report by Date Range
+  const handleDownloadPdfRange = async () => {
+    if (!pdfFromDate || !pdfToDate) {
+      triggerToast("Please select both From Date and To Date.", "error");
+      return;
+    }
+
+    if (new Date(pdfFromDate) > new Date(pdfToDate)) {
+      triggerToast("From Date cannot be later than To Date.", "error");
+      return;
+    }
+
+    setIsDownloadingPdf(true);
     try {
       const token = localStorage.getItem("token");
-      const queryParams = new URLSearchParams({
-        lineCode: headerInfo.lineCode,
-        partName: headerInfo.partName,
-        shopId: shopId || 3,
-        ...(firstRowDate ? { date: firstRowDate } : {}),
-        ...(selectedMachineNo ? { machineNo: selectedMachineNo } : {}),
-        ...(hodSign ? { hodSign: `Pending [${hodSign}]` } : {})
+      const params = new URLSearchParams({
+        fromDate: pdfFromDate,
+        toDate: pdfToDate,
+        shopId: String(shopId || 3)
       });
 
-      const url = `${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring/report?${queryParams.toString()}`;
-
+      const url = `${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring/report?${params.toString()}`;
       const response = await fetch(url, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
 
+      if (response.status === 404) {
+        throw new Error("No records found for the selected date range.");
+      }
       if (!response.ok) {
-        if (response.status === 404) throw new Error("No data recorded for this selection.");
-        throw new Error("Failed to generate PDF from the server.");
+        throw new Error("Failed to generate PDF report from server.");
       }
 
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = `4M_Change_Record_${headerInfo.lineCode}.pdf`;
+      link.download = `4M_Change_Report_${pdfFromDate}_to_${pdfToDate}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
 
+      setShowPdfModal(false);
       triggerToast("PDF generated and downloaded!", "success");
     } catch (err) {
       triggerToast(err.message || "Failed to download PDF", "error");
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -220,10 +303,9 @@ export default function FourMChangeMonitoringCheckSheet() {
     if (!headerInfo.machineShop) return triggerToast("Machine shop is missing.", "error");
     if (!headerInfo.lineCode) return triggerToast("Please select a Line Code.", "error");
     if (!headerInfo.partName) return triggerToast("Part Name is missing.", "error");
-    
     if (!selectedMachineNo) return triggerToast("Please select a Machine No in the table.", "error");
 
-    // --- APPROVE BUTTON CONSTRAINT FOR DATA INSERTION ---
+    // Approve button constraint for data insertion
     for (let rIdx = 0; rIdx < rows.length; rIdx++) {
       const row = rows[rIdx];
       const hasDataEntered = Boolean(
@@ -281,10 +363,72 @@ export default function FourMChangeMonitoringCheckSheet() {
   };
 
   return (
-    
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
       <Header/>
       <ToastContainer position="top-right" autoClose={3000} />
+
+      {/* Date Range Modal for PDF Download */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">Download Report by Date Range</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowPdfModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">From Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfFromDate}
+                  onChange={(e) => setPdfFromDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">To Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfToDate}
+                  onChange={(e) => setPdfToDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPdfModal(false)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadPdfRange}
+                disabled={isDownloadingPdf}
+                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+              >
+                <FileDown className="w-4 h-4" />
+                {isDownloadingPdf ? "Downloading..." : "Download Report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white w-full max-w-[95rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
         
         <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
@@ -299,7 +443,7 @@ export default function FourMChangeMonitoringCheckSheet() {
           </div>
           <button
             type="button"
-            onClick={handleDownloadPdf}
+            onClick={() => setShowPdfModal(true)}
             className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
           >
             <FileDown className="w-4 h-4" /> Download Report
@@ -368,9 +512,36 @@ export default function FourMChangeMonitoringCheckSheet() {
                 
                 return (
                 <tr key={`row-${rIdx}`} className="h-9">
-                  <td className="border border-gray-800 p-0"><input type="date" className="w-full h-full text-center outline-none bg-transparent py-1.5 px-1 font-medium" value={row.date} onChange={(e) => handleRowChange(rIdx, "date", e.target.value)} /></td>
-                  <td className="border border-gray-800 p-0"><select value={row.shift} className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" onChange={(e) => handleRowChange(rIdx, "shift", e.target.value)}><option value="I">I</option><option value="II">II</option><option value="III">III</option></select></td>
-                  <td className="border border-gray-800 p-0"><select value={row.mcNo} className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" onChange={(e) => handleMachineNoChange(rIdx, e.target.value)} disabled={!headerInfo.lineCode}><option value="">Select</option>{machineOptions.map((machine) => (<option key={machine.id} value={machine.machineNo}>{machine.machineNo}</option>))}</select></td>
+                  <td className="border border-gray-800 p-0">
+                    <input 
+                      type="date" 
+                      className="w-full h-full text-center outline-none bg-transparent py-1.5 px-1 font-medium" 
+                      value={row.date} 
+                      onChange={(e) => handleDateChange(rIdx, e.target.value)} 
+                    />
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                    <select 
+                      value={row.shift} 
+                      className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" 
+                      onChange={(e) => handleShiftChange(rIdx, e.target.value)}
+                    >
+                      <option value="I">I</option>
+                      <option value="II">II</option>
+                      <option value="III">III</option>
+                    </select>
+                  </td>
+                  <td className="border border-gray-800 p-0">
+                    <select 
+                      value={row.mcNo} 
+                      className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" 
+                      onChange={(e) => handleMachineNoChange(rIdx, e.target.value)} 
+                      disabled={!headerInfo.lineCode}
+                    >
+                      <option value="">Select</option>
+                      {machineOptions.map((machine) => (<option key={machine.id} value={machine.machineNo}>{machine.machineNo}</option>))}
+                    </select>
+                  </td>
                   <td className="border border-gray-800 p-0"><input type="text" className="w-full h-full text-center outline-none bg-transparent py-1.5 px-1 font-medium" placeholder="Man/M/c/Mat/Meth" value={row.typeOf4M} onChange={(e) => handleRowChange(rIdx, "typeOf4M", e.target.value)} /></td>
                   <td className="border border-gray-800 p-0"><input type="text" className="w-full h-full text-left px-3 outline-none bg-transparent py-1.5 font-medium" value={row.description} onChange={(e) => handleRowChange(rIdx, "description", e.target.value)} /></td>
                   <td className="border border-gray-800 p-0"><select value={row.firstPart} className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" onChange={(e) => handleRowChange(rIdx, "firstPart", e.target.value)}><option value=""></option><option value="✓">✓</option><option value="X">X</option></select></td>
@@ -389,7 +560,11 @@ export default function FourMChangeMonitoringCheckSheet() {
                         <span className="text-xs font-black text-gray-900 uppercase">{row.inchargeSign}</span>
                       </div>
                     ) : (
-                      <button type="button" onClick={() => handleRowChange(rIdx, "inchargeSign", currentUser)} className="text-[10px] font-bold px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded shadow uppercase w-full cursor-pointer">
+                      <button 
+                        type="button" 
+                        onClick={() => handleApproveIncharge(rIdx)} 
+                        className="text-[10px] font-bold px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded shadow uppercase w-full cursor-pointer"
+                      >
                         Approve
                       </button>
                     )}

@@ -56,10 +56,10 @@ const getHODUsers = async (req, res) => {
 };
 
 // ============================================================
-// FETCH EXISTING 4M RECORD (BY LINE, MACHINE, AND DATE)
+// FETCH EXISTING 4M RECORD (BY LINE, MACHINE, DATE, AND SHIFT)
 // ============================================================
 const getFourMRecord = async (req, res) => {
-    const { machineShop, lineCode, machineNo, date } = req.query;
+    const { machineShop, lineCode, machineNo, date, shift } = req.query;
 
     if (!lineCode || !machineNo || !date) {
         return res.status(400).json({ error: "lineCode, machineNo, and date are required" });
@@ -67,10 +67,13 @@ const getFourMRecord = async (req, res) => {
 
     try {
         const cleanDate = String(date).split('T')[0];
+        const targetShift = (shift || "I").trim();
+        const dateShiftFilter = `${cleanDate} ${targetShift}%`;
+
         const request = new sql.Request();
         request.input("lineCode", sql.NVarChar(100), lineCode);
         request.input("mcNo", sql.NVarChar(100), machineNo);
-        request.input("datePrefix", sql.NVarChar(100), `${cleanDate}%`);
+        request.input("dateShiftFilter", sql.NVarChar(100), dateShiftFilter);
 
         let shopFilter = "";
         if (machineShop) {
@@ -82,7 +85,7 @@ const getFourMRecord = async (req, res) => {
             SELECT * FROM FourMChangeMonitoring
             WHERE lineCode = @lineCode
               AND mcNo = @mcNo
-              AND dateShift LIKE @datePrefix
+              AND dateShift LIKE @dateShiftFilter
               ${shopFilter}
             ORDER BY slNo ASC, id ASC
         `;
@@ -98,7 +101,7 @@ const getFourMRecord = async (req, res) => {
         const rows = records.map((r) => {
             const dateParts = String(r.dateShift || "").trim().split(" ");
             const rowDate = dateParts[0] || cleanDate;
-            const rowShift = dateParts[1] || "I";
+            const rowShift = dateParts[1] || targetShift;
 
             return {
                 date: rowDate,
@@ -127,7 +130,7 @@ const getFourMRecord = async (req, res) => {
                 machineNo: first.mcNo || machineNo
             },
             rows,
-            hodSign: first.hodSign || "" // Retain original full signature string: "Approved (name)" or "Pending [name]"
+            hodSign: first.hodSign || ""
         });
     } catch (err) {
         console.error("Error fetching 4M record:", err);
@@ -157,21 +160,22 @@ const saveFourMChangeMonitoring = async (req, res) => {
         }
 
         const targetDate = rows[0]?.date ? String(rows[0].date).split('T')[0] : '';
+        const targetShift = rows[0]?.shift || 'I';
         const targetMc = rows.find(r => r.mcNo)?.mcNo || headerInfo.machineNo || '';
 
-        // Clean purge for safe re-submission of existing day/machine log
+        // Safe purge based on exact lineCode + machineNo + date + shift combo
         if (targetDate && targetMc) {
             await transaction.request()
                 .input("machineShop", sql.Int, Number(headerInfo.machineShop))
                 .input("lineCode", sql.NVarChar(100), headerInfo.lineCode)
                 .input("mcNo", sql.NVarChar(100), targetMc)
-                .input("datePrefix", sql.NVarChar(100), `${targetDate}%`)
+                .input("dateShiftFilter", sql.NVarChar(100), `${targetDate} ${targetShift}%`)
                 .query(`
                     DELETE FROM FourMChangeMonitoring
                     WHERE machineShop = @machineShop
                       AND lineCode = @lineCode
                       AND mcNo = @mcNo
-                      AND dateShift LIKE @datePrefix
+                      AND dateShift LIKE @dateShiftFilter
                 `);
         }
 
@@ -183,8 +187,8 @@ const saveFourMChangeMonitoring = async (req, res) => {
                    .input("lineCode", sql.NVarChar(100), headerInfo.lineCode)
                    .input("partName", sql.NVarChar(255), headerInfo.partName)
                    .input("slNo", sql.Int, row.slNo ? Number(row.slNo) : index + 1)
-                   .input("dateShift", sql.NVarChar(100), row.dateShift || null)
-                   .input("mcNo", sql.NVarChar(100), row.mcNo || null)
+                   .input("dateShift", sql.NVarChar(100), row.dateShift || `${row.date || targetDate} ${row.shift || targetShift}`.trim())
+                   .input("mcNo", sql.NVarChar(100), row.mcNo || targetMc)
                    .input("typeOf4M", sql.NVarChar(255), row.typeOf4M || null)
                    .input("description", sql.NVarChar(sql.MAX), row.description || null)
                    .input("firstPart", sql.NVarChar(100), row.firstPart || null)
@@ -278,87 +282,66 @@ const signHODApproval = async (req, res) => {
 };
 
 // ============================================================
-// GENERATE PDF (Fixes HOD Stamp & Vector Checkmarks)
+// GENERATE PDF (DATE RANGE, VECTOR SYMBOLS, MULTI-ENTRY DYNAMIC FIT)
 // ============================================================
 const generate4MReport = async (req, res) => {
     try {
-        const { lineCode, partName, date, machineNo, shopId } = req.query;
+        const { fromDate, toDate, shopId } = req.query;
 
-        if (!lineCode) return res.status(400).json({ error: "lineCode is required" });
+        if (!fromDate || !toDate) {
+            return res.status(400).json({ error: "fromDate and toDate are required." });
+        }
+
+        const cleanFromDate = String(fromDate).split('T')[0];
+        const cleanToDate = String(toDate).split('T')[0];
+        const targetShopId = parseInt(shopId || 3, 10);
 
         const request = new sql.Request();
-        request.input('lineCode', sql.NVarChar(50), lineCode);
+        request.input('fromDate', sql.NVarChar(50), cleanFromDate);
+        request.input('toDate', sql.NVarChar(50), cleanToDate);
+        request.input('machineShop', sql.Int, targetShopId);
 
-        let query = `SELECT * FROM FourMChangeMonitoring WHERE lineCode = @lineCode`;
-
-        if (partName) {
-            query += ` AND partName = @partName`;
-            request.input('partName', sql.NVarChar(255), partName);
-        }
-        if (date) {
-            const cleanDate = String(date).split('T')[0];
-            query += ` AND dateShift LIKE @dateFilter`;
-            request.input('dateFilter', sql.NVarChar(100), `${cleanDate}%`);
-        }
-        if (machineNo) {
-            query += ` AND mcNo = @mcFilter`;
-            request.input('mcFilter', sql.NVarChar(100), machineNo);
-        }
-        if (shopId) {
-            query += ` AND machineShop = @shopFilter`;
-            request.input('shopFilter', sql.Int, parseInt(shopId, 10));
-        }
-
-        query += ` ORDER BY slNo ASC, id ASC`;
+        const query = `
+            SELECT * FROM FourMChangeMonitoring 
+            WHERE machineShop = @machineShop
+              AND LEFT(LTRIM(dateShift), 10) >= @fromDate
+              AND LEFT(LTRIM(dateShift), 10) <= @toDate
+            ORDER BY dateShift ASC, lineCode ASC, mcNo ASC, slNo ASC, id ASC
+        `;
 
         const result = await request.query(query);
         const records = result.recordset;
 
         if (!records || records.length === 0) {
-            return res.status(404).json({ error: "No records found" });
+            return res.status(404).json({ error: "No records found for the selected date range." });
         }
+
+        // Group records by unique combo: lineCode + mcNo + date + shift
+        const groupedMap = new Map();
+        records.forEach(r => {
+            const parts = String(r.dateShift || "").trim().split(" ");
+            const rDate = parts[0] || "";
+            const rShift = parts[1] || "I";
+            const groupKey = `${r.lineCode}_${r.mcNo}_${rDate}_${rShift}`;
+            if (!groupedMap.has(groupKey)) {
+                groupedMap.set(groupKey, []);
+            }
+            groupedMap.get(groupKey).push(r);
+        });
+
+        const groups = Array.from(groupedMap.values());
 
         const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename=4M_Change_Record_${lineCode}.pdf`);
+        res.setHeader("Content-Disposition", `attachment; filename=4M_Change_Report_${cleanFromDate}_to_${cleanToDate}.pdf`);
         doc.pipe(res);
 
         const startX = 20;
-        let startY = 20;
-        const totalWidth = 800;
-        
-        doc.lineWidth(0.5).strokeColor('black');
+        const totalWidth = doc.page.width - 40; // 801.89pt landscape width
+        const pageBottom = doc.page.height - 20;
+        const topMargin = 20;
 
-        // Header Boxes
-        const metaBoxWidth = 350; 
-        const titleBoxWidth = totalWidth - 150 - metaBoxWidth;
-        const headerTotalH = 60; 
-        
-        doc.rect(startX, startY, 150, headerTotalH).stroke();
-        const logoPath = path.join(__dirname, 'logo.jpg');
-        if (fs.existsSync(logoPath)) {
-            doc.image(logoPath, startX + 15, startY + 10, { width: 120, height: 40, fit: [120, 40], align: 'center', valign: 'center' });
-        } else {
-            doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI AUTO", startX, startY + 25, { width: 150, align: "center" });
-        }
-
-        doc.rect(startX + 150, startY, titleBoxWidth, headerTotalH).stroke();
-        doc.font("Helvetica-Bold").fontSize(15).fillColor('black').text("4M CHANGE MONITORING CHECK SHEET", startX + 150, startY + 22, { width: titleBoxWidth, align: "center" });
-
-        const metaX = startX + 150 + titleBoxWidth;
-        doc.rect(metaX, startY, metaBoxWidth, headerTotalH).stroke();
-        doc.moveTo(metaX, startY + 30).lineTo(metaX + metaBoxWidth, startY + 30).stroke();
-
-        doc.font("Helvetica-Bold").fontSize(9.5);
-        doc.text("LINE NAME", metaX + 8, startY + 10);
-        doc.text(`:   ${lineCode || ''}`, metaX + 80, startY + 10);
-        doc.text("PART NAME", metaX + 8, startY + 40); 
-        
-        doc.font("Helvetica").fontSize(8.5).text(`:   ${records[0]?.partName || ''}`, metaX + 80, startY + 37, { width: metaBoxWidth - 90, height: 20 });
-
-        startY += headerTotalH + 10;
-
-        // Table Header
+        // Table column definitions
         const headers = [
             { label: "Date /\nShift", w: 65 },
             { label: "M/c. No", w: 45 },
@@ -374,139 +357,219 @@ const generate4MReport = async (req, res) => {
             { label: "Incharge\nSign", w: 75 }
         ];
 
-        const drawHeaders = (yPos) => {
-            doc.rect(startX, yPos, totalWidth, 35).fillAndStroke('#e5e7eb', 'black');
-            let curX = startX;
-            doc.font("Helvetica-Bold").fontSize(7).fillColor('black');
-            headers.forEach(h => {
-                doc.rect(curX, yPos, h.w, 35).stroke();
-                doc.text(h.label, curX, yPos + 4, { width: h.w, align: "center" });
-                curX += h.w;
-            });
-            return yPos + 35;
-        };
-
-        let currentY = drawHeaders(startY);
         const checkCols = [4, 5, 7, 8, 9, 10];
 
-        records.forEach(r => {
-            const rowData = [
-                r.dateShift || "-",
-                r.mcNo || "-",
-                r.typeOf4M || "-",
-                r.description || "-",
-                r.firstPart || "-",
-                r.lastPart || "-",
-                r.inspectionFrequency || "-",
-                r.retroChecking || "-",
-                r.quarantine || "-",
-                r.partIdentification || "-",
-                r.internalCommunication || "-",
-                r.inchargeSign || "-"
-            ];
-
-            let rowH = 26;
-            doc.font("Helvetica").fontSize(7);
-            const descH = doc.heightOfString(rowData[3], { width: headers[3].w - 6 });
-            if (descH + 12 > rowH) rowH = descH + 12;
-
-            if (currentY + rowH > doc.page.height - 65) {
-                doc.addPage();
-                currentY = 20;
-                currentY = drawHeaders(currentY);
-            }
-
-            let cX = startX;
-            rowData.forEach((val, i) => {
-                doc.rect(cX, currentY, headers[i].w, rowH).stroke();
-
-                if (checkCols.includes(i)) {
-                    const colCenter = cX + (headers[i].w / 2);
-                    const rowCenter = currentY + (rowH / 2);
-
-                    if (val === '✓' || val === '3') {
-                        doc.save();
-                        doc.lineWidth(1.6).strokeColor('#16a34a').lineCap('round').lineJoin('round');
-                        doc.moveTo(colCenter - 5, rowCenter)
-                           .lineTo(colCenter - 1.5, rowCenter + 4.5)
-                           .lineTo(colCenter + 6, rowCenter - 4.5)
-                           .stroke();
-                        doc.restore();
-                    } else if (val === 'X') {
-                        doc.save();
-                        doc.lineWidth(1.6).strokeColor('#dc2626').lineCap('round');
-                        doc.moveTo(colCenter - 4, rowCenter - 4)
-                           .lineTo(colCenter + 4, rowCenter + 4)
-                           .stroke();
-                        doc.moveTo(colCenter + 4, rowCenter - 4)
-                           .lineTo(colCenter - 4, rowCenter + 4)
-                           .stroke();
-                        doc.restore();
-                    } else {
-                        doc.font("Helvetica").fontSize(7.5).fillColor('black');
-                        doc.text(val || "-", cX, rowCenter - 4, { width: headers[i].w, align: "center" });
-                    }
-                } else if (i === 11) {
-                    if (val && val !== '-') {
-                        const midRow = currentY + (rowH / 2);
-                        doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#16a34a')
-                           .text("Approved ✓", cX, midRow - 7, { width: headers[i].w, align: "center" });
-                        doc.font("Helvetica-Bold").fontSize(6.5).fillColor('black')
-                           .text(String(val).toUpperCase().substring(0, 12), cX, midRow + 2, { width: headers[i].w, align: "center" });
-                    } else {
-                        doc.font("Helvetica").fontSize(7.5).fillColor('black')
-                           .text("-", cX, currentY + (rowH / 2) - 4, { width: headers[i].w, align: "center" });
-                    }
-                } else {
-                    doc.font("Helvetica").fontSize(7).fillColor('black');
-                    const textH = doc.heightOfString(val, { width: headers[i].w - 6 });
-                    doc.text(val, cX + 3, currentY + (rowH / 2) - (textH / 2), { 
-                        width: headers[i].w - 6, 
-                        align: i === 3 ? "left" : "center" 
-                    });
-                }
-                
-                doc.fillColor('black');
-                cX += headers[i].w;
-            });
-
-            currentY += rowH;
-        });
-
-        // --- FOOTER & HOD SIGNATURE VERIFICATION BLOCK ---
-        currentY += 10;
-        if (currentY + 45 > doc.page.height - 20) {
-            doc.addPage();
-            currentY = 20;
-        }
-
-        doc.lineWidth(0.5).strokeColor('black');
-        doc.rect(startX, currentY, totalWidth - 250, 40).stroke();
-        doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("QF / 07 / MPD-36, Rev.No: 01, 13.03.2019", startX + 10, currentY + 16);
-
-        // HOD Sign Box
-        const hodX = startX + totalWidth - 250;
-        doc.rect(hodX, currentY, 250, 40).stroke();
-        doc.font("Helvetica-Bold").fontSize(9.5).fillColor('black').text("HOD Sign: ", hodX + 10, currentY + 15);
-
-        // Find true HOD status from actual record rows
-        const currentHodSign = String(records[0]?.hodSign || '').trim();
-        if (currentHodSign.toLowerCase().startsWith('approved')) {
-            const cleanName = currentHodSign.replace(/approved\s*\(/i, '').replace(')', '').trim();
+        // Clean vector checkmark
+        const drawCheckMark = (colCenter, rowCenter) => {
             doc.save();
             doc.lineWidth(1.6).strokeColor('#16a34a').lineCap('round').lineJoin('round');
-            doc.moveTo(hodX + 70, currentY + 20).lineTo(hodX + 74, currentY + 24).lineTo(hodX + 80, currentY + 15).stroke();
+            doc.moveTo(colCenter - 5, rowCenter)
+               .lineTo(colCenter - 1.5, rowCenter + 4.5)
+               .lineTo(colCenter + 6, rowCenter - 4.5)
+               .stroke();
             doc.restore();
+        };
 
-            doc.fillColor('#16a34a').font("Helvetica-Bold").fontSize(9)
-               .text(`APPROVED (${cleanName.toUpperCase()})`, hodX + 85, currentY + 15);
-        } else if (currentHodSign.toLowerCase().startsWith('pending')) {
-            const cleanName = currentHodSign.replace(/pending\s*\[/i, '').replace(']', '').trim();
-            doc.fillColor('#dc2626').font("Helvetica-Bold").fontSize(9)
-               .text(`Pending [${cleanName.toUpperCase()}]`, hodX + 70, currentY + 15);
-        } else {
-            doc.fillColor('red').font("Helvetica").fontSize(9).text("Pending Review", hodX + 70, currentY + 15);
-        }
+        // Clean vector crossmark
+        const drawCrossMark = (colCenter, rowCenter) => {
+            doc.save();
+            doc.lineWidth(1.6).strokeColor('#dc2626').lineCap('round');
+            doc.moveTo(colCenter - 4, rowCenter - 4)
+               .lineTo(colCenter + 4, rowCenter + 4)
+               .stroke();
+            doc.moveTo(colCenter + 4, rowCenter - 4)
+               .lineTo(colCenter - 4, rowCenter + 4)
+               .stroke();
+            doc.restore();
+        };
+
+        // Precompute total height of an entry block
+        const computeEntryHeight = (groupRecords) => {
+            const headerTotalH = 50;
+            const tableHeadersH = 30;
+            const footerH = 36;
+            let rowsH = 0;
+
+            doc.font("Helvetica").fontSize(7);
+            groupRecords.forEach(r => {
+                let rowH = 22;
+                const descH = doc.heightOfString(r.description || "-", { width: headers[3].w - 6 });
+                if (descH + 8 > rowH) rowH = descH + 8;
+                rowsH += rowH;
+            });
+
+            return headerTotalH + 5 + tableHeadersH + rowsH + footerH + 10;
+        };
+
+        // Render one full entry block
+        const drawEntry = (groupRecords, entryY) => {
+            const first = groupRecords[0];
+
+            // 1. Header Box (50pt)
+            const headerTotalH = 50;
+            const metaBoxWidth = 320;
+            const logoBoxWidth = 130;
+            const titleBoxWidth = totalWidth - logoBoxWidth - metaBoxWidth;
+
+            doc.lineWidth(0.6).strokeColor('black');
+
+            // Logo
+            doc.rect(startX, entryY, logoBoxWidth, headerTotalH).stroke();
+            const logoPath = path.join(__dirname, 'logo.jpg');
+            if (fs.existsSync(logoPath)) {
+                doc.image(logoPath, startX + 10, entryY + 8, { width: 110, height: 34, fit: [110, 34], align: 'center', valign: 'center' });
+            } else {
+                doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("SAKTHI AUTO", startX, entryY + 18, { width: logoBoxWidth, align: "center" });
+            }
+
+            // Title
+            doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerTotalH).stroke();
+            doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("4M CHANGE MONITORING CHECK SHEET", startX + logoBoxWidth, entryY + 18, { width: titleBoxWidth, align: "center" });
+
+            // Line & Part Info
+            const metaX = startX + logoBoxWidth + titleBoxWidth;
+            doc.rect(metaX, entryY, metaBoxWidth, headerTotalH).stroke();
+            doc.moveTo(metaX, entryY + 25).lineTo(metaX + metaBoxWidth, entryY + 25).stroke();
+
+            doc.font("Helvetica-Bold").fontSize(8.5).fillColor('black');
+            doc.text("LINE NAME", metaX + 8, entryY + 8);
+            doc.text(`:   ${first.lineCode || ''}`, metaX + 70, entryY + 8);
+            doc.text("PART NAME", metaX + 8, entryY + 33);
+            doc.font("Helvetica").fontSize(8).text(`:   ${first.partName || ''}`, metaX + 70, entryY + 31, { width: metaBoxWidth - 75, height: 16, ellipsis: true });
+
+            let currY = entryY + headerTotalH + 4;
+
+            // 2. Table Headers (30pt)
+            doc.rect(startX, currY, totalWidth, 30).fillAndStroke('#e5e7eb', 'black');
+            let curX = startX;
+            doc.font("Helvetica-Bold").fontSize(6.5).fillColor('black');
+            headers.forEach(h => {
+                doc.rect(curX, currY, h.w, 30).stroke();
+                doc.text(h.label, curX, currY + 3, { width: h.w, align: "center" });
+                curX += h.w;
+            });
+            currY += 30;
+
+            // 3. Table Rows
+            groupRecords.forEach(r => {
+                const rowData = [
+                    r.dateShift || "-",
+                    r.mcNo || "-",
+                    r.typeOf4M || "-",
+                    r.description || "-",
+                    r.firstPart || "-",
+                    r.lastPart || "-",
+                    r.inspectionFrequency || "-",
+                    r.retroChecking || "-",
+                    r.quarantine || "-",
+                    r.partIdentification || "-",
+                    r.internalCommunication || "-",
+                    r.inchargeSign || "-"
+                ];
+
+                let rowH = 22;
+                doc.font("Helvetica").fontSize(7);
+                const descH = doc.heightOfString(rowData[3], { width: headers[3].w - 6 });
+                if (descH + 8 > rowH) rowH = descH + 8;
+
+                let cX = startX;
+                rowData.forEach((val, i) => {
+                    doc.rect(cX, currY, headers[i].w, rowH).stroke();
+
+                    if (checkCols.includes(i)) {
+                        const colCenter = cX + (headers[i].w / 2);
+                        const rowCenter = currY + (rowH / 2);
+
+                        if (val === '✓' || val === '3' || String(val).toLowerCase() === 'ok') {
+                            drawCheckMark(colCenter, rowCenter);
+                        } else if (val === 'X' || val === 'x' || String(val).toLowerCase() === 'notok') {
+                            drawCrossMark(colCenter, rowCenter);
+                        } else {
+                            doc.font("Helvetica").fontSize(7).fillColor('black');
+                            doc.text(val || "-", cX, rowCenter - 4, { width: headers[i].w, align: "center" });
+                        }
+                    } else if (i === 11) {
+                        const midRow = currY + (rowH / 2);
+                        if (val && val !== '-') {
+                            doc.font("Helvetica-Bold").fontSize(6).fillColor('#16a34a')
+                               .text("Approved ✓", cX, midRow - 6, { width: headers[i].w, align: "center" });
+                            doc.font("Helvetica-Bold").fontSize(6).fillColor('black')
+                               .text(String(val).toUpperCase().substring(0, 12), cX, midRow + 2, { width: headers[i].w, align: "center" });
+                        } else {
+                            doc.font("Helvetica").fontSize(7).fillColor('black')
+                               .text("-", cX, midRow - 4, { width: headers[i].w, align: "center" });
+                        }
+                    } else {
+                        doc.font("Helvetica").fontSize(6.5).fillColor('black');
+                        const textH = doc.heightOfString(val, { width: headers[i].w - 6 });
+                        doc.text(val, cX + 3, currY + (rowH / 2) - (textH / 2), { 
+                            width: headers[i].w - 6, 
+                            align: i === 3 ? "left" : "center" 
+                        });
+                    }
+
+                    cX += headers[i].w;
+                });
+
+                currY += rowH;
+            });
+
+            // 4. Footer & HOD Sign Block (32pt)
+            currY += 4;
+            const footerH = 32;
+            doc.lineWidth(0.5).strokeColor('black');
+            doc.rect(startX, currY, totalWidth - 250, footerH).stroke();
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text("QF / 07 / MPD-36, Rev.No: 01, 13.03.2019", startX + 10, currY + 12);
+
+            const hodX = startX + totalWidth - 250;
+            doc.rect(hodX, currY, 250, footerH).stroke();
+            doc.font("Helvetica-Bold").fontSize(8.5).fillColor('black').text("HOD Sign: ", hodX + 10, currY + 11);
+
+            const currentHodSign = String(first.hodSign || '').trim();
+            if (currentHodSign.toLowerCase().startsWith('approved')) {
+                const cleanName = currentHodSign.replace(/approved\s*\(/i, '').replace(')', '').trim();
+                drawCheckMark(hodX + 66, currY + 16);
+                doc.fillColor('#16a34a').font("Helvetica-Bold").fontSize(8)
+                   .text(`APPROVED (${cleanName.toUpperCase()})`, hodX + 75, currY + 11);
+            } else if (currentHodSign.toLowerCase().startsWith('pending')) {
+                const cleanName = currentHodSign.replace(/pending\s*\[/i, '').replace(']', '').trim();
+                doc.fillColor('#dc2626').font("Helvetica-Bold").fontSize(8)
+                   .text(`Pending [${cleanName.toUpperCase()}]`, hodX + 65, currY + 11);
+            } else {
+                doc.fillColor('red').font("Helvetica").fontSize(8).text("Pending Review", hodX + 65, currY + 11);
+            }
+
+            return currY + footerH;
+        };
+
+        // Render entries with dynamic page fitting
+        let currentY = topMargin;
+        let isFirstOnPage = true;
+
+        groups.forEach(groupRecords => {
+            const entryH = computeEntryHeight(groupRecords);
+
+            if (!isFirstOnPage && (currentY + entryH > pageBottom)) {
+                doc.addPage();
+                currentY = topMargin;
+                isFirstOnPage = true;
+            }
+
+            if (!isFirstOnPage) {
+                doc.save()
+                   .lineWidth(0.5)
+                   .dash(3, { space: 3 })
+                   .strokeColor('#9ca3af')
+                   .moveTo(startX, currentY - 4)
+                   .lineTo(startX + totalWidth, currentY - 4)
+                   .stroke()
+                   .restore();
+            }
+
+            const endY = drawEntry(groupRecords, currentY);
+            currentY = endY + 12;
+            isFirstOnPage = false;
+        });
 
         doc.end();
     } catch (err) {

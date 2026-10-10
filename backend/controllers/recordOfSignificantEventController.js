@@ -17,13 +17,15 @@ const saveSignificantEvent = async (req, res) => {
         await transaction.begin();
 
         const cleanDate = String(header.date).split('T')[0];
+        const targetShift = header.shift || 'I';
 
-        // Clear existing draft entries for this lineCode + mcNo + date combination
+        // Clear existing draft entries for this lineCode + mcNo + date + shift combination
         const delReq = transaction.request();
         delReq.input('machineShop', sql.Int, header.machineShop || 3);
         delReq.input('lineCode', sql.NVarChar, header.lineCode || '');
         delReq.input('mcNo', sql.NVarChar, header.mcNo || '');
         delReq.input('recordDate', sql.Date, cleanDate);
+        delReq.input('shift', sql.NVarChar, targetShift);
 
         await delReq.query(`
             DELETE FROM SignificantEventRecord
@@ -31,6 +33,7 @@ const saveSignificantEvent = async (req, res) => {
               AND lineCode = @lineCode
               AND mcNo = @mcNo
               AND CONVERT(date, recordDate) = CONVERT(date, @recordDate)
+              AND shift = @shift
         `);
 
         const rowsToInsert = (rows && rows.length > 0) ? rows : [{}];
@@ -47,7 +50,7 @@ const saveSignificantEvent = async (req, res) => {
                 .input('mcNo', sql.NVarChar, header.mcNo || '')
                 .input('opNo', sql.NVarChar, header.opNo || '')
                 .input('recordDate', sql.Date, cleanDate)
-                .input('shift', sql.NVarChar, header.shift || 'I')
+                .input('shift', sql.NVarChar, targetShift)
                 .input('fromTime', sql.NVarChar, header.from || '')
                 .input('toTime', sql.NVarChar, header.to || '')
                 .input('rowIdx', sql.Int, rIdx + 1)
@@ -113,14 +116,18 @@ const saveSignificantEvent = async (req, res) => {
     }
 };
 
-// GET: Fetch Records (Exact or partial match for lineCode + mcNo + date)
+// GET: Fetch Records (Exact match for lineCode + mcNo + date + shift)
 const getSignificantEventRecords = async (req, res) => {
-    const { date, partName, lineCode, mcNo, shift } = req.query;
+    const { date, partName, lineCode, mcNo, shift, machineShop } = req.query;
 
     try {
         let query = `SELECT * FROM SignificantEventRecord WHERE 1=1`;
         const request = new sql.Request();
 
+        if (machineShop) {
+            request.input('machineShop', sql.Int, parseInt(machineShop, 10));
+            query += ` AND machineShop = @machineShop`;
+        }
         if (date) {
             const cleanDate = String(date).split('T')[0];
             request.input('date', sql.Date, cleanDate);
@@ -230,7 +237,7 @@ const signSignificantEvent = async (req, res) => {
     }
 };
 
-// 4. Generate PDF Report (Properly aligned, auto-wrapping, no overlapping text)
+// 4. Generate PDF Report (Untouched)
 const generateSignificantEventPDF = async (req, res) => {
     try {
         const { lineCode, mcNo, date, shift } = req.query;

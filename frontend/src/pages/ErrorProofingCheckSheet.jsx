@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useLineSet } from "../context/LineSetContext.jsx";
-import { FileDown } from 'lucide-react';
+import { FileDown, Calendar, X } from 'lucide-react';
 import Header from '../components/Header';
 
 const INITIAL_ROWS = 1;
@@ -89,6 +89,12 @@ export default function ErrorProofingCheckSheet() {
   const [isSavedRecord, setIsSavedRecord] = useState(false);
   const lookupSeqRef = useRef(0);
 
+  // PDF Date Range Modal States
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfFromDate, setPdfFromDate] = useState('');
+  const [pdfToDate, setPdfToDate] = useState('');
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
   // Determine role from route & get logged in username
   const isOperatorRoute = location.pathname.includes('/operator');
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
@@ -105,6 +111,22 @@ export default function ErrorProofingCheckSheet() {
         type: ''
       });
     }, 4000);
+  };
+
+  // Helper validation before approval
+  const validateBeforeApprove = () => {
+    if (!headerInfo.lineCode || !headerInfo.date) {
+      triggerToast("Please select Line Code and Date first.", "error");
+      return false;
+    }
+
+    const hasFilledValues = rows.some(r => r.machineNo || r.errorProofNo || r.errorProofName || r.value);
+    if (!hasFilledValues) {
+      triggerToast("Please fill checksheet items before approving.", "error");
+      return false;
+    }
+
+    return true;
   };
 
   // ==========================================================
@@ -338,44 +360,45 @@ export default function ErrorProofingCheckSheet() {
   // SEPARATE SIGNATURE APPROVAL HANDLERS
   // ==========================================================
   const handleApproveOperator = () => {
+    if (!validateBeforeApprove()) return;
+
     setSignatures((prev) => ({
       ...prev,
-      // If Operator clicks it, operator username is saved.
-      // If Shift Incharge clicks it, strictly save "Approved".
       "Operator": isOperatorRoute ? currentUser : "Approved"
     }));
     triggerToast("Operator signature approved successfully", "success");
   };
 
   const handleApproveShiftIncharge = () => {
+    if (!validateBeforeApprove()) return;
+
     setSignatures((prev) => ({
       ...prev,
-      // Shift Incharge name comes ONLY in this field.
-      // Does not alter or overwrite Operator's signature.
       "Shift Incharge": currentUser
     }));
     triggerToast("Shift Incharge signature approved successfully", "success");
   };
 
   // ==========================================================
-  // DIRECT PDF DOWNLOAD
+  // PDF REPORT DOWNLOAD (BY DATE RANGE)
   // ==========================================================
-  const handleDownloadPdf = async () => {
-    if (!headerInfo.lineCode || !headerInfo.date) {
-      triggerToast("Please select Line Code and Date first.", "error");
+  const handleDownloadPdfRange = async () => {
+    if (!pdfFromDate || !pdfToDate) {
+      triggerToast("Please select both From Date and To Date.", "error");
       return;
     }
 
-    if (!isSavedRecord) {
-      triggerToast("No saved record found for this date. Save before downloading.", "error");
+    if (new Date(pdfFromDate) > new Date(pdfToDate)) {
+      triggerToast("From Date cannot be later than To Date.", "error");
       return;
     }
 
+    setIsDownloadingPdf(true);
     try {
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({
-        lineCode: headerInfo.lineCode,
-        date: headerInfo.date,
+        fromDate: pdfFromDate,
+        toDate: pdfToDate,
         shopId: String(shopId || 3)
       });
 
@@ -384,22 +407,28 @@ export default function ErrorProofingCheckSheet() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      if (!res.ok) throw new Error("Report request failed");
+      if (res.status === 404) {
+        throw new Error("No checksheet records found for the selected date range.");
+      }
+      if (!res.ok) throw new Error("Failed to download PDF report");
 
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `ErrorProofing_Checksheet_${headerInfo.lineCode}_${headerInfo.date}.pdf`;
+      link.download = `ErrorProofing_Checksheet_Report_${pdfFromDate}_to_${pdfToDate}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
-      triggerToast("PDF generated and downloaded!", "success");
+      setShowPdfModal(false);
+      triggerToast("PDF generated and downloaded successfully!", "success");
     } catch (err) {
       console.error("PDF generation failed:", err);
       triggerToast(err.message || "Failed to generate PDF", "error");
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -526,6 +555,68 @@ export default function ErrorProofingCheckSheet() {
         }
       />
 
+      {/* Date Range Modal for PDF Download */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">Download PDF by Date Range</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowPdfModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">From Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfFromDate}
+                  onChange={(e) => setPdfFromDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">To Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfToDate}
+                  onChange={(e) => setPdfToDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPdfModal(false)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadPdfRange}
+                disabled={isDownloadingPdf}
+                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+              >
+                <FileDown className="w-4 h-4" />
+                {isDownloadingPdf ? "Downloading..." : "Download PDF"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Saving / Success Overlay */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -600,7 +691,7 @@ export default function ErrorProofingCheckSheet() {
 
           <button
             type="button"
-            onClick={handleDownloadPdf}
+            onClick={() => setShowPdfModal(true)}
             className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
           >
             <FileDown className="w-4 h-4" /> Download PDF

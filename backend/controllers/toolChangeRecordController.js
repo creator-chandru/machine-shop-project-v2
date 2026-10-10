@@ -153,7 +153,7 @@ const saveToolChangeRecord = async (req, res) => {
                   AND machineShop = @machineShop 
                   AND (verifiedByQcSignature IS NULL OR verifiedByQcSignature = '' OR verifiedByQcSignature = 'Pending')
             `);
-        // Sections already approved by QC stay in the DB untouched; don't re-insert them
+
         const verifiedRes = await transaction.request()
             .input('lineCode', sql.NVarChar(100), lineCode)
             .input('checkDate', sql.NVarChar(50), cleanDate)
@@ -323,7 +323,6 @@ const signQcApproval = async (req, res) => {
         request.input('signature', sql.NVarChar(100), signVal);
         request.input('qcName', sql.NVarChar(100), String(qcUsername).trim());
 
-        // Only rows assigned to this QC and still pending
         const result = await request.query(`
             UPDATE ToolChangeRecord 
             SET verifiedByQcSignature = @signature, status = 'Completed', updatedAt = GETDATE()
@@ -345,7 +344,7 @@ const signQcApproval = async (req, res) => {
 };
 
 // ============================================================
-// 6. GET: Fetch Records (Query by lineCode and date)
+// 6. GET: Fetch Records (Query by lineCode, date, machineNo, shift)
 // ============================================================
 const parseControlSpec = (spec) => {
     const tokens = String(spec || '').trim().split(/\s+/).filter(Boolean);
@@ -360,8 +359,9 @@ const parseControlSpec = (spec) => {
     }
     return { nominalValue: tokens[0], operatorSymbol: '±', toleranceValue: '' };
 };
+
 const getToolChangeRecords = async (req, res) => {
-    const { machineShop, lineCode, partName, date, machineNo } = req.query;
+    const { machineShop, lineCode, partName, date, machineNo, shift } = req.query;
 
     try {
         let query = `
@@ -419,6 +419,10 @@ const getToolChangeRecords = async (req, res) => {
             request.input('machineNo', sql.NVarChar(100), machineNo);
             query += ` AND machineNo = @machineNo`;
         }
+        if (shift) {
+            request.input('shift', sql.NVarChar(20), shift);
+            query += ` AND shift = @shift`;
+        }
 
         query += ` ORDER BY checkDate DESC, id ASC`;
 
@@ -429,7 +433,6 @@ const getToolChangeRecords = async (req, res) => {
             return res.status(200).json([]);
         }
 
-        // A new section (column) starts every time slNo restarts at 1
         const sectionList = [];
         let current = null;
         rows.forEach((r) => {
@@ -483,7 +486,7 @@ const getToolChangeRecords = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET: PDF Generator Endpoint
+// 7. GET: PDF Generator Endpoint (Untouched)
 // ============================================================
 const generateReport = async (req, res) => {
     try {
@@ -612,7 +615,7 @@ const generateReport = async (req, res) => {
 
         records.forEach((r) => {
             const controlSpec = r.controlSpec || "-";
-            const time = (r.fromTime || r.toTime) ? `${r.fromTime || ""} - ${r.toTime || ""}` : "-";
+            const time = (r.fromTime || r.toTime) ? `${r.fromTime || ""}\n${r.toTime || ""}` : "-";
             y = drawRow([
                 r.lineCode || "-",
                 r.partName || "-",

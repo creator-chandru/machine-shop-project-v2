@@ -90,7 +90,7 @@ export default function RecordOfSignificantEvent() {
     to: "",
   });
 
-  // 2. Traceability Information
+  // 2. Traceability Information (Manual and auto-generated are editable)
   const [traceability, setTraceability] = useState({
     casting: {
       before: { part1: "", part2: "", part3: "" },
@@ -107,7 +107,7 @@ export default function RecordOfSignificantEvent() {
     Array.from({ length: INITIAL_ROWS }, () => createEmptyRow())
   );
 
-  // 4. Signatures (Untouched functionality)
+  // 4. Signatures
   const [signatures, setSignatures] = useState({
     prodnIncharge: "",
     qcIncharge: "",
@@ -152,7 +152,7 @@ export default function RecordOfSignificantEvent() {
     fetchMasterData();
   }, [shopId]);
 
-  // Fetch Users for Signatures (Untouched logic)
+  // Fetch Users for Signatures
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -226,10 +226,45 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Check if existing record exists for lineCode + mcNo + date
+  // Reset form to blank template state
+  const resetFormState = (retainingLine = "", retainingMc = "", retainingDate = getTodayISODate(), retainingShift = "I") => {
+    setIsSavedRecord(false);
+    setHeader((prev) => ({
+      ...prev,
+      month: "",
+      event: "",
+      opNo: "",
+      from: "",
+      to: "",
+      lineCode: retainingLine,
+      mcNo: retainingMc,
+      date: retainingDate,
+      shift: retainingShift,
+    }));
+    setTraceability({
+      casting: {
+        before: { part1: "", part2: "", part3: "" },
+        after: { part1: "", part2: "", part3: "" },
+      },
+      machining: {
+        before: { part1: "", part2: "", part3: "" },
+        after: { part1: "", part2: "", part3: "" },
+      },
+    });
+    setRows(Array.from({ length: INITIAL_ROWS }, () => createEmptyRow()));
+    setSignatures({
+      prodnIncharge: "",
+      qcIncharge: "",
+      prodnHofSign: "",
+    });
+  };
+
+  // ==========================================================
+  // COMBO CHECK: lineCode + mcNo + date + shift
+  // ==========================================================
   const checkExistingRecord = async (lineCode, mcNo, date, shift) => {
-    if (!lineCode || !mcNo || !date) {
-      setIsSavedRecord(false);
+    if (!lineCode || !mcNo || !date || !shift) {
+      resetFormState(lineCode, mcNo, date, shift);
       return;
     }
 
@@ -237,11 +272,9 @@ export default function RecordOfSignificantEvent() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/significant-event-record?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-record?lineCode=${encodeURIComponent(
           lineCode
-        )}&mcNo=${encodeURIComponent(mcNo)}&date=${encodeURIComponent(date)}${
-          shift ? `&shift=${encodeURIComponent(shift)}` : ""
-        }`,
+        )}&mcNo=${encodeURIComponent(mcNo)}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}&machineShop=${encodeURIComponent(shopId || 3)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -261,7 +294,6 @@ export default function RecordOfSignificantEvent() {
             partName: first.partName || prev.partName,
             event: first.event || "",
             opNo: first.opNo || "",
-            shift: first.shift || prev.shift,
             from: first.fromTime || "",
             to: first.toTime || "",
           }));
@@ -311,14 +343,14 @@ export default function RecordOfSignificantEvent() {
           );
 
           setSignatures({
-            prodnIncharge: first.prodnIncharge?.replace(/^(Pending \[|Approved \()|(\]|\))$/g, "") || "",
-            qcIncharge: first.qcIncharge?.replace(/^(Pending \[|Approved \()|(\]|\))$/g, "") || "",
-            prodnHofSign: first.prodnHofSign?.replace(/^(Pending \[|Approved \()|(\]|\))$/g, "") || "",
+            prodnIncharge: first.prodnIncharge?.replace(/^(Pending \[|Approved \()\vert{}(\]\vert{}\))$/g, "") || "",
+            qcIncharge: first.qcIncharge?.replace(/^(Pending \[|Approved \()\vert{}(\]\vert{}\))$/g, "") || "",
+            prodnHofSign: first.prodnHofSign?.replace(/^(Pending \[|Approved \()\vert{}(\]\vert{}\))$/g, "") || "",
           });
-          triggerToast("Existing record loaded. Values are locked.", "success");
+          triggerToast("Existing record loaded for this combo.", "success");
         } else {
-          setIsSavedRecord(false);
-          setRows(Array.from({ length: INITIAL_ROWS }, () => createEmptyRow()));
+          resetFormState(lineCode, mcNo, date, shift);
+          fetchMachiningTraceability(lineCode, date, shift);
         }
       }
     } catch (err) {
@@ -326,39 +358,24 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Header change handler
+  // Header change handler with combo refresh
   const handleHeaderChange = (field, val) => {
-    // Only lineCode, mcNo, date can be changed when record already exists
-    if (isSavedRecord && !["lineCode", "mcNo", "date"].includes(field)) {
-      return;
+    let nextHeader = { ...header, [field]: val };
+
+    if (field === "lineCode") {
+      const mapping = lineMappings.find((m) => m.lineCode === val);
+      const autoPartName =
+        mapping?.partSet ||
+        machineDetails.find((m) => m.lineCode === val)?.partName ||
+        "";
+      nextHeader.partName = autoPartName;
+      nextHeader.mcNo = "";
     }
 
-    setHeader((prev) => {
-      const next = { ...prev, [field]: val };
+    setHeader(nextHeader);
 
-      if (field === "lineCode") {
-        const mapping = lineMappings.find((m) => m.lineCode === val);
-        const autoPartName =
-          mapping?.partSet ||
-          machineDetails.find((m) => m.lineCode === val)?.partName ||
-          "";
-        next.partName = autoPartName;
-        next.mcNo = ""; // Reset M/C No to blank by default when line changes
-      }
-      return next;
-    });
-
-    const targetLine = field === "lineCode" ? val : header.lineCode;
-    const targetMc = field === "mcNo" ? val : header.mcNo;
-    const targetDate = field === "date" ? val : header.date;
-    const targetShift = field === "shift" ? val : header.shift;
-
-    if (field === "lineCode" || field === "date" || field === "shift") {
-      fetchMachiningTraceability(targetLine, targetDate, targetShift);
-    }
-
-    if (field === "lineCode" || field === "mcNo" || field === "date") {
-      checkExistingRecord(targetLine, targetMc, targetDate, targetShift);
+    if (["lineCode", "mcNo", "date", "shift"].includes(field)) {
+      checkExistingRecord(nextHeader.lineCode, nextHeader.mcNo, nextHeader.date, nextHeader.shift);
     }
   };
 
@@ -459,10 +476,65 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Save to Backend
+  // Save handler with inner table checks removed
   const handleSave = async () => {
-    if (!header.lineCode || !header.mcNo || !header.date) {
-      triggerToast("Please provide Line Code, M/C No, and Date before saving.", "error");
+    // 1. Header validations
+    if (!header.lineCode) {
+      triggerToast("Please select Line Code.", "error");
+      return;
+    }
+    if (!header.mcNo) {
+      triggerToast("Please select M/C No.", "error");
+      return;
+    }
+    if (!header.opNo) {
+      triggerToast("Please select OP No.", "error");
+      return;
+    }
+    if (!header.event || !header.event.trim()) {
+      triggerToast("Please specify the Event description.", "error");
+      return;
+    }
+    if (!header.date) {
+      triggerToast("Please select Date.", "error");
+      return;
+    }
+    if (!header.shift) {
+      triggerToast("Please select Shift.", "error");
+      return;
+    }
+    if (!header.from || !header.to) {
+      triggerToast("Please enter both FROM and TO times.", "error");
+      return;
+    }
+
+    // 2. Casting Traceability validations
+    const cB = traceability.casting.before;
+    const cA = traceability.casting.after;
+    if (!cB.part1 || !cB.part2 || !cB.part3 || !cA.part1 || !cA.part2 || !cA.part3) {
+      triggerToast("Please fill all Casting Traceability part codes (Before & After).", "error");
+      return;
+    }
+
+    // 3. Machining Traceability validations
+    const mB = traceability.machining.before;
+    const mA = traceability.machining.after;
+    if (!mB.part1 || !mB.part2 || !mB.part3 || !mA.part1 || !mA.part2 || !mA.part3) {
+      triggerToast("Please fill all Machining Traceability part codes (Before & After).", "error");
+      return;
+    }
+
+    // 4. Signature validations
+    if (!signatures.prodnIncharge) {
+      triggerToast("Please select Production Incharge signature before submitting.", "error");
+      return;
+    }
+    if (!signatures.qcIncharge) {
+      triggerToast("Please select QC Incharge signature before submitting.", "error");
+      return;
+    }
+    if (!signatures.prodnHofSign) {
+      triggerToast("Please select Production HOF signature before submitting.", "error");
       return;
     }
 
@@ -546,9 +618,7 @@ export default function RecordOfSignificantEvent() {
           </button>
         </div>
 
-        {/* ========================================================
-            1. HEADER & EVENT DETAILS TABLE
-        ======================================================== */}
+        {/* 1. HEADER & EVENT DETAILS TABLE */}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
             <tbody>
@@ -725,9 +795,7 @@ export default function RecordOfSignificantEvent() {
           </table>
         </div>
 
-        {/* ========================================================
-            2. SINGLE CONTROL SPEC & MEASUREMENTS TABLE
-        ======================================================== */}
+        {/* 2. MEASUREMENTS & SPECIFICATIONS TABLE */}
         <div className="pt-2">
           <div className="flex justify-between items-center mb-2 px-1">
             <div className="flex items-center gap-2">
@@ -802,7 +870,7 @@ export default function RecordOfSignificantEvent() {
                         type="text"
                         disabled={isSavedRecord}
                         placeholder="Manual"
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100 font-medium"
                         value={traceability.casting.before[p]}
                         onChange={(e) =>
                           handleTraceabilityChange("casting", "before", p, e.target.value)
@@ -816,7 +884,7 @@ export default function RecordOfSignificantEvent() {
                         type="text"
                         disabled={isSavedRecord}
                         placeholder="Manual"
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100 font-medium"
                         value={traceability.casting.after[p]}
                         onChange={(e) =>
                           handleTraceabilityChange("casting", "after", p, e.target.value)
@@ -826,36 +894,42 @@ export default function RecordOfSignificantEvent() {
                   ))}
                 </tr>
 
-                {/* 2) Part Traceability - Machining (Auto-Generated) */}
+                {/* 2) Part Traceability - Machining (Auto-Generated + Manually Editable) */}
                 <tr className="h-8">
                   <td colSpan={2} className="border border-gray-800 px-3 py-1 text-left font-medium bg-gray-50">
                     2) Part Traceability - Machining:
                   </td>
                   {["part1", "part2", "part3"].map((p) => (
-                    <td key={`mach-b-${p}`} className="border border-gray-800 p-0 bg-gray-50">
+                    <td key={`mach-b-${p}`} className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        readOnly
-                        placeholder="Auto-generated"
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 text-gray-700"
+                        disabled={isSavedRecord}
+                        placeholder="Auto / Edit"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100 font-medium"
                         value={traceability.machining.before[p]}
+                        onChange={(e) =>
+                          handleTraceabilityChange("machining", "before", p, e.target.value)
+                        }
                       />
                     </td>
                   ))}
                   {["part1", "part2", "part3"].map((p) => (
-                    <td key={`mach-a-${p}`} className="border border-gray-800 p-0 bg-gray-50">
+                    <td key={`mach-a-${p}`} className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        readOnly
-                        placeholder="Auto-generated"
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 text-gray-700"
+                        disabled={isSavedRecord}
+                        placeholder="Auto / Edit"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100 font-medium"
                         value={traceability.machining.after[p]}
+                        onChange={(e) =>
+                          handleTraceabilityChange("machining", "after", p, e.target.value)
+                        }
                       />
                     </td>
                   ))}
                 </tr>
 
-                {/* Dynamic Custom Data Rows with OK / NOT OK dropdowns */}
+                {/* Dynamic Custom Data Rows */}
                 {rows.map((row, rIdx) => (
                   <tr key={`data-row-${rIdx}`} className="h-8">
                     {/* CONTROL SPEC */}
@@ -863,7 +937,7 @@ export default function RecordOfSignificantEvent() {
                       <input
                         type="text"
                         disabled={isSavedRecord}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100 font-medium"
                         placeholder="Specification"
                         value={row.controlSpec}
                         onChange={(e) =>
@@ -877,7 +951,7 @@ export default function RecordOfSignificantEvent() {
                       <input
                         type="text"
                         disabled={isSavedRecord}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100 font-medium"
                         placeholder="Instrument / Gauge"
                         value={row.inspectionGauge}
                         onChange={(e) =>
@@ -886,7 +960,7 @@ export default function RecordOfSignificantEvent() {
                       />
                     </td>
 
-                    {/* BEFORE OCCURANCE (PART 1, 2, 3) - DROPDOWN OK / NOT OK */}
+                    {/* BEFORE OCCURANCE (PART 1, 2, 3) */}
                     {["part1", "part2", "part3"].map((p) => (
                       <td key={`b-${p}-${rIdx}`} className="border border-gray-800 p-0">
                         <select
@@ -904,7 +978,7 @@ export default function RecordOfSignificantEvent() {
                       </td>
                     ))}
 
-                    {/* AFTER CORRECTION (PART 1, 2, 3) - DROPDOWN OK / NOT OK */}
+                    {/* AFTER CORRECTION (PART 1, 2, 3) */}
                     {["part1", "part2", "part3"].map((p) => (
                       <td key={`a-${p}-${rIdx}`} className="border border-gray-800 p-0">
                         <select
@@ -928,9 +1002,7 @@ export default function RecordOfSignificantEvent() {
           </div>
         </div>
 
-        {/* ========================================================
-            3. SIGNATURES & APPLICABLE EVENTS TABLE (UNTOUCHED)
-        ======================================================== */}
+        {/* 3. SIGNATURES & APPLICABLE EVENTS TABLE */}
         <div className="overflow-x-auto pt-2">
           <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center table-fixed">
             <tbody>

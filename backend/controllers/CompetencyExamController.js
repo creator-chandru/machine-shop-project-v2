@@ -12,52 +12,22 @@ const answerKey = {
 // ============================================================
 const getAllLines = async (req, res) => {
     try {
-        const { shopId } = req.query;
         const request = new sql.Request();
         
-        let query = `
+        const query = `
             SELECT DISTINCT lineCode 
-            FROM LineMappings 
+            FROM ErrorProofingCheckSheet 
             WHERE lineCode IS NOT NULL AND lineCode <> ''
+            ORDER BY lineCode ASC
         `;
-
-        if (shopId && !isNaN(parseInt(shopId, 10))) {
-            request.input('shopId', sql.Int, parseInt(shopId, 10));
-            query += ` AND (shopId = @shopId OR machineShop = @shopId)`;
-        }
-
-        query += ` ORDER BY lineCode ASC`;
 
         const result = await request.query(query);
         const lineList = result.recordset.map(row => row.lineCode);
         
         return res.status(200).json(lineList);
     } catch (err) {
-        console.error("Fetch lines error from LineMappings:", err);
-        
-        // Fallback: Query distinct line codes from ErrorProofingCheckSheet if LineMappings fails
-        try {
-            const fallbackReq = new sql.Request();
-            let fallbackQuery = `
-                SELECT DISTINCT lineCode 
-                FROM ErrorProofingCheckSheet 
-                WHERE lineCode IS NOT NULL AND lineCode <> ''
-            `;
-
-            if (req.query.shopId && !isNaN(parseInt(req.query.shopId, 10))) {
-                fallbackReq.input('shopId', sql.Int, parseInt(req.query.shopId, 10));
-                fallbackQuery += ` AND machineShop = @shopId`;
-            }
-
-            fallbackQuery += ` ORDER BY lineCode ASC`;
-
-            const fallbackRes = await fallbackReq.query(fallbackQuery);
-            const lineList = fallbackRes.recordset.map(row => row.lineCode);
-            return res.status(200).json(lineList);
-        } catch (fallbackErr) {
-            console.error("Fallback fetch lines error:", fallbackErr);
-            return res.status(500).json({ error: 'Failed to fetch line codes' });
-        }
+        console.error("Fetch lines error from ErrorProofingCheckSheet:", err);
+        return res.status(500).json({ error: 'Failed to fetch line codes' });
     }
 };
 
@@ -131,7 +101,7 @@ const saveCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 3. FETCH SAVED EXAM DATA (BY EMP NO, LINE, & DATE)
+// 3. FETCH SAVED EXAM DATA
 // ============================================================
 const getCompetencyExam = async (req, res) => {
     const employeeNo = req.query.employeeNo;
@@ -180,7 +150,7 @@ const getCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 4. GENERATE PDF REPORT
+// 4. GENERATE STRUCTURED TABLE PDF REPORT
 // ============================================================
 const generateCompetencyReport = async (req, res) => {
     try {
@@ -213,33 +183,111 @@ const generateCompetencyReport = async (req, res) => {
         const data = result.recordset[0];
         const answers = JSON.parse(data.answers || '{}');
 
-        const doc = new PDFDocument({ margin: 25, size: "A4" });
+        const doc = new PDFDocument({ margin: 30, size: "A4" });
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename=Exam_${employeeNo}_${cleanDate}.pdf`);
+        res.setHeader("Content-Disposition", `inline; filename=Competency_Report_${employeeNo}_${cleanDate}.pdf`);
         doc.pipe(res);
 
-        // Header Section
-        doc.font("Helvetica-Bold").fontSize(14).text("SAKTHI AUTO COMPONENT LIMITED", { align: "center" });
-        doc.fontSize(11).text("LEVEL 3 COMPETENCY QUALIFICATION - VTL & HTL MACHINE", { align: "center" });
-        doc.moveDown(0.5);
+        // --- TITLE HEADER ---
+        doc.font("Helvetica-Bold").fontSize(13).text("SAKTHI AUTO COMPONENT LIMITED", { align: "center" });
+        doc.fontSize(10).fillColor("#444444").text("LEVEL 3 COMPETENCY QUALIFICATION EVALUATION REPORT - VTL & HTL", { align: "center" });
+        doc.moveDown(0.8);
 
-        doc.fontSize(9).font("Helvetica");
-        doc.text(`Emp No: ${data.employeeNo} | Name: ${data.employeeName} | Line: ${data.line}`);
-        doc.text(`DOJ: ${data.doj ? new Date(data.doj).toISOString().split('T')[0] : 'N/A'} | Date: ${new Date(data.examDate).toISOString().split('T')[0]} | Qualification: ${data.qualification}`);
-        doc.text(`Score: ${data.score} / 100 | Evaluated By: ${data.evaluatedBy || 'N/A'}`);
-        doc.moveDown();
+        // --- EMPLOYEE DETAILS PANEL ---
+        const boxTop = doc.y;
+        doc.rect(30, boxTop, 535, 55).strokeColor("#B0B0B0").lineWidth(1).stroke();
+        
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000");
+        doc.text(`Emp No:`, 40, boxTop + 10);
+        doc.font("Helvetica").text(data.employeeNo, 90, boxTop + 10);
 
-        doc.moveTo(25, doc.y).lineTo(570, doc.y).stroke();
-        doc.moveDown(0.5);
+        doc.font("Helvetica-Bold").text(`Name:`, 210, boxTop + 10);
+        doc.font("Helvetica").text(data.employeeName || 'N/A', 245, boxTop + 10);
 
-        doc.font("Helvetica-Bold").fontSize(10).text("Submitted Answers:");
-        doc.moveDown(0.5);
+        doc.font("Helvetica-Bold").text(`Line:`, 410, boxTop + 10);
+        doc.font("Helvetica").text(data.line, 440, boxTop + 10);
 
+        doc.font("Helvetica-Bold").text(`DOJ:`, 40, boxTop + 25);
+        doc.font("Helvetica").text(data.doj ? new Date(data.doj).toISOString().split('T')[0] : 'N/A', 90, boxTop + 25);
+
+        doc.font("Helvetica-Bold").text(`Date:`, 210, boxTop + 25);
+        doc.font("Helvetica").text(cleanDate, 245, boxTop + 25);
+
+        doc.font("Helvetica-Bold").text(`Qualification:`, 410, boxTop + 25);
+        doc.font("Helvetica").text(data.qualification || 'N/A', 475, boxTop + 25);
+
+        doc.font("Helvetica-Bold").text(`Evaluated By:`, 40, boxTop + 40);
+        doc.font("Helvetica").text(data.evaluatedBy || 'N/A', 110, boxTop + 40);
+
+        doc.font("Helvetica-Bold").text(`Score:`, 410, boxTop + 40);
+        doc.font("Helvetica-Bold").fillColor(data.score >= 70 ? "#008000" : "#D32F2F").text(`${data.score} / 100`, 445, boxTop + 40);
+
+        doc.moveDown(2.8);
+
+        // --- TABLE LAYOUT CONFIGURATION ---
+        const startX = 30;
+        const colWidths = [50, 140, 160, 185]; 
+        const rowHeight = 20;
+        let currentY = doc.y;
+
+        // Draw Table Header Row
+        doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9);
+        doc.rect(startX, currentY, 535, rowHeight).fill("#E2E8F0").stroke();
+        
+        doc.fillColor("#000000");
+        doc.text("Q. No", startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
+        doc.text("Selected Answer", startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
+        doc.text("Status", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
+        doc.text("Correct Answer (Key)", startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
+
+        currentY += rowHeight;
+
+        // --- TABLE DATA ROWS ---
         doc.font("Helvetica").fontSize(9);
         for (let i = 1; i <= 20; i++) {
+            if (currentY > 750) { 
+                doc.addPage();
+                currentY = 40;
+            }
+
             const selectedOpt = answers[i] || "Unanswered";
-            const isCorrect = selectedOpt === answerKey[i] ? "✓ Correct" : `X Incorrect (Key: ${answerKey[i]})`;
-            doc.text(`Q${i}: Option ${selectedOpt}   ---   ${isCorrect}`);
+            const correctOpt = answerKey[i];
+            const isCorrect = selectedOpt === correctOpt;
+
+            // Alternating row background for clean structure
+            const rowBg = i % 2 === 0 ? "#F8FAFC" : "#FFFFFF";
+            doc.rect(startX, currentY, 535, rowHeight).fill(rowBg).strokeColor("#CBD5E1").lineWidth(0.5).stroke();
+
+            // Text columns
+            doc.fillColor("#000000").font("Helvetica-Bold");
+            doc.text(`Q${i}`, startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
+
+            doc.font("Helvetica");
+            doc.text(`Option ${selectedOpt}`, startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
+
+            if (isCorrect) {
+                // Correct: Green status text
+                doc.fillColor("#16A34A").font("Helvetica-Bold");
+                doc.text("✓ Correct", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
+
+                doc.fillColor("#334155").font("Helvetica");
+                doc.text(`Option ${correctOpt}`, startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
+            } else {
+                // Incorrect: Red status text
+                doc.fillColor("#DC2626").font("Helvetica-Bold");
+                doc.text("X Incorrect", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
+
+                // Correct Answer highlighted with Yellow background box indicator
+                doc.save();
+                const badgeX = startX + colWidths[0] + colWidths[1] + colWidths[2] + 45;
+                const badgeY = currentY + 3;
+                doc.roundedRect(badgeX, badgeY, 95, 14, 3).fill("#FEF08A").stroke(); // Yellow / Amber highlight box
+                doc.fillColor("#854D0E").font("Helvetica-Bold");
+                doc.text(`Option ${correctOpt}`, badgeX, badgeY + 3, { width: 95, align: "center" });
+                doc.restore();
+            }
+
+            currentY += rowHeight;
         }
 
         doc.end();

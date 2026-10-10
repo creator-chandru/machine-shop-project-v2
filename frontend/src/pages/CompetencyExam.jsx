@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useLineSet } from "../context/LineSetContext.jsx";
 import { FileDown } from "lucide-react";
 import Header from '../components/Header';
 
@@ -48,6 +49,7 @@ const Toast = ({ message, type, onClose }) => {
 export default function CompetencyExamVtlHtl() {
   const { shopId } = useParams();
   const navigate = useNavigate();
+  const { lineSet, setLineSet } = useLineSet();
 
   const [headerInfo, setHeaderInfo] = useState({
     employeeNo: "",
@@ -70,6 +72,15 @@ export default function CompetencyExamVtlHtl() {
     setToast({ message, type });
     setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
+
+  useEffect(() => {
+    if (lineSet && lineSet.lineCode) {
+      setHeaderInfo((prev) => ({
+        ...prev,
+        line: lineSet.lineCode || ""
+      }));
+    }
+  }, [lineSet]);
 
   // Fetch Line Codes
   useEffect(() => {
@@ -94,6 +105,11 @@ export default function CompetencyExamVtlHtl() {
     };
     fetchLineCodes();
   }, [shopId]);
+
+  const handleLineChange = (lineCode) => {
+    setHeaderInfo((prev) => ({ ...prev, line: lineCode }));
+    setLineSet({ machineShop: shopId, lineCode });
+  };
 
   // Fetch Saved Exam Data on Same Line Code, Date, and Emp No
   useEffect(() => {
@@ -293,7 +309,7 @@ export default function CompetencyExamVtlHtl() {
             <select
               className="w-full border border-gray-300 p-2 rounded text-sm font-semibold bg-white"
               value={headerInfo.line}
-              onChange={(e) => handleHeaderChange('line', e.target.value)}
+              onChange={(e) => handleLineChange(e.target.value)}
               disabled={loadingLines}
             >
               <option value="">{loadingLines ? "Loading..." : "Select Line Code"}</option>

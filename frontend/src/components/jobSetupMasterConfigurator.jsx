@@ -6,7 +6,7 @@ const API = process.env.REACT_APP_API_URL || "";
 
 const SPECIAL_CHARS = ["Ø", "±", "°", "×", "≤", "≥", "⌀", "⊥", "∥", "√", "Ra", "~", "'", '"', "µm", "R", "C"];
 
-const DEFAULT_ROWS = 10;
+const DEFAULT_ROWS = 5;
 const emptyRow = () => ({ controlName: "", specification: "" });
 const blankRows = () => Array.from({ length: DEFAULT_ROWS }, emptyRow);
 
@@ -30,7 +30,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
 
   const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 
-  // Derive distinct Part Names from M{shopId}PartSets (fallback to legacy if empty)
+  // Derive distinct Part Names from M{shopId}PartSets (fallback to machineDetails / lineMappings)
   const partOptions = Array.from(
     new Set(
       partSets.length > 0
@@ -62,7 +62,6 @@ export default function JobSetupMasterConfigurator({ shopId }) {
         setLoadingParts(true);
         const currentShop = shopId || "3";
 
-        // Fetch from dynamic M{shopId}PartSets endpoint
         const partRes = await fetch(`${API}/api/job-setup-verification/parts/${currentShop}`, {
           headers: authHeaders(),
         }).catch(() => null);
@@ -99,7 +98,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
     setLoadingSpecs(true);
     try {
       const res = await fetch(
-        `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(name)}`,
+        `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(name)}&shopId=${shopId || 3}`,
         { headers: authHeaders() }
       );
       if (seq !== loadSeqRef.current) return;
@@ -151,6 +150,10 @@ export default function JobSetupMasterConfigurator({ shopId }) {
     }, 0);
   };
 
+  const handleDeleteRow = (idx) => {
+    setRows((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   const handleSave = async () => {
     if (!partName) {
       toast.error("Please select a Part Name first.");
@@ -180,6 +183,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
           partNo,
           specifications: cleaned,
           username: currentUsername,
+          shopId: shopId || "3",
         }),
       });
       if (!res.ok) {
@@ -188,7 +192,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
       }
       setRows(cleaned.map((r) => ({ ...r })));
       setHasMaster(true);
-      toast.success("Control specifications saved for this part!");
+      toast.success("Control specifications updated successfully!");
       fetchMasters();
     } catch (err) {
       toast.error(err.message || "Failed to save control specifications");
@@ -231,8 +235,8 @@ export default function JobSetupMasterConfigurator({ shopId }) {
             {loadingSpecs
               ? "Loading..."
               : hasMaster
-              ? "Saved specifications loaded. Editing and saving will update what shift incharges see for this part."
-              : "No specifications configured for this part yet. Fill in the rows below and save."}
+              ? "Existing specifications loaded (from master/supervisor submissions). You can edit, delete, or add new rows."
+              : "No specifications saved for this part yet. Fill in the rows below and save to set up."}
           </p>
         )}
 
@@ -260,16 +264,17 @@ export default function JobSetupMasterConfigurator({ shopId }) {
 
       {partName && !loadingSpecs && (
         <>
+          {/* SPECIAL SYMBOLS TOOLBAR */}
           <div className="bg-orange-50 border border-orange-200 p-2.5 rounded flex flex-wrap items-center gap-1.5 text-xs shadow-inner">
             <span className="font-bold text-gray-800 mr-2 uppercase text-[11px]">
-              Insert Symbol to Control / Specification:
+              Insert Symbol:
             </span>
             {SPECIAL_CHARS.map((char) => (
               <button
                 key={char}
                 type="button"
                 onMouseDown={(e) => insertSymbol(e, char)}
-                className="bg-white hover:bg-orange-500 hover:text-white border border-gray-300 rounded px-2.5 py-1 font-bold text-gray-800 shadow-sm transition-all"
+                className="bg-white hover:bg-orange-500 hover:text-white border border-gray-300 rounded px-2.5 py-1 font-bold text-gray-800 shadow-sm transition-all cursor-pointer"
               >
                 {char}
               </button>
@@ -278,7 +283,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
 
           <div className="overflow-x-auto max-h-[600px] border-2 border-gray-800 rounded">
             <table className="w-full text-xs border-collapse text-center min-w-[700px]">
-              <thead className="bg-gray-100 font-bold sticky top-0 z-10">
+              <thead className="bg-gray-100 font-bold sticky top-0 z-10 border-b border-gray-400">
                 <tr>
                   <th className="border border-gray-400 p-2 w-[8%]">Sl.No</th>
                   <th className="border border-gray-400 p-2 w-[42%]">Control</th>
@@ -287,13 +292,20 @@ export default function JobSetupMasterConfigurator({ shopId }) {
                 </tr>
               </thead>
               <tbody>
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="border border-gray-400 p-4 text-gray-500 italic">
+                      No rows available. Click "Add Row" to create one.
+                    </td>
+                  </tr>
+                )}
                 {rows.map((r, idx) => (
-                  <tr key={`spec-${idx}`} className="bg-white">
-                    <td className="border border-gray-400 p-1 font-bold">{idx + 1}</td>
+                  <tr key={`spec-${idx}`} className="bg-white hover:bg-orange-50/20">
+                    <td className="border border-gray-400 p-1 font-bold bg-gray-50">{idx + 1}</td>
                     <td className="border border-gray-400 p-1">
                       <input
                         type="text"
-                        className="w-full p-1 font-semibold uppercase outline-none"
+                        className="w-full p-1.5 font-bold uppercase outline-none border border-gray-200 rounded focus:border-orange-500"
                         value={r.controlName}
                         placeholder="e.g. BORE DIAMETER"
                         onFocus={(e) => {
@@ -305,7 +317,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
                     <td className="border border-gray-400 p-1">
                       <input
                         type="text"
-                        className="w-full p-1 font-semibold outline-none text-gray-900"
+                        className="w-full p-1.5 font-semibold outline-none text-gray-900 border border-gray-200 rounded focus:border-orange-500"
                         value={r.specification}
                         placeholder="e.g. Ø77 +0.030 / +0.076"
                         onFocus={(e) => {
@@ -317,9 +329,9 @@ export default function JobSetupMasterConfigurator({ shopId }) {
                     <td className="border border-gray-400 p-1">
                       <button
                         type="button"
-                        onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
-                        className="text-red-600 hover:text-red-800 font-bold cursor-pointer"
-                        title="Delete row"
+                        onClick={() => handleDeleteRow(idx)}
+                        className="text-red-600 hover:text-red-800 font-bold cursor-pointer p-1"
+                        title="Delete specification"
                       >
                         <Trash2 className="w-4 h-4 mx-auto" />
                       </button>
@@ -334,7 +346,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
             <button
               type="button"
               onClick={() => setRows((prev) => [...prev, emptyRow()])}
-              className="flex items-center gap-1 bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded font-bold text-xs cursor-pointer"
+              className="flex items-center gap-1 bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded font-bold text-xs cursor-pointer shadow"
             >
               <Plus className="w-3.5 h-3.5" /> Add Row
             </button>
@@ -342,7 +354,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
               type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-8 py-2.5 rounded font-bold shadow-lg uppercase tracking-wider text-xs cursor-pointer"
+              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-8 py-2.5 rounded font-bold shadow-lg uppercase tracking-wider text-xs cursor-pointer transition-colors"
             >
               <Save className="w-4 h-4" /> {isSaving ? "Saving..." : "Save Specifications"}
             </button>

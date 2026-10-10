@@ -315,109 +315,65 @@ const getLatestMachineParams = async (req, res) => {
 };
 
 // ============================================================
-// PDF REPORT GENERATOR FOR PRE-OPERATION CHECKLIST
+// PDF REPORT GENERATOR FOR PRE-OPERATION CHECKLIST (2 PER PAGE)
 // ============================================================
 const generatePreOperationReport = async (req, res) => {
-  const { lineCode, machineNo, date, shopId } = req.query;
+  const { fromDate, toDate, shopId } = req.query;
 
-  if (!lineCode || !machineNo || !date) {
-    return res.status(400).send("lineCode, machineNo, and date are required.");
+  if (!fromDate || !toDate) {
+    return res.status(400).send("fromDate and toDate are required.");
   }
 
   try {
-    const cleanDate = String(date).split('T')[0];
-    const request = new sql.Request();
-    request.input('lineCode', sql.NVarChar(50), lineCode);
-    request.input('machineNo', sql.NVarChar(50), machineNo);
-    request.input('checklistDate', sql.NVarChar(50), cleanDate);
+    const cleanFromDate = String(fromDate).split('T')[0];
+    const cleanToDate = String(toDate).split('T')[0];
+    const targetShopId = parseInt(shopId || 3, 10);
 
-    let query = `
+    const request = new sql.Request();
+    request.input('fromDate', sql.NVarChar(50), cleanFromDate);
+    request.input('toDate', sql.NVarChar(50), cleanToDate);
+    request.input('machineShop', sql.Int, targetShopId);
+
+    const query = `
       SELECT
         id, machineShop, lineCode, partName, partNo, machineNo, opNo,
         FORMAT(checklistDate, 'yyyy-MM-dd') AS checklistDate,
         slNo, specification, subRow, value,
         operatorSignature, shiftInchargeSignature
       FROM PreOperationChecklist
-      WHERE lineCode = @lineCode
-        AND machineNo = @machineNo
-        AND CONVERT(date, checklistDate) = CONVERT(date, @checklistDate)
+      WHERE machineShop = @machineShop
+        AND CONVERT(date, checklistDate) >= CONVERT(date, @fromDate)
+        AND CONVERT(date, checklistDate) <= CONVERT(date, @toDate)
+      ORDER BY checklistDate ASC, lineCode ASC, machineNo ASC, slNo ASC, id ASC
     `;
-
-    if (shopId) {
-      request.input('machineShop', sql.Int, parseInt(shopId, 10));
-      query += ` AND machineShop = @machineShop`;
-    }
-
-    query += ` ORDER BY slNo ASC, id ASC`;
 
     const result = await request.query(query);
     const records = result.recordset;
 
     if (!records || records.length === 0) {
-      return res.status(404).send("No records found for the selected parameters.");
+      return res.status(404).send("No records found for the selected date range.");
     }
 
-    const first = records[0];
-    const [yy, mm, dd] = String(first.checklistDate).split('-');
-    const displayDate = `${dd}/${mm}/${yy}`;
+    // Group records by unique combination: lineCode + machineNo + checklistDate
+    const groupedMap = new Map();
+    records.forEach((r) => {
+      const groupKey = `${r.lineCode}_${r.machineNo}_${r.checklistDate}`;
+      if (!groupedMap.has(groupKey)) {
+        groupedMap.set(groupKey, []);
+      }
+      groupedMap.get(groupKey).push(r);
+    });
 
-    const doc = new PDFDocument({ margin: 25, size: "A4", layout: "portrait", bufferPages: true, autoPageBreak: false });
+    const groups = Array.from(groupedMap.values());
+
+    const doc = new PDFDocument({ margin: 20, size: "A4", layout: "portrait", bufferPages: true, autoPageBreak: false });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename=PreOperation_Checklist_${lineCode}_${machineNo}_${cleanDate}.pdf`);
+    res.setHeader("Content-Disposition", `attachment; filename=PreOperation_Checklist_Report_${cleanFromDate}_to_${cleanToDate}.pdf`);
     doc.pipe(res);
 
-    const startX = 25;
-    const headerY = 25;
-    const totalWidth = doc.page.width - 50;
-    const pageBottom = doc.page.height - 25;
-
-    // Header Blocks with expanded height (46pt) to prevent any text overlap
-    const headerH = 46;
-    doc.lineWidth(1).strokeColor('black');
-    doc.rect(startX, headerY, 95, headerH).stroke();
-
-    const logoPath = path.join(__dirname, 'logo.jpg');
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, startX + 8, headerY + 8, { width: 78, height: 30 });
-    } else {
-      doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 14, { width: 95, align: "center" });
-    }
-
-    const midWidth = totalWidth - 260;
-    doc.rect(startX + 95, headerY, midWidth, headerH).stroke();
-    doc.font("Helvetica-Bold").fontSize(9.5).fillColor('black')
-       .text("CHECK LIST FOR PRE OPERATION AND PROCESS PARAMETERS", startX + 100, headerY + 8, { width: midWidth - 10, align: "center" });
-    doc.font("Helvetica").fontSize(7.5).fillColor('black')
-       .text(`LINE: ${lineCode}   |   M/C NO: ${machineNo}   |   OP: ${first.opNo || '-'}`, startX + 100, headerY + 28, { width: midWidth - 10, align: "center" });
-
-    const rightWidth = 165;
-    doc.rect(startX + totalWidth - rightWidth, headerY, rightWidth, headerH).stroke();
-    doc.font("Helvetica-Bold").fontSize(7).fillColor('black')
-       .text(`PART: ${String(first.partName || '-').substring(0, 32)}`, startX + totalWidth - rightWidth + 5, headerY + 6, { width: rightWidth - 10 });
-    doc.font("Helvetica").fontSize(7).fillColor('black')
-       .text(`PART NO: ${first.partNo || '-'}`, startX + totalWidth - rightWidth + 5, headerY + 18, { width: rightWidth - 10 });
-    doc.font("Helvetica").fontSize(7).fillColor('black')
-       .text(`DATE: ${displayDate}`, startX + totalWidth - rightWidth + 5, headerY + 30, { width: rightWidth - 10 });
-
-    // Table Columns
-    const headers = ["Sl", "Parameters", "Specification", "Unit", "Method", "Condition", "Value"];
-    const fractions = [0.06, 0.32, 0.23, 0.09, 0.14, 0.08, 0.08];
-    const colWidths = fractions.map(f => f * totalWidth);
-    const pad = 3;
-    const fontSize = 7;
-
-    const drawHeader = (currY) => {
-      doc.font("Helvetica-Bold").fontSize(fontSize);
-      let x = startX;
-      headers.forEach((h, i) => {
-        doc.rect(x, currY, colWidths[i], 16).fillAndStroke('#f0f0f0', 'black');
-        doc.fillColor('black').text(h, x + pad, currY + 4, { width: colWidths[i] - pad * 2, align: "center" });
-        x += colWidths[i];
-      });
-      return currY + 16;
-    };
-
-    let y = drawHeader(headerY + headerH + 6);
+    const startX = 20;
+    const totalWidth = doc.page.width - 40; // 555pt printable width
+    const pageHeight = doc.page.height;     // 841.89pt
 
     const labels = {
       1: { name: "System pressure", unit: "KGF/CM2", method: "PRESSURE GAUGE" },
@@ -434,90 +390,160 @@ const generatePreOperationReport = async (req, res) => {
       12: { name: "Double Hand switches, Limit switches, Sensors", unit: "-", method: "Operate" }
     };
 
-    doc.font("Helvetica").fontSize(fontSize);
-    doc.lineWidth(0.5).strokeColor('black');
+    const tableHeaders = ["Sl", "Parameters", "Specification", "Unit", "Method", "Condition", "Value"];
+    const fractions = [0.06, 0.32, 0.23, 0.09, 0.14, 0.08, 0.08];
+    const colWidths = fractions.map(f => f * totalWidth);
+    const pad = 2.5;
+    const fontSize = 6.5;
 
-    records.forEach((r) => {
-      const paramInfo = labels[r.slNo] || { name: `Param ${r.slNo}`, unit: "-", method: "-" };
-      const rowCells = [
-        String(r.slNo),
-        paramInfo.name,
-        r.specification || "-",
-        paramInfo.unit,
-        paramInfo.method,
-        r.subRow || "-",
-        r.value || "-"
-      ];
-
-      // Dynamic text height calculation to prevent multi-line collision
-      let rowH = 16;
-      rowCells.forEach((c, i) => {
-        const textH = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 6;
-        if (textH > rowH) rowH = textH;
-      });
-
-      if (y + rowH > pageBottom - 60) {
-        doc.addPage();
-        y = drawHeader(25);
-        doc.font("Helvetica").fontSize(fontSize);
-      }
-
-      let x = startX;
-      rowCells.forEach((c, i) => {
-        doc.rect(x, y, colWidths[i], rowH).stroke();
-        doc.fillColor('black').text(String(c), x + pad, y + 4, {
-          width: colWidths[i] - pad * 2,
-          align: i === 1 || i === 2 ? "left" : "center"
-        });
-        x += colWidths[i];
-      });
-
-      y += rowH;
-    });
-
-    // Signatures Block
-    let sigY = y + 16;
-    if (sigY + 50 > pageBottom) {
-      doc.addPage();
-      sigY = 30;
-    }
-
-    const sigColWidth = totalWidth / 2;
-
-    // Helper formatter for signature text
     const formatSigText = (sig) => {
       if (!sig) return "";
       const trimmed = String(sig).trim();
-      if (trimmed.toUpperCase() === "APPROVED") {
-        return "APPROVED";
-      }
+      if (trimmed.toUpperCase() === "APPROVED") return "APPROVED";
       return `APPROVED (${trimmed.toUpperCase()})`;
     };
 
-    // Operator Signature
-    doc.lineWidth(0.5).strokeColor('black');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Operator Signature", startX, sigY, { width: sigColWidth - 10, align: "center" });
-    doc.rect(startX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    const opSig = first.operatorSignature;
-    if (opSig) {
-      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(startX + 20, sigY + 26).lineTo(startX + 24, sigY + 31).lineTo(startX + 30, sigY + 20).stroke();
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(formatSigText(opSig), startX + 34, sigY + 22);
-    } else {
-      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", startX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
-    }
+    // Helper to draw one full entry block at a given Y offset (compact height ~380pt)
+    const drawEntryBlock = (groupRecords, blockStartY) => {
+      const first = groupRecords[0];
+      const [yy, mm, dd] = String(first.checklistDate).split('-');
+      const displayDate = `${dd}/${mm}/${yy}`;
 
-    // Shift Incharge Signature
-    const inchargeX = startX + sigColWidth;
-    doc.lineWidth(0.5).strokeColor('black');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Incharge Signature", inchargeX, sigY, { width: sigColWidth - 10, align: "center" });
-    doc.rect(inchargeX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    const incSig = first.shiftInchargeSignature;
-    if (incSig) {
-      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(inchargeX + 20, sigY + 26).lineTo(inchargeX + 24, sigY + 31).lineTo(inchargeX + 30, sigY + 20).stroke();
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(formatSigText(incSig), inchargeX + 34, sigY + 22);
-    } else {
-      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", inchargeX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
-    }
+      // 1. Header Box (34pt height)
+      const headerH = 34;
+      doc.lineWidth(0.8).strokeColor('black');
+      doc.rect(startX, blockStartY, 80, headerH).stroke();
+
+      const logoPath = path.join(__dirname, 'logo.jpg');
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, startX + 5, blockStartY + 4, { width: 70, height: 25 });
+      } else {
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor('black').text("SAKTHI\nAUTO", startX, blockStartY + 7, { width: 80, align: "center" });
+      }
+
+      const midWidth = totalWidth - 235;
+      doc.rect(startX + 80, blockStartY, midWidth, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(8).fillColor('black')
+         .text("CHECK LIST FOR PRE OPERATION AND PROCESS PARAMETERS", startX + 85, blockStartY + 5, { width: midWidth - 10, align: "center" });
+      doc.font("Helvetica").fontSize(6.5).fillColor('black')
+         .text(`LINE: ${first.lineCode}   |   M/C NO: ${first.machineNo}   |   OP: ${first.opNo || '-'}`, startX + 85, blockStartY + 20, { width: midWidth - 10, align: "center" });
+
+      const rightWidth = 155;
+      doc.rect(startX + totalWidth - rightWidth, blockStartY, rightWidth, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('black')
+         .text(`PART: ${String(first.partName || '-').substring(0, 30)}`, startX + totalWidth - rightWidth + 4, blockStartY + 4, { width: rightWidth - 8 });
+      doc.font("Helvetica").fontSize(6.5).fillColor('black')
+         .text(`PART NO: ${first.partNo || '-'}`, startX + totalWidth - rightWidth + 4, blockStartY + 14, { width: rightWidth - 8 });
+      doc.font("Helvetica").fontSize(6.5).fillColor('black')
+         .text(`DATE: ${displayDate}`, startX + totalWidth - rightWidth + 4, blockStartY + 24, { width: rightWidth - 8 });
+
+      // 2. Table Header (13pt height)
+      let currentY = blockStartY + headerH + 3;
+      doc.font("Helvetica-Bold").fontSize(fontSize);
+      let colX = startX;
+      tableHeaders.forEach((h, i) => {
+        doc.rect(colX, currentY, colWidths[i], 13).fillAndStroke('#f0f0f0', 'black');
+        doc.fillColor('black').text(h, colX + pad, currentY + 3, { width: colWidths[i] - pad * 2, align: "center" });
+        colX += colWidths[i];
+      });
+      currentY += 13;
+
+      // 3. Table Rows
+      doc.font("Helvetica").fontSize(fontSize);
+      doc.lineWidth(0.5).strokeColor('black');
+
+      groupRecords.forEach((r) => {
+        const paramInfo = labels[r.slNo] || { name: `Param ${r.slNo}`, unit: "-", method: "-" };
+        const rowCells = [
+          String(r.slNo),
+          paramInfo.name,
+          r.specification || "-",
+          paramInfo.unit,
+          paramInfo.method,
+          r.subRow || "-",
+          r.value || "-"
+        ];
+
+        let rowH = 12.5;
+        rowCells.forEach((c, i) => {
+          const textH = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 3;
+          if (textH > rowH) rowH = textH;
+        });
+
+        let rowX = startX;
+        rowCells.forEach((c, i) => {
+          doc.rect(rowX, currentY, colWidths[i], rowH).stroke();
+          doc.fillColor('black').text(String(c), rowX + pad, currentY + 2.5, {
+            width: colWidths[i] - pad * 2,
+            align: i === 1 || i === 2 ? "left" : "center"
+          });
+          rowX += colWidths[i];
+        });
+
+        currentY += rowH;
+      });
+
+      // 4. Compact Signatures Block
+      const sigY = currentY + 4;
+      const sigColWidth = totalWidth / 2;
+
+      // Operator Signature
+      doc.lineWidth(0.5).strokeColor('black');
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Operator Signature", startX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(startX + 10, sigY + 10, sigColWidth - 20, 20).stroke();
+      const opSig = first.operatorSignature;
+      if (opSig) {
+        doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(startX + 18, sigY + 20).lineTo(startX + 21, sigY + 24).lineTo(startX + 26, sigY + 15).stroke();
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(formatSigText(opSig), startX + 30, sigY + 16);
+      } else {
+        doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", startX + 10, sigY + 16, { width: sigColWidth - 20, align: "center" });
+      }
+
+      // Shift Incharge Signature
+      const inchargeX = startX + sigColWidth;
+      doc.lineWidth(0.5).strokeColor('black');
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Incharge Signature", inchargeX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(inchargeX + 10, sigY + 10, sigColWidth - 20, 20).stroke();
+      const incSig = first.shiftInchargeSignature;
+      if (incSig) {
+        doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(inchargeX + 18, sigY + 20).lineTo(inchargeX + 21, sigY + 24).lineTo(inchargeX + 26, sigY + 15).stroke();
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(formatSigText(incSig), inchargeX + 30, sigY + 16);
+      } else {
+        doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", inchargeX + 10, sigY + 16, { width: sigColWidth - 20, align: "center" });
+      }
+
+      return sigY + 34;
+    };
+
+    // Loop through groups and render 2 per page
+    groups.forEach((groupRecords, index) => {
+      const positionOnPage = index % 2; // 0 = top, 1 = bottom
+
+      if (index > 0 && positionOnPage === 0) {
+        doc.addPage();
+      }
+
+      const topStartY = 16;
+      const bottomStartY = 422;
+
+      if (positionOnPage === 0) {
+        drawEntryBlock(groupRecords, topStartY);
+
+        // Draw a neat subtle dashed divider line between top and bottom if there are more records
+        if (index + 1 < groups.length) {
+          doc.save()
+             .lineWidth(0.5)
+             .dash(3, { space: 3 })
+             .strokeColor('#9ca3af')
+             .moveTo(startX, 412)
+             .lineTo(startX + totalWidth, 412)
+             .stroke()
+             .restore();
+        }
+      } else {
+        drawEntryBlock(groupRecords, bottomStartY);
+      }
+    });
 
     doc.end();
   } catch (err) {

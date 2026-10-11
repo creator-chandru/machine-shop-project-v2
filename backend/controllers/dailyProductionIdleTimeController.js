@@ -134,7 +134,7 @@ const getPartTraceability = async (req, res) => {
 };
 
 // ============================================================
-// 2. GET PE USERS (dropdown for Section Incharge / PE)
+// 2. GET PE USERS
 // ============================================================
 const getPEUsers = async (req, res) => {
   try {
@@ -173,7 +173,7 @@ const getMachineShopDetails = async (req, res) => {
 };
 
 // ============================================================
-// 4. GET PART QUANTITIES (capacity set by HOD / HOF)
+// 4. GET PART QUANTITIES
 // ============================================================
 const getPartQuantities = async (req, res) => {
   const { shopId } = req.params;
@@ -193,7 +193,7 @@ const getPartQuantities = async (req, res) => {
 };
 
 // ============================================================
-// 5. GET SAVED REPORT (shopId + date [+ lineCode])
+// 5. GET SAVED REPORT
 // ============================================================
 const rowToColumn = (r) => {
   const s = (v) => (v != null ? String(v) : '');
@@ -288,7 +288,7 @@ const getDailyProductionIdleTime = async (req, res) => {
 };
 
 // ============================================================
-// 6. SAVE REPORT (Shift Incharge submit)
+// 6. SAVE REPORT
 // ============================================================
 const shiftHasData = (col, n) => {
   const k = `shift${n}`;
@@ -326,7 +326,6 @@ const saveDailyProductionIdleTime = async (req, res) => {
       if (!partName) throw httpError(400, `Part name could not be resolved for line ${lineCode}`);
       if (!assignedPe) throw httpError(400, `Select a Product Engineer for line ${lineCode}`);
 
-      // Existing data for this date + line is immutable
       const existReq = new sql.Request(transaction);
       existReq.input('m', sql.Int, shopId);
       existReq.input('d', sql.NVarChar(50), reportDate);
@@ -340,7 +339,6 @@ const saveDailyProductionIdleTime = async (req, res) => {
         continue;
       }
 
-      // Capacity comes from the line mapping set by HOD/HOF (sent by the form, read-only there)
       const capacity = {
         shift1: toInt(col.capacity?.shift1),
         shift2: toInt(col.capacity?.shift2),
@@ -352,26 +350,16 @@ const saveDailyProductionIdleTime = async (req, res) => {
 
       for (const n of SHIFT_NUMS) {
         const k = `shift${n}`;
-        const cap = num(capacity[k]);
         const has = shiftHasData(col, n);
         const sign = String(signatures[k] || '').trim();
 
         if (has) {
           anyData = true;
-          if (!(cap > 0)) throw httpError(400, `Line ${lineCode} Shift ${n}: capacity is not set`);
-          if (num(col.actualProd?.lh?.[k]) > cap || num(col.actualProd?.rh?.[k]) > cap) {
-            throw httpError(400, `Line ${lineCode} Shift ${n}: actual production cannot exceed capacity (${cap})`);
-          }
-          const lossSum = LOSS_IDS.reduce((a, i) => a + num(col.losses?.[`loss_${i}`]?.[k]), 0);
-          if (lossSum > cap) {
-            throw httpError(400, `Line ${lineCode} Shift ${n}: total losses (${lossSum}) cannot exceed capacity (${cap})`);
-          }
           if (!sign) throw httpError(400, `Line ${lineCode} Shift ${n}: shift officer approval is required`);
         }
       }
       if (!anyData) throw httpError(400, `Line ${lineCode}: no production / loss data entered`);
 
-      // Build the INSERT
       const f = [];
       const add = (name, type, val) => f.push({ name, type, val });
 
@@ -445,7 +433,7 @@ const saveDailyProductionIdleTime = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET PENDING REPORTS FOR A PRODUCT ENGINEER
+// 7. GET PENDING PE DATA
 // ============================================================
 const getPendingPEIdleTimeData = async (req, res) => {
   try {
@@ -517,7 +505,6 @@ const signPEApproval = async (req, res) => {
       shopFilter = ' AND MachineShop = @machineShop';
     }
 
-    // Only the PE the shift incharge assigned can approve
     const result = await request.query(`
       UPDATE ${TABLE}
       SET Sign_ProductionEngineer = @approvedStr
@@ -547,19 +534,27 @@ const signPEApproval = async (req, res) => {
 };
 
 // ============================================================
-// 9. PDF REPORT
+// 9. PDF REPORT (DATE RANGE WITH DYNAMIC MULTI-ENTRY FITTING)
 // ============================================================
 const generateIdleTimeReport = async (req, res) => {
   try {
-    const { shopId, date, lineCode } = req.query;
-    if (!date) return res.status(400).send('Date is required.');
+    const { shopId, fromDate, toDate, lineCode } = req.query;
+    if (!fromDate || !toDate) {
+      return res.status(400).send('fromDate and toDate are required.');
+    }
 
-    const cleanDate = cleanDateStr(date);
+    const cleanFrom = cleanDateStr(fromDate);
+    const cleanTo = cleanDateStr(toDate);
 
     const request = new sql.Request();
-    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('fromDate', sql.NVarChar(50), cleanFrom);
+    request.input('toDate', sql.NVarChar(50), cleanTo);
 
-    let query = `SELECT * FROM ${TABLE} WHERE ReportDate = CONVERT(date, @reportDate)`;
+    let query = `
+      SELECT * FROM ${TABLE} 
+      WHERE ReportDate >= CONVERT(date, @fromDate)
+        AND ReportDate <= CONVERT(date, @toDate)
+    `;
 
     const parsedShop = validShopId(shopId);
     if (parsedShop) {
@@ -570,18 +565,26 @@ const generateIdleTimeReport = async (req, res) => {
       request.input('lineCode', sql.NVarChar(50), lineCode);
       query += ' AND LineCode = @lineCode';
     }
-    query += ' ORDER BY LineCode ASC, Id ASC';
+    query += ' ORDER BY ReportDate ASC, LineCode ASC, Id ASC';
 
     const result = await request.query(query);
     const records = result.recordset || [];
 
     if (records.length === 0) {
-      return res.status(404).send('No records found for the selected parameters.');
+      return res.status(404).send('No records found for the selected date range.');
     }
 
-    const first = records[0];
-    const [yy, mm, dd] = String(cleanDate).split('-');
-    const displayDate = `${dd}/${mm}/${yy}`;
+    // Group records by ReportDate
+    const groupedMap = new Map();
+    records.forEach(r => {
+      const dateKey = cleanDateStr(r.ReportDate);
+      if (!groupedMap.has(dateKey)) {
+        groupedMap.set(dateKey, []);
+      }
+      groupedMap.get(dateKey).push(r);
+    });
+
+    const dateGroups = Array.from(groupedMap.entries());
 
     const doc = new PDFDocument({
       margin: 20,
@@ -592,54 +595,14 @@ const generateIdleTimeReport = async (req, res) => {
     });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename=Daily_Production_Idle_Time_${cleanDate}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=Daily_Production_Idle_Time_${cleanFrom}_to_${cleanTo}.pdf`);
     doc.pipe(res);
 
     const startX = 20;
-    const headerY = 20;
-    const totalWidth = doc.page.width - 40;
+    const totalWidth = doc.page.width - 40; // ~801.89pt landscape width
     const pageBottom = doc.page.height - 20;
-
-    // ---------------- HEADER ----------------
-    doc.lineWidth(1).strokeColor('black');
-    doc.rect(startX, headerY, 100, 35).stroke();
-
-    const logoPath = path.join(__dirname, 'logo.jpg');
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, startX + 10, headerY + 5, { width: 80, height: 25 });
-    } else {
-      doc.font('Helvetica-Bold').fontSize(12).fillColor('black')
-        .text('SAKTHI\nAUTO', startX, headerY + 8, { width: 100, align: 'center' });
-    }
-
-    doc.rect(startX + 100, headerY, totalWidth - 260, 35).stroke();
-    doc.font('Helvetica-Bold').fontSize(13).fillColor('black')
-      .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 100, headerY + 12, {
-        width: totalWidth - 260,
-        align: 'center'
-      });
-
-    const distinctLines = [...new Set(records.map((r) => r.LineCode).filter(Boolean))].join(', ');
-
-    doc.rect(startX + totalWidth - 160, headerY, 160, 35).stroke();
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor('black')
-      .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 160, headerY + 6, {
-        width: 160,
-        align: 'center'
-      });
-    doc.font('Helvetica').fontSize(8).fillColor('black')
-      .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 160, headerY + 20, {
-        width: 160,
-        align: 'center'
-      });
-
-    // ---------------- LAYOUT ----------------
-    let curY = headerY + 42;
-    const numCols = records.length;
-    const colW = Math.min(130, (totalWidth - 150) / Math.max(1, numCols));
-    const descW = totalWidth - colW * numCols;
-    const shiftW = colW / 4;
-    const rowH = 11.5;
+    const topMargin = 20;
+    const rowH = 11.2;
     const fontSize = 6.8;
 
     const drawCell = (x, y, w, h, text, isBold = false, bg = null, align = 'center') => {
@@ -652,141 +615,210 @@ const generateIdleTimeReport = async (req, res) => {
         .text(String(text != null ? text : '-'), x + 2, y + 2.5, { width: w - 4, align });
     };
 
-    doc.lineWidth(0.5).strokeColor('black');
-
-    const colX = (idx) => startX + descW + idx * colW;
-
-    // ---------------- TABLE HEADERS ----------------
-    drawCell(startX, curY, descW, rowH, 'LINE CODE', true, '#f0f0f0', 'left');
-    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.LineCode || '-', true, '#f0f0f0'));
-    curY += rowH;
-
-    drawCell(startX, curY, descW, rowH, 'PART NAME', true, '#ffffff', 'left');
-    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.PartName || '-', false, '#ffffff'));
-    curY += rowH;
-
-    drawCell(startX, curY, descW, rowH, 'ABS / NABS', true, '#ffffff', 'left');
-    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.BrakeType || '-', false, '#ffffff'));
-    curY += rowH;
-
-    drawCell(startX, curY, descW, rowH, 'SHIFT DETAILS / PARAMETERS', true, '#f0f0f0', 'left');
-    records.forEach((rec, idx) => {
-      ['I', 'II', 'III', 'T'].forEach((sh, shIdx) => {
-        drawCell(colX(idx) + shIdx * shiftW, curY, shiftW, rowH, sh, true, sh === 'T' ? '#e5e7eb' : '#f9fafb');
-      });
-    });
-    curY += rowH;
-
-    // ---------------- DATA ROW HELPER ----------------
-    const drawShiftDataRow = (title, getVals, isBold = false, bgColor = '#ffffff') => {
-      drawCell(startX, curY, descW, rowH, title, isBold, bgColor, 'left');
-
-      records.forEach((rec, idx) => {
-        const vals = getVals(rec).map((v) => (v != null && v !== '' ? parseFloat(v) : 0));
-        const total = vals[0] + vals[1] + vals[2];
-
-        [vals[0], vals[1], vals[2], total].forEach((val, shIdx) => {
-          drawCell(
-            colX(idx) + shIdx * shiftW,
-            curY,
-            shiftW,
-            rowH,
-            val !== 0 ? String(val) : '-',
-            isBold || shIdx === 3,
-            shIdx === 3 ? '#e5e7eb' : bgColor
-          );
-        });
-      });
-
-      curY += rowH;
+    const computeGroupHeight = () => {
+      // Header 32pt + Table Headers (4 rows) + Data Rows (18 rows) + Signatures (5 rows) + Notes (20pt)
+      return 32 + (4 * rowH) + (18 * rowH) + (5 * rowH) + 24 + 10;
     };
 
-    drawShiftDataRow('CAPACITY QTY IN SETS', (r) => [r.Capacity_Shift1, r.Capacity_Shift2, r.Capacity_Shift3], true, '#f3f4f6');
-    drawShiftDataRow('ACTUAL PROD QTY (LH)', (r) => [r.ActualProd_LH_Shift1, r.ActualProd_LH_Shift2, r.ActualProd_LH_Shift3]);
-    drawShiftDataRow('ACTUAL PROD QTY (RH)', (r) => [r.ActualProd_RH_Shift1, r.ActualProd_RH_Shift2, r.ActualProd_RH_Shift3]);
-    drawShiftDataRow('NO OF MANPOWER (UTILIZED)', (r) => [r.Manpower_Shift1, r.Manpower_Shift2, r.Manpower_Shift3], false, '#f9fafb');
+    const renderDateGroup = (dateKey, dateRecords, groupY) => {
+      const [yy, mm, dd] = String(dateKey).split('-');
+      const displayDate = `${dd}/${mm}/${yy}`;
+      const first = dateRecords[0];
 
-    LOSS_REASONS.forEach((loss) => {
-      drawShiftDataRow(
-        `${loss.id}. [${loss.category}] ${loss.name}`,
-        (r) => [r[`Loss${loss.id}_Shift1`], r[`Loss${loss.id}_Shift2`], r[`Loss${loss.id}_Shift3`]]
-      );
-    });
+      // Header Box (32pt)
+      doc.lineWidth(0.8).strokeColor('black');
+      doc.rect(startX, groupY, 90, 32).stroke();
 
-    const calcTotalLossRec = (r, shift) =>
-      LOSS_IDS.reduce((sum, i) => sum + (r[`Loss${i}_Shift${shift}`] || 0), 0);
-
-    drawShiftDataRow(
-      'TOTAL LOSS (MINS)',
-      (r) => [calcTotalLossRec(r, 1), calcTotalLossRec(r, 2), calcTotalLossRec(r, 3)],
-      true,
-      '#e5e7eb'
-    );
-
-    // ---------------- SIGNATURE ROWS ----------------
-    // Shift officer (approved by the shift incharge, per shift)
-    const signH = rowH * 3;
-    drawCell(startX, curY, descW, signH, 'SHIFT OFFICER SIGN (APPROVED BY SHIFT INCHARGE)', true, '#f3f4f6', 'left');
-    records.forEach((rec, idx) => {
-      const x = colX(idx);
-      doc.rect(x, curY, colW, signH).stroke();
-      [
-        ['I', rec.ShiftInchargeSign_Shift1],
-        ['II', rec.ShiftInchargeSign_Shift2],
-        ['III', rec.ShiftInchargeSign_Shift3]
-      ].forEach(([label, v], i) => {
-        doc.fillColor(v ? '#16a34a' : '#6b7280')
-          .font('Helvetica-Bold')
-          .fontSize(6)
-          .text(`${label}: ${v ? String(v).toUpperCase() : '-'}`, x + 3, curY + 3.5 + i * rowH, {
-            width: colW - 6,
-            lineBreak: false
-          });
-      });
-    });
-    curY += signH;
-
-    // PE
-    const peH = rowH * 2;
-    drawCell(startX, curY, descW, peH, 'SECTION INCHARGE (PE) SIGN', true, '#f3f4f6', 'left');
-    records.forEach((rec, idx) => {
-      const x = colX(idx);
-      doc.rect(x, curY, colW, peH).stroke();
-
-      const sig = rec.Sign_ProductionEngineer || '';
-      if (sig && !isPendingSign(sig)) {
-        const name = String(sig).replace('Approved (', '').replace(')', '').trim();
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(6.5)
-          .text('APPROVED', x + 3, curY + 3, { width: colW - 6, align: 'center', lineBreak: false });
-        doc.fillColor('black').font('Helvetica-Bold').fontSize(6.5)
-          .text(name.toUpperCase(), x + 3, curY + 12, { width: colW - 6, align: 'center', lineBreak: false });
+      const logoPath = path.join(__dirname, 'logo.jpg');
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, startX + 5, groupY + 4, { width: 80, height: 24, fit: [80, 24], align: 'center', valign: 'center' });
       } else {
-        doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(6.5)
-          .text('PENDING', x + 3, curY + 3, { width: colW - 6, align: 'center', lineBreak: false });
-        doc.fillColor('black').font('Helvetica').fontSize(6.5)
-          .text(rec.assignedPe ? `[${String(rec.assignedPe).toUpperCase()}]` : '', x + 3, curY + 12, {
-            width: colW - 6,
-            align: 'center',
-            lineBreak: false
-          });
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black')
+          .text('SAKTHI\nAUTO', startX, groupY + 7, { width: 90, align: 'center' });
       }
+
+      const titleW = totalWidth - 90 - 160;
+      doc.rect(startX + 90, groupY, titleW, 32).stroke();
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
+        .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, groupY + 11, {
+          width: titleW,
+          align: 'center'
+        });
+
+      const distinctLines = [...new Set(dateRecords.map((r) => r.LineCode).filter(Boolean))].join(', ');
+      doc.rect(startX + totalWidth - 160, groupY, 160, 32).stroke();
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
+        .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 160, groupY + 5, {
+          width: 160,
+          align: 'center'
+        });
+      doc.font('Helvetica').fontSize(7).fillColor('black')
+        .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 160, groupY + 18, {
+          width: 160,
+          align: 'center'
+        });
+
+      let curY = groupY + 36;
+      const numCols = dateRecords.length;
+      const colW = Math.min(130, (totalWidth - 150) / Math.max(1, numCols));
+      const descW = totalWidth - colW * numCols;
+      const shiftW = colW / 4;
+
+      doc.lineWidth(0.5).strokeColor('black');
+      const colX = (idx) => startX + descW + idx * colW;
+
+      // Table Header Rows
+      drawCell(startX, curY, descW, rowH, 'LINE CODE', true, '#f0f0f0', 'left');
+      dateRecords.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.LineCode || '-', true, '#f0f0f0'));
+      curY += rowH;
+
+      drawCell(startX, curY, descW, rowH, 'PART NAME', true, '#ffffff', 'left');
+      dateRecords.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.PartName || '-', false, '#ffffff'));
+      curY += rowH;
+
+      drawCell(startX, curY, descW, rowH, 'ABS / NABS', true, '#ffffff', 'left');
+      dateRecords.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.BrakeType || '-', false, '#ffffff'));
+      curY += rowH;
+
+      drawCell(startX, curY, descW, rowH, 'SHIFT DETAILS / PARAMETERS', true, '#f0f0f0', 'left');
+      dateRecords.forEach((rec, idx) => {
+        ['I', 'II', 'III', 'T'].forEach((sh, shIdx) => {
+          drawCell(colX(idx) + shIdx * shiftW, curY, shiftW, rowH, sh, true, sh === 'T' ? '#e5e7eb' : '#f9fafb');
+        });
+      });
+      curY += rowH;
+
+      // Data Rows
+      const drawShiftDataRow = (title, getVals, isBold = false, bgColor = '#ffffff') => {
+        drawCell(startX, curY, descW, rowH, title, isBold, bgColor, 'left');
+
+        dateRecords.forEach((rec, idx) => {
+          const vals = getVals(rec).map((v) => (v != null && v !== '' ? parseFloat(v) : 0));
+          const total = vals[0] + vals[1] + vals[2];
+
+          [vals[0], vals[1], vals[2], total].forEach((val, shIdx) => {
+            drawCell(
+              colX(idx) + shIdx * shiftW,
+              curY,
+              shiftW,
+              rowH,
+              val !== 0 ? String(val) : '-',
+              isBold || shIdx === 3,
+              shIdx === 3 ? '#e5e7eb' : bgColor
+            );
+          });
+        });
+
+        curY += rowH;
+      };
+
+      drawShiftDataRow('CAPACITY QTY IN SETS', (r) => [r.Capacity_Shift1, r.Capacity_Shift2, r.Capacity_Shift3], true, '#f3f4f6');
+      drawShiftDataRow('ACTUAL PROD QTY (LH)', (r) => [r.ActualProd_LH_Shift1, r.ActualProd_LH_Shift2, r.ActualProd_LH_Shift3]);
+      drawShiftDataRow('ACTUAL PROD QTY (RH)', (r) => [r.ActualProd_RH_Shift1, r.ActualProd_RH_Shift2, r.ActualProd_RH_Shift3]);
+      drawShiftDataRow('NO OF MANPOWER (UTILIZED)', (r) => [r.Manpower_Shift1, r.Manpower_Shift2, r.Manpower_Shift3], false, '#f9fafb');
+
+      LOSS_REASONS.forEach((loss) => {
+        drawShiftDataRow(
+          `${loss.id}. [${loss.category}] ${loss.name}`,
+          (r) => [r[`Loss${loss.id}_Shift1`], r[`Loss${loss.id}_Shift2`], r[`Loss${loss.id}_Shift3`]]
+        );
+      });
+
+      const calcTotalLossRec = (r, shift) =>
+        LOSS_IDS.reduce((sum, i) => sum + (r[`Loss${i}_Shift${shift}`] || 0), 0);
+
+      drawShiftDataRow(
+        'TOTAL LOSS (MINS)',
+        (r) => [calcTotalLossRec(r, 1), calcTotalLossRec(r, 2), calcTotalLossRec(r, 3)],
+        true,
+        '#e5e7eb'
+      );
+
+      // Signatures
+      const signH = rowH * 3;
+      drawCell(startX, curY, descW, signH, 'SHIFT OFFICER SIGN (APPROVED BY SHIFT INCHARGE)', true, '#f3f4f6', 'left');
+      dateRecords.forEach((rec, idx) => {
+        const x = colX(idx);
+        doc.rect(x, curY, colW, signH).stroke();
+        [
+          ['I', rec.ShiftInchargeSign_Shift1],
+          ['II', rec.ShiftInchargeSign_Shift2],
+          ['III', rec.ShiftInchargeSign_Shift3]
+        ].forEach(([label, v], i) => {
+          doc.fillColor(v ? '#16a34a' : '#6b7280')
+            .font('Helvetica-Bold')
+            .fontSize(5.8)
+            .text(`${label}: ${v ? String(v).toUpperCase() : '-'}`, x + 2, curY + 2.5 + i * rowH, {
+              width: colW - 4,
+              lineBreak: false
+            });
+        });
+      });
+      curY += signH;
+
+      const peH = rowH * 2;
+      drawCell(startX, curY, descW, peH, 'SECTION INCHARGE (PE) SIGN', true, '#f3f4f6', 'left');
+      dateRecords.forEach((rec, idx) => {
+        const x = colX(idx);
+        doc.rect(x, curY, colW, peH).stroke();
+
+        const sig = rec.Sign_ProductionEngineer || '';
+        if (sig && !isPendingSign(sig)) {
+          const name = String(sig).replace('Approved (', '').replace(')', '').trim();
+          doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(6)
+            .text('APPROVED', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
+          doc.fillColor('black').font('Helvetica-Bold').fontSize(6)
+            .text(name.toUpperCase(), x + 2, curY + 11, { width: colW - 4, align: 'center', lineBreak: false });
+        } else {
+          doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(6)
+            .text('PENDING', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
+          doc.fillColor('black').font('Helvetica').fontSize(6)
+            .text(rec.assignedPe ? `[${String(rec.assignedPe).toUpperCase()}]` : '', x + 2, curY + 11, {
+              width: colW - 4,
+              align: 'center',
+              lineBreak: false
+            });
+        }
+      });
+      curY += peH + 4;
+
+      // Notes
+      doc.lineWidth(0.5).strokeColor('black');
+      doc.rect(startX, curY, totalWidth, 20).stroke();
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(6.5)
+        .text('Notes: 1. Tool change losses above 20 mins only. 2. Verify and record parameters during set-up change.', startX + 4, curY + 6);
+
+      return curY + 24;
+    };
+
+    // Render entries sequentially, fitting dynamic groups onto landscape pages
+    let currentY = topMargin;
+    let isFirstOnPage = true;
+
+    dateGroups.forEach(([dateKey, dateRecords]) => {
+      const groupHeight = computeGroupHeight();
+
+      if (!isFirstOnPage && (currentY + groupHeight > pageBottom)) {
+        doc.addPage();
+        currentY = topMargin;
+        isFirstOnPage = true;
+      }
+
+      if (!isFirstOnPage) {
+        doc.save()
+          .lineWidth(0.5)
+          .dash(3, { space: 3 })
+          .strokeColor('#9ca3af')
+          .moveTo(startX, currentY - 4)
+          .lineTo(startX + totalWidth, currentY - 4)
+          .stroke()
+          .restore();
+      }
+
+      const endY = renderDateGroup(dateKey, dateRecords, currentY);
+      currentY = endY + 8;
+      isFirstOnPage = false;
     });
-    curY += peH + 8;
-
-    // ---------------- NOTES ----------------
-    if (curY + 30 > pageBottom) {
-      doc.addPage();
-      curY = 30;
-    }
-
-    doc.lineWidth(0.5).strokeColor('black');
-    doc.rect(startX, curY, totalWidth, 24).stroke();
-    doc.fillColor('black').font('Helvetica-Bold').fontSize(7)
-      .text('Notes / Instructions:', startX + 5, curY + 3);
-    doc.font('Helvetica').fontSize(6.5)
-      .text('1. TOOL CHANGE LOSSES TIME ABOVE 20 MINS ONLY MENTION THE LOSS.', startX + 5, curY + 10);
-    doc.font('Helvetica').fontSize(6.5)
-      .text('2. During set-up change, the production and idle time parameters should be verified and recorded.', startX + 5, curY + 16);
 
     doc.end();
   } catch (err) {

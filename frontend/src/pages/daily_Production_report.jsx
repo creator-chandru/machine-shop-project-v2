@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
-import { ArrowLeft, FileDown } from "lucide-react";
+import { ArrowLeft, FileDown, Calendar, X } from "lucide-react";
 import Header from "../components/Header";
 
 const INITIAL_ROWS = 1;
@@ -110,14 +110,14 @@ export default function DailyProductionReport() {
   const [hofUsers, setHofUsers] = useState([]);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
 
-  const [toast, setToast] = useState({ message: "", type: "" });
-  const isSavedRecordRef = useRef(false);
-  const lookupSeqRef = useRef(0);
-  const didInitialLookupRef = useRef(false);
+  // PDF Date Range Modal States
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfFromDate, setPdfFromDate] = useState("");
+  const [pdfToDate, setPdfToDate] = useState("");
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  useEffect(() => {
-    isSavedRecordRef.current = isSavedRecord;
-  }, [isSavedRecord]);
+  const [toast, setToast] = useState({ message: "", type: "" });
+  const lookupSeqRef = useRef(0);
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -153,13 +153,38 @@ export default function DailyProductionReport() {
     hofProduction: "",
   });
 
+  const currentPartNameNo =
+    header.partName && header.partNo ? `${header.partName} / ${header.partNo}` : "";
+
+  // Reset form state to completely clean template
+  const resetToEmptyForm = (lineCode, date, shift) => {
+    setIsSavedRecord(false);
+    setRows([createEmptyRow(currentPartNameNo)]);
+    setSignatures({
+      shiftSupervisorProduction: "",
+      shiftSupervisorQuality: "",
+      productionEngineer: "",
+      hofProduction: "",
+    });
+    setHeader((prev) => ({
+      ...prev,
+      shiftInchargeName: isShiftIncharge && currentUsername !== "Unknown" ? currentUsername : "",
+      partTraceabilityMachining: "",
+      assignedQc: "",
+      assignedPe: "",
+      assignedHof: "",
+    }));
+    fetchPartTraceability(lineCode, date, shift);
+  };
+
   // Load record data helper
   const loadRecordData = (record) => {
     if (!record) return;
     setIsSavedRecord(true);
 
     if (record.header) {
-      setHeader({
+      setHeader((prev) => ({
+        ...prev,
         date: record.header.date || getTodayISODate(),
         shift: record.header.shift || "I",
         shiftInchargeName:
@@ -172,7 +197,7 @@ export default function DailyProductionReport() {
         assignedQc: record.header.assignedQc || "",
         assignedPe: record.header.assignedPe || "",
         assignedHof: record.header.assignedHof || "",
-      });
+      }));
     }
 
     if (record.rows && record.rows.length > 0) {
@@ -267,19 +292,27 @@ export default function DailyProductionReport() {
     }
   };
 
-  // Check existing submitted record
-  const checkExistingRecord = async (lineCode, date, shift = "I") => {
-    if (!lineCode || !date) return;
+  // ==========================================================
+  // COMBO CHECK: date + lineCode + machineNo + shift
+  // ==========================================================
+  const checkExistingRecord = async (lineCode, date, shift, machineNo) => {
+    if (!lineCode || !date || !shift) {
+      resetToEmptyForm(lineCode, date, shift);
+      return;
+    }
 
     const seq = ++lookupSeqRef.current;
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report?machineShop=${shopId || 3}&lineCode=${encodeURIComponent(
-          lineCode
-        )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      let url = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report?machineShop=${shopId || 3}&lineCode=${encodeURIComponent(
+        lineCode
+      )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`;
+
+      if (machineNo) {
+        url += `&machineNo=${encodeURIComponent(machineNo)}`;
+      }
+
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 
       if (seq !== lookupSeqRef.current) return;
 
@@ -287,24 +320,12 @@ export default function DailyProductionReport() {
         const data = await res.json();
         if (seq !== lookupSeqRef.current) return;
         const found = Array.isArray(data) && data.length > 0 ? data[0] : null;
+
         if (found && found.rows && found.rows.length > 0) {
           loadRecordData(found);
+          triggerToast("Existing production record loaded for this combo.", "success");
         } else {
-          if (isSavedRecordRef.current) {
-            setIsSavedRecord(false);
-            setRows([createEmptyRow()]);
-            setSignatures({
-              shiftSupervisorProduction: "",
-              shiftSupervisorQuality: "",
-              productionEngineer: "",
-              hofProduction: "",
-            });
-            setHeader((prev) => ({
-              ...prev,
-              shiftInchargeName: isShiftIncharge && currentUsername !== "Unknown" ? currentUsername : "",
-              partTraceabilityMachining: "",
-            }));
-          }
+          resetToEmptyForm(lineCode, date, shift);
         }
       }
     } catch (err) {
@@ -319,21 +340,16 @@ export default function DailyProductionReport() {
     } else {
       const qRecordDate = searchParams.get("date");
       const qLineCode = searchParams.get("lineCode");
+      const qShift = searchParams.get("shift") || "I";
+      const qMachineNo = searchParams.get("machineNo") || "";
+
       if (qRecordDate && qLineCode) {
-        checkExistingRecord(qLineCode, qRecordDate, searchParams.get("shift") || "I");
+        checkExistingRecord(qLineCode, qRecordDate, qShift, qMachineNo);
       }
     }
   }, [location.state, searchParams]);
 
   // Sync with LineSetContext
-  useEffect(() => {
-    if (didInitialLookupRef.current || !lineSet?.lineCode) return;
-    didInitialLookupRef.current = true;
-    if (location.state?.record || searchParams.get("date")) return;
-    checkExistingRecord(lineSet.lineCode, header.date, header.shift);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lineSet]);
-
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || header.lineCode;
@@ -353,12 +369,13 @@ export default function DailyProductionReport() {
           prev.map((r) => ({
             ...r,
             partNameNo: r.partNameNo || defaultPartNameNo,
+            machineNo: r.machineNo || lineSet.machineNo || "",
           }))
         );
       }
 
       if (newLineCode) {
-        fetchPartTraceability(newLineCode, header.date, header.shift);
+        checkExistingRecord(newLineCode, header.date, header.shift, lineSet.machineNo || "");
       }
     }
   }, [lineSet]);
@@ -402,56 +419,28 @@ export default function DailyProductionReport() {
 
   const handleHeaderChange = (field, val) => {
     if (isReadOnlyApprover) return;
-    if (isSavedRecord && ["partTraceabilityMachining", "shiftInchargeName", "assignedQc", "assignedPe", "assignedHof"].includes(field)) {
-      return;
-    }
 
-    setHeader((prev) => ({ ...prev, [field]: val }));
+    const nextHeader = { ...header, [field]: val };
 
     if (field === "lineCode") {
       const mapping = lineMappings.find((m) => m.lineCode === val);
       const autoPartName = mapping?.partSet || "";
       const autoPartNo = mapping?.idSet || "";
-      const defaultPartNameNo = autoPartName && autoPartNo ? `${autoPartName} / ${autoPartNo}` : "";
-
-      setHeader((prev) => ({
-        ...prev,
-        lineCode: val,
-        partName: autoPartName,
-        partNo: autoPartNo,
-      }));
-
-      setRows([createEmptyRow(defaultPartNameNo)]);
-
-      if (setLineSet) {
-        setLineSet((prev) => ({
-          ...prev,
-          machineShop: shopId || "3",
-          lineCode: val,
-          partName: autoPartName,
-          partNo: autoPartNo,
-        }));
-      }
-
-      checkExistingRecord(val, header.date, header.shift);
+      nextHeader.partName = autoPartName;
+      nextHeader.partNo = autoPartNo;
     }
 
-    if (field === "lineCode" || field === "date" || field === "shift") {
-      const targetLineCode = field === "lineCode" ? val : header.lineCode;
-      const targetDate = field === "date" ? val : header.date;
-      const targetShift = field === "shift" ? val : header.shift;
+    setHeader(nextHeader);
 
-      if (targetLineCode && targetDate && targetShift) {
-        fetchPartTraceability(targetLineCode, targetDate, targetShift);
-        if (field !== "lineCode") {
-          checkExistingRecord(targetLineCode, targetDate, targetShift);
-        }
-      }
+    const firstMachineNo = rows[0]?.machineNo || "";
+    if (["lineCode", "date", "shift"].includes(field)) {
+      checkExistingRecord(nextHeader.lineCode, nextHeader.date, nextHeader.shift, firstMachineNo);
     }
   };
 
   const handleRowChange = (rowIdx, field, subField, val) => {
     if (isReadOnlyApprover || rows[rowIdx].isSavedRow) return;
+
     setRows((prev) => {
       const next = [...prev];
       if (subField) {
@@ -471,10 +460,11 @@ export default function DailyProductionReport() {
       }
       return next;
     });
-  };
 
-  const currentPartNameNo =
-    header.partName && header.partNo ? `${header.partName} / ${header.partNo}` : "";
+    if (field === "machineNo" && rowIdx === 0) {
+      checkExistingRecord(header.lineCode, header.date, header.shift, val);
+    }
+  };
 
   const handleAddRow = () => {
     if (isReadOnlyApprover) return;
@@ -492,6 +482,12 @@ export default function DailyProductionReport() {
 
   // Shift Incharge Approves "Shift Supervisor (Production)"
   const handleApproveSupervisorProduction = () => {
+    const selectedMc = rows.find((r) => r.machineNo)?.machineNo || "";
+    if (!header.lineCode || !header.date || !header.shift || !selectedMc) {
+      triggerToast("Please select Line Code, Date, Shift, and at least one Machine No before approving.", "error");
+      return;
+    }
+
     setSignatures((prev) => ({
       ...prev,
       shiftSupervisorProduction: currentUsername || "Approved",
@@ -554,18 +550,24 @@ export default function DailyProductionReport() {
     triggerToast("HOF Production Approved!", "success");
   };
 
-  const handleDownloadPdf = async () => {
-    if (!isSavedRecord) {
-      triggerToast("No saved record found for this date. Submit the form first to preview.", "error");
+  // Download PDF Report by Date Range
+  const handleDownloadPdfRange = async () => {
+    if (!pdfFromDate || !pdfToDate) {
+      triggerToast("Please select both From Date and To Date.", "error");
       return;
     }
 
+    if (new Date(pdfFromDate) > new Date(pdfToDate)) {
+      triggerToast("From Date cannot be later than To Date.", "error");
+      return;
+    }
+
+    setIsDownloadingPdf(true);
     try {
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({
-        lineCode: header.lineCode,
-        date: header.date,
-        shift: header.shift,
+        fromDate: pdfFromDate,
+        toDate: pdfToDate,
         shopId: String(shopId || 3),
       });
 
@@ -574,31 +576,54 @@ export default function DailyProductionReport() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
+      if (res.status === 404) {
+        throw new Error("No records found for the selected date range.");
+      }
       if (!res.ok) throw new Error("Report request failed");
 
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `Daily_Production_Report_${header.lineCode}_${header.date}_${header.shift}.pdf`;
+      link.download = `Daily_Production_Report_${pdfFromDate}_to_${pdfToDate}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
+      setShowPdfModal(false);
       triggerToast("PDF generated and downloaded!", "success");
     } catch (err) {
       console.error("PDF generation failed:", err);
-      triggerToast("Failed to generate PDF", "error");
+      triggerToast(err.message || "Failed to generate PDF", "error");
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
   const handleSave = async () => {
+    // 1. Header validations
     if (!header.lineCode) {
-      triggerToast("Please select a Line Code in the header before saving.", "error");
+      triggerToast("Please select Line Code.", "error");
+      return;
+    }
+    if (!header.date) {
+      triggerToast("Please select Date.", "error");
+      return;
+    }
+    if (!header.shift) {
+      triggerToast("Please select Shift.", "error");
       return;
     }
 
+    // 2. Machine Number validation in rows
+    const hasMachineSelected = rows.some((r) => r.machineNo && r.machineNo.trim() !== "");
+    if (!hasMachineSelected) {
+      triggerToast("Please select Machine No in at least one row.", "error");
+      return;
+    }
+
+    // 3. Signature & Allocation checks
     if (isShiftIncharge) {
       if (!signatures.shiftSupervisorProduction) {
         triggerToast("Please click 'Approve' under SHIFT SUPERVISOR (PRODUCTION) before submitting.", "error");
@@ -737,6 +762,68 @@ export default function DailyProductionReport() {
 
       <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "" })} />
 
+      {/* Date Range Modal for PDF Download */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">Download Report by Date Range</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowPdfModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">From Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfFromDate}
+                  onChange={(e) => setPdfFromDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">To Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfToDate}
+                  onChange={(e) => setPdfToDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPdfModal(false)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadPdfRange}
+                disabled={isDownloadingPdf}
+                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+              >
+                <FileDown className="w-4 h-4" />
+                {isDownloadingPdf ? "Downloading..." : "Download Report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
@@ -799,14 +886,16 @@ export default function DailyProductionReport() {
               <span>|</span>
               <span>Revision: {formMeta.revision}</span>
               <span>|</span>
+              <span>Revision Date: {formMeta.revisionDate}</span>
+              <span>|</span>
               <span className="font-bold text-orange-600">Shop ID: {shopId}</span>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={handleDownloadPdf}
-            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors"
+            onClick={() => setShowPdfModal(true)}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
           >
             <FileDown className="w-4 h-4" /> Preview PDF
           </button>
@@ -905,8 +994,7 @@ export default function DailyProductionReport() {
                   <button
                     type="button"
                     onClick={handleRemoveRow}
-                    disabled={rows[rows.length - 1].isSavedRow}
-                    className={`inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded transition-colors shadow hover:cursor-pointer ${rows[rows.length - 1].isSavedRow ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded transition-colors shadow hover:cursor-pointer"
                   >
                     − Delete Row
                   </button>

@@ -736,20 +736,22 @@ const getDailyProductionRecords = async (req, res) => {
 };
 
 // ============================================================
-// 14. PDF REPORT GENERATOR
+// 14. PDF REPORT GENERATOR (DATE RANGE WITH DYNAMIC PAGE FITTING)
 // ============================================================
 const generateReport = async (req, res) => {
   try {
-    const { lineCode, date, shift, shopId, machineNo } = req.query;
+    const { fromDate, toDate, shopId } = req.query;
 
-    if (!lineCode || !date) {
-      return res.status(400).send("lineCode and date are required.");
+    if (!fromDate || !toDate) {
+      return res.status(400).send("fromDate and toDate are required.");
     }
 
-    const cleanDate = String(date).split('T')[0];
+    const cleanFromDate = String(fromDate).split('T')[0];
+    const cleanToDate = String(toDate).split('T')[0];
+
     const request = new sql.Request();
-    request.input('lineCode', sql.NVarChar(50), lineCode);
-    request.input('reportDate', sql.NVarChar(50), cleanDate);
+    request.input('fromDate', sql.NVarChar(50), cleanFromDate);
+    request.input('toDate', sql.NVarChar(50), cleanToDate);
 
     let query = `
       SELECT
@@ -763,190 +765,255 @@ const generateReport = async (req, res) => {
         CONVERT(VARCHAR(5), TimeTo, 108) AS TimeTo,
         Sign_SupervisorProduction, Sign_SupervisorQuality, Sign_ProductionEngineer, Sign_HOFProduction
       FROM DailyProductionReport
-      WHERE lineCode = @lineCode
-        AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+      WHERE CONVERT(date, ReportDate) >= CONVERT(date, @fromDate)
+        AND CONVERT(date, ReportDate) <= CONVERT(date, @toDate)
     `;
 
-    if (shift) {
-      request.input('shift', sql.NVarChar(10), shift);
-      query += ` AND Shift = @shift`;
-    }
     if (shopId) {
       request.input('machineShop', sql.NVarChar(50), String(shopId));
       query += ` AND MachineShop = @machineShop`;
     }
-    // Include machineNo filter just in case the frontend also passes it here
-    if (machineNo) {
-      request.input('machineNo', sql.NVarChar(50), String(machineNo));
-      query += ` AND MachineNo = @machineNo`;
-    }
 
-    query += ` ORDER BY Id ASC`;
+    query += ` ORDER BY ReportDate ASC, lineCode ASC, Shift ASC, Id ASC`;
 
     const result = await request.query(query);
     const records = result.recordset;
 
-    if (records.length === 0) {
-      return res.status(404).send("No records found for the selected parameters.");
+    if (!records || records.length === 0) {
+      return res.status(404).send("No records found for the selected date range.");
     }
 
-    const first = records[0];
-    const [yy, mm, dd] = String(first.ReportDate).split('-');
-    const displayDate = `${dd}/${mm}/${yy}`;
+    // Group records by unique combo: lineCode + ReportDate + Shift
+    const groupedMap = new Map();
+    records.forEach(r => {
+      const groupKey = `${r.lineCode}_${r.ReportDate}_${r.Shift}`;
+      if (!groupedMap.has(groupKey)) {
+        groupedMap.set(groupKey, []);
+      }
+      groupedMap.get(groupKey).push(r);
+    });
 
-    const doc = new PDFDocument({ margin: 25, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
+    const groups = Array.from(groupedMap.values());
+
+    const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "inline; filename=Daily_Production_Report.pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=Daily_Production_Report_${cleanFromDate}_to_${cleanToDate}.pdf`);
     doc.pipe(res);
 
-    const startX = 25;
-    const headerY = 25;
-    const totalWidth = doc.page.width - 50;
-    const pageBottom = doc.page.height - 25;
+    const startX = 20;
+    const totalWidth = doc.page.width - 40; // ~801.89pt landscape width
+    const pageBottom = doc.page.height - 20;
+    const topMargin = 20;
 
-    // Header Blocks
-    doc.lineWidth(1).strokeColor('black');
-    doc.rect(startX, headerY, 100, 35).stroke();
-
-    const logoPath = path.join(__dirname, 'logo.jpg');
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, startX + 10, headerY + 5, { width: 80, height: 25 });
-    } else {
-      doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
-    }
-
-    doc.rect(startX + 100, headerY, totalWidth - 250, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(13).text("DAILY PRODUCTION REPORT (MACHINE SHOP)", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });
-
-    doc.rect(startX + totalWidth - 150, headerY, 150, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(9).text(`LINE: ${lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - 150, headerY + 6, { width: 150, align: "center" });
-    doc.font("Helvetica").fontSize(8).text(`DATE: ${displayDate}`, startX + totalWidth - 150, headerY + 20, { width: 150, align: "center" });
-
-    // Table Data
     const headers = ["M/C No", "Part Name / No", "Operator", "Prod", "Acc", "Hold", "Casting Reason", "Machining Reason", "Time", "M/C Stop Reason"];
     const fractions = [0.08, 0.16, 0.10, 0.05, 0.05, 0.06, 0.12, 0.12, 0.08, 0.18];
     const colWidths = fractions.map((f) => f * totalWidth);
-    const pad = 4;
-    const fontSize = 7;
+    const pad = 3;
+    const fontSize = 6.5;
 
-    const drawRow = (cells, y, isHeader) => {
-      doc.font(isHeader ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
+    // Estimate total height needed for an entry block
+    const computeEntryHeight = (groupRecords) => {
+      const headerH = 34;
+      const tableHeaderH = 15;
+      const sigH = 38;
+      let rowsH = 0;
 
-      let rowH = 0;
-      cells.forEach((c, i) => {
-        const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 });
-        if (h > rowH) rowH = h;
+      doc.font("Helvetica").fontSize(fontSize);
+      groupRecords.forEach((r) => {
+        let rowH = 14;
+        const timeVal = (r.TimeFrom || r.TimeTo) ? `${r.TimeFrom || ''}-${r.TimeTo || ''}` : '-';
+        const castHold = r.ReasonForHold_Casting ? `${r.ReasonForHold_Casting} (${r.ReasonForHold_CastingQty || 0})` : '-';
+        const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
+
+        const rowCells = [
+          r.MachineNo || "-",
+          r.PartNameNo || "-",
+          r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-",
+          r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-",
+          castHold,
+          machHold,
+          timeVal,
+          r.McStopTimeReason || "-"
+        ];
+
+        rowCells.forEach((c, i) => {
+          const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 4;
+          if (h > rowH) rowH = h;
+        });
+        rowsH += rowH;
       });
-      rowH += pad * 2;
 
-      if (!isHeader && y + rowH > pageBottom) {
-        doc.addPage();
-        y = 25;
-        y = drawRow(headers, y, true);
-        doc.font("Helvetica").fontSize(fontSize);
-      }
-
-      let x = startX;
-      cells.forEach((c, i) => {
-        if (isHeader) {
-          doc.rect(x, y, colWidths[i], rowH).fillAndStroke('#f0f0f0', 'black');
-        } else {
-          doc.rect(x, y, colWidths[i], rowH).stroke();
-        }
-        doc.fillColor('black').font(isHeader ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize)
-          .text(String(c), x + pad, y + pad, { width: colWidths[i] - pad * 2, align: "center" });
-        x += colWidths[i];
-      });
-
-      return y + rowH;
+      return headerH + 4 + tableHeaderH + rowsH + sigH + 10;
     };
 
-    doc.lineWidth(0.5).strokeColor('black');
-    let y = drawRow(headers, headerY + 45, true);
+    // Draw one full entry block
+    const drawEntry = (groupRecords, entryY) => {
+      const first = groupRecords[0];
+      const [yy, mm, dd] = String(first.ReportDate).split('-');
+      const displayDate = `${dd}/${mm}/${yy}`;
 
-    // Collect Signatures aggressively from ALL records 
-    // to ensure they display even if some specific machine records haven't been signed.
-    let opSig = '';
-    let qcSig = '';
-    let peSig = '';
-    let hofSig = '';
+      // 1. Top Header (34pt)
+      const headerH = 34;
+      doc.lineWidth(0.8).strokeColor('black');
+      doc.rect(startX, entryY, 90, headerH).stroke();
 
-    records.forEach((r) => {
-      const timeVal = (r.TimeFrom || r.TimeTo) ? `${r.TimeFrom || ''}-${r.TimeTo || ''}` : '-';
-      const castHold = r.ReasonForHold_Casting ? `${r.ReasonForHold_Casting} (${r.ReasonForHold_CastingQty || 0})` : '-';
-      const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
+      const logoPath = path.join(__dirname, 'logo.jpg');
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, startX + 5, entryY + 4, { width: 80, height: 26, fit: [80, 26], align: 'center', valign: 'center' });
+      } else {
+        doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("SAKTHI\nAUTO", startX, entryY + 8, { width: 90, align: "center" });
+      }
 
-      y = drawRow([
-        r.MachineNo || "-",
-        r.PartNameNo || "-",
-        r.OperatorName || "-",
-        r.Produced != null ? r.Produced : "-",
-        r.Accepted != null ? r.Accepted : "-",
-        r.HoldNonConformance || "-",
-        castHold,
-        machHold,
-        timeVal,
-        r.McStopTimeReason || "-"
-      ], y, false);
+      const titleW = totalWidth - 90 - 160;
+      doc.rect(startX + 90, entryY, titleW, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("DAILY PRODUCTION REPORT (MACHINE SHOP)", startX + 90, entryY + 12, { width: titleW, align: "center" });
 
-      // Aggregate Signatures
-      if (!opSig && r.Sign_SupervisorProduction && !String(r.Sign_SupervisorProduction).includes('Pending')) opSig = r.Sign_SupervisorProduction;
-      if (!qcSig && r.Sign_SupervisorQuality && !String(r.Sign_SupervisorQuality).includes('Pending')) qcSig = r.Sign_SupervisorQuality;
-      if (!peSig && r.Sign_ProductionEngineer && !String(r.Sign_ProductionEngineer).includes('Pending')) peSig = r.Sign_ProductionEngineer;
-      if (!hofSig && r.Sign_HOFProduction && !String(r.Sign_HOFProduction).includes('Pending')) hofSig = r.Sign_HOFProduction;
+      doc.rect(startX + totalWidth - 160, entryY, 160, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - 160, entryY + 6, { width: 160, align: "center" });
+      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - 160, entryY + 18, { width: 160, align: "center" });
+
+      let currY = entryY + headerH + 3;
+
+      // 2. Table Header (15pt)
+      doc.font("Helvetica-Bold").fontSize(fontSize);
+      let curX = startX;
+      headers.forEach((h, i) => {
+        doc.rect(curX, currY, colWidths[i], 15).fillAndStroke('#f0f0f0', 'black');
+        doc.fillColor('black').text(h, curX + pad, currY + 4, { width: colWidths[i] - pad * 2, align: "center" });
+        curX += colWidths[i];
+      });
+      currY += 15;
+
+      // 3. Table Rows
+      doc.font("Helvetica").fontSize(fontSize);
+      doc.lineWidth(0.5).strokeColor('black');
+
+      let opSig = '';
+      let qcSig = '';
+      let peSig = '';
+      let hofSig = '';
+
+      groupRecords.forEach((r) => {
+        const timeVal = (r.TimeFrom || r.TimeTo) ? `${r.TimeFrom || ''}-${r.TimeTo || ''}` : '-';
+        const castHold = r.ReasonForHold_Casting ? `${r.ReasonForHold_Casting} (${r.ReasonForHold_CastingQty || 0})` : '-';
+        const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
+
+        const rowCells = [
+          r.MachineNo || "-",
+          r.PartNameNo || "-",
+          r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-",
+          r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-",
+          castHold,
+          machHold,
+          timeVal,
+          r.McStopTimeReason || "-"
+        ];
+
+        let rowH = 14;
+        rowCells.forEach((c, i) => {
+          const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 4;
+          if (h > rowH) rowH = h;
+        });
+
+        let x = startX;
+        rowCells.forEach((c, i) => {
+          doc.rect(x, currY, colWidths[i], rowH).stroke();
+          doc.fillColor('black').text(String(c), x + pad, currY + 3, { width: colWidths[i] - pad * 2, align: "center" });
+          x += colWidths[i];
+        });
+
+        currY += rowH;
+
+        if (!opSig && r.Sign_SupervisorProduction && !String(r.Sign_SupervisorProduction).includes('Pending')) opSig = r.Sign_SupervisorProduction;
+        if (!qcSig && r.Sign_SupervisorQuality && !String(r.Sign_SupervisorQuality).includes('Pending')) qcSig = r.Sign_SupervisorQuality;
+        if (!peSig && r.Sign_ProductionEngineer && !String(r.Sign_ProductionEngineer).includes('Pending')) peSig = r.Sign_ProductionEngineer;
+        if (!hofSig && r.Sign_HOFProduction && !String(r.Sign_HOFProduction).includes('Pending')) hofSig = r.Sign_HOFProduction;
+      });
+
+      // 4. Signatures (34pt)
+      let sigY = currY + 4;
+      const sigColWidth = totalWidth / 4;
+
+      // 1. Shift Supervisor (Production)
+      doc.lineWidth(0.5).strokeColor('black');
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Supervisor (Production)", startX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(startX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      if (opSig) {
+        doc.fillColor('black').font('Helvetica-Bold').fontSize(7).text(String(opSig).toUpperCase(), startX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+      } else {
+        doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", startX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+      }
+
+      // 2. Shift Supervisor (Quality)
+      const qcX = startX + sigColWidth;
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Supervisor (Quality)", qcX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(qcX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      if (qcSig) {
+        doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(qcX + 16, sigY + 21).lineTo(qcX + 19, sigY + 25).lineTo(qcX + 24, sigY + 16).stroke();
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(`APPROVED (${String(qcSig).toUpperCase()})`, qcX + 28, sigY + 16, { width: sigColWidth - 36 });
+      } else {
+        doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", qcX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+      }
+
+      // 3. Production Engineer
+      const peX = startX + sigColWidth * 2;
+      doc.strokeColor('black').lineWidth(0.5);
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Production Engineer", peX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(peX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      if (peSig) {
+        doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(peX + 16, sigY + 21).lineTo(peX + 19, sigY + 25).lineTo(peX + 24, sigY + 16).stroke();
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(`APPROVED (${String(peSig).toUpperCase()})`, peX + 28, sigY + 16, { width: sigColWidth - 36 });
+      } else {
+        doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", peX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+      }
+
+      // 4. HOF - Production
+      const hofX = startX + sigColWidth * 3;
+      doc.strokeColor('black').lineWidth(0.5);
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("HOF - Production", hofX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(hofX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      if (hofSig) {
+        doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(hofX + 16, sigY + 21).lineTo(hofX + 19, sigY + 25).lineTo(hofX + 24, sigY + 16).stroke();
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(`APPROVED (${String(hofSig).toUpperCase()})`, hofX + 28, sigY + 16, { width: sigColWidth - 36 });
+      } else {
+        doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", hofX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+      }
+
+      return sigY + 34;
+    };
+
+    // Render entries sequentially, packing as many as fit per landscape page
+    let currentY = topMargin;
+    let isFirstOnPage = true;
+
+    groups.forEach((groupRecords) => {
+      const entryH = computeEntryHeight(groupRecords);
+
+      if (!isFirstOnPage && (currentY + entryH > pageBottom)) {
+        doc.addPage();
+        currentY = topMargin;
+        isFirstOnPage = true;
+      }
+
+      if (!isFirstOnPage) {
+        doc.save()
+          .lineWidth(0.5)
+          .dash(3, { space: 3 })
+          .strokeColor('#9ca3af')
+          .moveTo(startX, currentY - 4)
+          .lineTo(startX + totalWidth, currentY - 4)
+          .stroke()
+          .restore();
+      }
+
+      const endY = drawEntry(groupRecords, currentY);
+      currentY = endY + 10;
+      isFirstOnPage = false;
     });
-
-    // Signatures Block
-    let sigY = y + 18;
-    if (sigY + 50 > pageBottom) {
-      doc.addPage();
-      sigY = 30;
-    }
-
-    const sigColWidth = totalWidth / 4;
-
-    // 1. Shift Supervisor (Production)
-    doc.lineWidth(0.5).strokeColor('black');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Supervisor (Production)", startX, sigY, { width: sigColWidth - 10, align: "center" });
-    doc.rect(startX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    if (opSig) {
-      doc.fillColor('black').font('Helvetica').fontSize(8).text(String(opSig), startX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
-    }
-
-    // 2. Shift Supervisor (Quality)
-    const qcX = startX + sigColWidth;
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Supervisor (Quality)", qcX, sigY, { width: sigColWidth - 10, align: "center" });
-    doc.rect(qcX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    if (qcSig) {
-      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(qcX + 20, sigY + 26).lineTo(qcX + 24, sigY + 31).lineTo(qcX + 30, sigY + 20).stroke();
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(qcSig).toUpperCase()})`, qcX + 34, sigY + 22, { lineBreak: false });
-    } else {
-      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", qcX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
-    }
-
-    // 3. Production Engineer
-    const peX = startX + sigColWidth * 2;
-    doc.strokeColor('black').lineWidth(0.5);
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Production Engineer", peX, sigY, { width: sigColWidth - 10, align: "center" });
-    doc.rect(peX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    if (peSig) {
-      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(peX + 20, sigY + 26).lineTo(peX + 24, sigY + 31).lineTo(peX + 30, sigY + 20).stroke();
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(peSig).toUpperCase()})`, peX + 34, sigY + 22, { lineBreak: false });
-    } else {
-      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", peX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
-    }
-
-    // 4. HOF - Production
-    const hofX = startX + sigColWidth * 3;
-    doc.strokeColor('black').lineWidth(0.5);
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("HOF - Production", hofX, sigY, { width: sigColWidth - 10, align: "center" });
-    doc.rect(hofX + 10, sigY + 12, sigColWidth - 20, 28).stroke();
-    if (hofSig) {
-      doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(hofX + 20, sigY + 26).lineTo(hofX + 24, sigY + 31).lineTo(hofX + 30, sigY + 20).stroke();
-      doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(hofSig).toUpperCase()})`, hofX + 34, sigY + 22, { lineBreak: false });
-    } else {
-      doc.fillColor('red').font('Helvetica').fontSize(8).text("Pending", hofX + 10, sigY + 22, { width: sigColWidth - 20, align: "center" });
-    }
 
     doc.end();
   } catch (err) {

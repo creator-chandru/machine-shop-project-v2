@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { FileDown } from "lucide-react";
+import { FileDown, Calendar, X } from "lucide-react";
 import { useLineSet } from "../context/LineSetContext.jsx";
 import Header from '../components/Header';
 
@@ -69,10 +69,7 @@ const createEmptyLineColumn = (lineCode = "", partName = "", capacity = null) =>
     return acc;
   }, {}),
 
-  // Shift officer sign – approved by the shift incharge himself, per shift
   signatures: emptyShifts(),
-
-  // Section incharge (PE) assigned by the shift incharge
   assignedPe: "",
   peSign: "",
 });
@@ -91,7 +88,6 @@ const sumLosses = (col, shift, excludeId = null) =>
     return acc + (parseFloat(col.losses[`loss_${l.id}`]?.[shift]) || 0);
   }, 0);
 
-// Toast notification component
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
 
@@ -110,7 +106,6 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
-// Number of line columns per table, based on screen width (tablet friendly)
 const calcChunkSize = () => {
   const w = typeof window !== "undefined" ? window.innerWidth : 1280;
   if (w >= 1536) return 4;
@@ -157,6 +152,12 @@ export default function DailyProductionIdleTimeReport() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // PDF Date Range Modal States
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfFromDate, setPdfFromDate] = useState("");
+  const [pdfToDate, setPdfToDate] = useState("");
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
   const [toast, setToast] = useState({ message: '', type: '' });
 
   const triggerToast = (message, type = 'error') => {
@@ -168,7 +169,6 @@ export default function DailyProductionIdleTimeReport() {
     createEmptyLineColumn(lineSet?.lineCode || "", lineSet?.partName || ""),
   ]);
 
-  // Refs so async callbacks always see the latest values
   const lineColumnsRef = useRef(lineColumns);
   const reportDateRef = useRef(reportDate);
   useEffect(() => { lineColumnsRef.current = lineColumns; }, [lineColumns]);
@@ -178,9 +178,6 @@ export default function DailyProductionIdleTimeReport() {
   useEffect(() => { machineShopDetailsRef.current = machineShopDetails; }, [machineShopDetails]);
   useEffect(() => { reportDateRef.current = reportDate; }, [reportDate]);
 
-  // ------------------------------------------------------------
-  // Master data
-  // ------------------------------------------------------------
   useEffect(() => {
     if (!shopId) return;
 
@@ -202,7 +199,6 @@ export default function DailyProductionIdleTimeReport() {
         setLineMappings(Array.isArray(maps) ? maps : []);
       } catch (e) {
         console.error(e);
-        setLineMappings([]);
       }
 
       try {
@@ -210,7 +206,6 @@ export default function DailyProductionIdleTimeReport() {
         setPeUsers(pe.peList || []);
       } catch (e) {
         console.error(e);
-        setPeUsers([]);
       }
 
       setLoadingMaster(false);
@@ -219,7 +214,6 @@ export default function DailyProductionIdleTimeReport() {
     loadAll();
   }, [shopId]);
 
-  // Sync with LineSetContext whenever it changes (first column only)
   useEffect(() => {
     if (lineSet?.lineCode) {
       setLineColumns((prev) => {
@@ -237,9 +231,6 @@ export default function DailyProductionIdleTimeReport() {
     }
   }, [lineSet]);
 
-  // ------------------------------------------------------------
-  // Line / part / capacity helpers
-  // ------------------------------------------------------------
   const lineCodes = [
     ...new Set(
       lineMappings.length > 0
@@ -284,12 +275,8 @@ export default function DailyProductionIdleTimeReport() {
         return capacity ? { ...c, partName: partName || c.partName, capacity } : c;
       })
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineMappings, machineShopDetails]);
 
-  // ------------------------------------------------------------
-  // Load saved data for (date + lineCode)
-  // ------------------------------------------------------------
   const freshFrom = (c) => {
     const { partName, capacity } = resolvePartForLine(c.lineCode);
     return createEmptyLineColumn(c.lineCode, partName || c.partName, capacity);
@@ -328,7 +315,6 @@ export default function DailyProductionIdleTimeReport() {
   useEffect(() => {
     const first = lineColumnsRef.current[0];
     if (first?.lineCode) applySavedOrFresh(first.lineCode, reportDateRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shopId]);
 
   const handleDateChange = (val) => {
@@ -341,9 +327,6 @@ export default function DailyProductionIdleTimeReport() {
     cols.filter((c) => c.lineCode).forEach((c) => applySavedOrFresh(c.lineCode, val));
   };
 
-  // ------------------------------------------------------------
-  // Handlers
-  // ------------------------------------------------------------
   const isEditableShift = (col, shift) => !col.locked && !col.signatures?.[shift];
 
   const handleLineCodeChange = (colIdx, lineCode) => {
@@ -359,10 +342,6 @@ export default function DailyProductionIdleTimeReport() {
     }
 
     const { partName, capacity } = resolvePartForLine(lineCode);
-
-    if (lineCode && partName && !capacity) {
-      triggerToast("Capacity has not been set by HOD/HOF for this line.", "error");
-    }
 
     setLineColumns((prev) => {
       const next = [...prev];
@@ -399,29 +378,6 @@ export default function DailyProductionIdleTimeReport() {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
 
-    if (val !== "") {
-      const capNum = parseFloat(col.capacity[shift]);
-      const enteredVal = parseFloat(val);
-
-      if (enteredVal < 0) return;
-
-      if (isNaN(capNum) || capNum <= 0) {
-        triggerToast(
-          `Capacity for Shift ${SHIFT_LABEL[shift]} is not set by HOD/HOF. Production cannot be entered.`,
-          "error"
-        );
-        return;
-      }
-
-      if (!isNaN(enteredVal) && enteredVal > capNum) {
-        triggerToast(
-          `Actual production quantity (${enteredVal}) cannot exceed the capacity (${capNum}) for Shift ${SHIFT_LABEL[shift]}!`,
-          "error"
-        );
-        return;
-      }
-    }
-
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = {
@@ -438,7 +394,6 @@ export default function DailyProductionIdleTimeReport() {
   const handleManpowerChange = (colIdx, shift, val) => {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
-    if (val !== "" && parseFloat(val) < 0) return;
 
     setLineColumns((prev) => {
       const next = [...prev];
@@ -453,29 +408,6 @@ export default function DailyProductionIdleTimeReport() {
   const handleLossChange = (colIdx, lossId, shift, val) => {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
-
-    if (val !== "") {
-      const entered = parseFloat(val);
-      if (entered < 0) return;
-
-      const capNum = parseFloat(col.capacity[shift]);
-      if (isNaN(capNum) || capNum <= 0) {
-        triggerToast(
-          `Capacity for Shift ${SHIFT_LABEL[shift]} is not set by HOD/HOF. Losses cannot be entered.`,
-          "error"
-        );
-        return;
-      }
-
-      const total = sumLosses(col, shift, lossId) + (isNaN(entered) ? 0 : entered);
-      if (total > capNum) {
-        triggerToast(
-          `Total losses (${total}) cannot exceed the capacity (${capNum}) for Shift ${SHIFT_LABEL[shift]}!`,
-          "error"
-        );
-        return;
-      }
-    }
 
     setLineColumns((prev) => {
       const next = [...prev];
@@ -496,6 +428,11 @@ export default function DailyProductionIdleTimeReport() {
   const handleApproveShift = (colIdx, shift) => {
     const col = lineColumns[colIdx];
     if (!col || col.locked) return;
+
+    if (!col.lineCode) {
+      triggerToast("Select Line Code before approving.", "error");
+      return;
+    }
 
     if (!shiftHasData(col, shift)) {
       triggerToast(`Enter data for Shift ${SHIFT_LABEL[shift]} before approving it.`, "error");
@@ -554,49 +491,55 @@ export default function DailyProductionIdleTimeReport() {
   const calcTotalLoss = (col, shift) => sumLosses(col, shift) || "";
 
   // ------------------------------------------------------------
-  // PDF download
+  // PDF Download (By Date Range Modal)
   // ------------------------------------------------------------
-  const handleDownloadPdf = async (targetCol = null) => {
-    const col = targetCol || lineColumns.find((c) => c.lineCode);
-    if (!col || !col.lineCode || !reportDate) {
-      triggerToast("Select a line code and date first.", "error");
+  const handleDownloadPdfRange = async () => {
+    if (!pdfFromDate || !pdfToDate) {
+      triggerToast("Please select both From Date and To Date.", "error");
       return;
     }
 
+    if (new Date(pdfFromDate) > new Date(pdfToDate)) {
+      triggerToast("From Date cannot be later than To Date.", "error");
+      return;
+    }
+
+    setIsDownloadingPdf(true);
     try {
       const params = new URLSearchParams({
-        lineCode: col.lineCode,
-        date: reportDate,
-        shopId: shopId || 3,
+        fromDate: pdfFromDate,
+        toDate: pdfToDate,
+        shopId: String(shopId || 3),
       });
-
-      triggerToast("Downloading PDF from server...", "success");
 
       const response = await fetch(`${API}/api/daily-production-idle-time/report?${params.toString()}`, {
         headers: authHeaders(),
       });
 
-      if (!response.ok) {
-        if (response.status === 404) throw new Error("No data recorded for this date and line.");
-        throw new Error("Failed to generate PDF from the server.");
-      }
+      if (response.status === 404) throw new Error("No data recorded for the selected date range.");
+      if (!response.ok) throw new Error("Failed to generate PDF from the server.");
 
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = `Idle_Time_Report_${col.lineCode}_${reportDate}.pdf`;
+      link.download = `Idle_Time_Report_${pdfFromDate}_to_${pdfToDate}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
+
+      setShowPdfModal(false);
+      triggerToast("PDF generated and downloaded!", "success");
     } catch (err) {
       triggerToast(err.message || "Failed to download PDF", "error");
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
   // ------------------------------------------------------------
-  // Save
+  // Save with signature allocation checks
   // ------------------------------------------------------------
   const validateColumn = (col, label) => {
     if (!col.partName) return `${label}: part name could not be determined for this line.`;
@@ -605,17 +548,8 @@ export default function DailyProductionIdleTimeReport() {
 
     for (const shift of SHIFT_KEYS) {
       const name = SHIFT_LABEL[shift];
-      const cap = parseFloat(col.capacity[shift]) || 0;
-      const lh = parseFloat(col.actualProd.lh[shift]) || 0;
-      const rh = parseFloat(col.actualProd.rh[shift]) || 0;
-      const lossTotal = sumLosses(col, shift);
-
       if (shiftHasData(col, shift)) {
         anyData = true;
-        if (!(cap > 0)) return `${label} (Shift ${name}): capacity is not set by HOD/HOF.`;
-        if (lh > cap) return `${label} (Shift ${name}): Actual LH production (${lh}) cannot exceed capacity (${cap})!`;
-        if (rh > cap) return `${label} (Shift ${name}): Actual RH production (${rh}) cannot exceed capacity (${cap})!`;
-        if (lossTotal > cap) return `${label} (Shift ${name}): Total losses (${lossTotal}) cannot exceed capacity (${cap})!`;
         if (!col.signatures[shift]) return `${label} (Shift ${name}): approve the shift (Shift Officer Sign) before submitting.`;
       }
     }
@@ -696,7 +630,6 @@ export default function DailyProductionIdleTimeReport() {
       setSaveSuccess(true);
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
-
       navigate(`/shift-incharge/${shopId || 3}`);
     } catch (err) {
       console.error("Save error:", err);
@@ -707,9 +640,6 @@ export default function DailyProductionIdleTimeReport() {
 
   const hasUnlockedColumn = lineColumns.some((c) => !c.locked && c.lineCode);
 
-  // ------------------------------------------------------------
-  // Render
-  // ------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-2 pt-0 sm:p-6 pb-20">
       <Header />
@@ -719,6 +649,68 @@ export default function DailyProductionIdleTimeReport() {
         type={toast.type}
         onClose={() => setToast({ message: '', type: '' })}
       />
+
+      {/* Date Range Modal for PDF Download */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">Download Report by Date Range</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowPdfModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">From Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfFromDate}
+                  onChange={(e) => setPdfFromDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">To Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                  value={pdfToDate}
+                  onChange={(e) => setPdfToDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPdfModal(false)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadPdfRange}
+                disabled={isDownloadingPdf}
+                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+              >
+                <FileDown className="w-4 h-4" />
+                {isDownloadingPdf ? "Downloading..." : "Download Report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -759,7 +751,7 @@ export default function DailyProductionIdleTimeReport() {
 
           <button
             type="button"
-            onClick={() => handleDownloadPdf()}
+            onClick={() => setShowPdfModal(true)}
             className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
           >
             <FileDown className="w-4 h-4" /> Download PDF
@@ -917,7 +909,7 @@ export default function DailyProductionIdleTimeReport() {
                       ))}
                     </tr>
 
-                    {/* Capacity – set by HOD/HOF, read-only */}
+                    {/* Capacity */}
                     <tr className="bg-white">
                       <td
                         colSpan={3}
@@ -972,7 +964,6 @@ export default function DailyProductionIdleTimeReport() {
                                 type="number"
                                 inputMode="numeric"
                                 min="0"
-                                max={col.capacity[shift] || undefined}
                                 placeholder="0"
                                 className={`${INPUT_BASE} font-medium`}
                                 value={col.actualProd.lh[shift]}
@@ -1006,7 +997,6 @@ export default function DailyProductionIdleTimeReport() {
                                 type="number"
                                 inputMode="numeric"
                                 min="0"
-                                max={col.capacity[shift] || undefined}
                                 placeholder="0"
                                 className={`${INPUT_BASE} font-medium`}
                                 value={col.actualProd.rh[shift]}
@@ -1107,7 +1097,7 @@ export default function DailyProductionIdleTimeReport() {
                       </tr>
                     ))}
 
-                    {/* Total loss – calculated from entered losses */}
+                    {/* Total loss */}
                     <tr className="bg-gray-200 font-extrabold text-gray-900">
                       <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2">
                         Total Loss (mins)
@@ -1129,7 +1119,7 @@ export default function DailyProductionIdleTimeReport() {
                       ))}
                     </tr>
 
-                    {/* Shift Officer Sign – approved by the shift incharge */}
+                    {/* Shift Officer Sign */}
                     <tr className="bg-gray-50">
                       <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2 font-bold">
                         SHIFT OFFICER SIGN
@@ -1179,7 +1169,7 @@ export default function DailyProductionIdleTimeReport() {
                       ))}
                     </tr>
 
-                    {/* Section Incharge (PE) – assigned from dropdown */}
+                    {/* Section Incharge (PE) */}
                     <tr className="bg-gray-50">
                       <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2 font-bold">
                         SECTION INCHARGE (PE)

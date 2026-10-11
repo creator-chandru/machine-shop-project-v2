@@ -26,6 +26,7 @@ const jobSetupVerificationRoutes = require("./routes/jobSetupVerificationRoutes.
 const CompetencyExamRoutes = require("./routes/CompetencyExamRoutes.js");
 const partSets = require("./routes/partSetRoutes.js");
 const qfRoutes = require("./routes/qfRoutes.js"); // ✅ Added QF Routes
+const Level1Routes = require("./routes/Level1MaintenanceRoutes.js"); // ✅ Added Level 1 Routes
 
 const app = express();
 
@@ -62,7 +63,7 @@ app.use('/api', jobSetupVerificationRoutes);
 app.use('/api', CompetencyExamRoutes);
 app.use('/api/part-sets', partSets);
 app.use('/api', qfRoutes); // ✅ Registered QF Routes
-
+app.use('/api', Level1Routes); // ✅ Registered Level 1 Routes
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);

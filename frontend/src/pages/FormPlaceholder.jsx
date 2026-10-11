@@ -19,6 +19,7 @@ import EightDProblemSolvingReport from "./8DProblemSolvingReport";
 import OperatorAllotment from "./OperationAllotment";
 import JobSetupVerification from "./jobSetupVerification.jsx";
 import CompetencyExam from "./CompetencyExam.jsx";
+import Level1MaintenanceChecksheet from "./Level1MaintenanceCheckSheet.jsx";
 /**
  * Central map for operator forms
  *
@@ -57,7 +58,8 @@ const formMap = {
    "8d-problem-solving-report":<EightDProblemSolvingReport />,
     "operator-allotment":<OperatorAllotment />,
     "job-setup-verification" : <JobSetupVerification />,
-    "competency-exam" : <CompetencyExam />
+    "competency-exam" : <CompetencyExam />,
+    "level1-maintenance" : <Level1MaintenanceChecksheet/>
   // Future forms:
   // "some-form": <SomeForm />,
 };

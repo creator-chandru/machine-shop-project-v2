@@ -482,3 +482,38 @@ GO
 CREATE INDEX IX_CorrectiveActionRegister_LineDate
 ON CorrectiveActionRegister(lineCode, recordDate);
 GO
+
+--Level 1 Maintenance checksheet
+USE [MachineShop]
+GO
+/****** Object:  Table [dbo].[Level1MaintenanceChecksheet]    Script Date: 10/11/2026 12:47:57 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Level1MaintenanceChecksheet](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[machineShop] [int] NOT NULL,
+	[lineCode] [nvarchar](50) NOT NULL,
+	[partName] [nvarchar](200) NULL,
+	[partNo] [nvarchar](100) NULL,
+	[machineNo] [nvarchar](50) NOT NULL,
+	[opNo] [nvarchar](50) NULL,
+	[checklistDate] [date] NOT NULL,
+	[slNo] [int] NOT NULL,
+	[parameterName] [nvarchar](250) NULL,
+	[specification] [nvarchar](500) NULL,
+	[checkMethod] [nvarchar](100) NULL,
+	[value] [nvarchar](100) NULL,
+	[operatorSignature] [nvarchar](100) NULL,
+	[shiftInchargeSignature] [nvarchar](100) NULL,
+	[peSignature] [nvarchar](100) NULL,
+	[createdAt] [datetime] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[Level1MaintenanceChecksheet] ADD  DEFAULT (getdate()) FOR [createdAt]
+GO

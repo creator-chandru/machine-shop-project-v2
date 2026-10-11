@@ -329,6 +329,20 @@ const generatePreOperationReport = async (req, res) => {
     const cleanToDate = String(toDate).split('T')[0];
     const targetShopId = parseInt(shopId || 3, 10);
 
+    // 🔥 1. FETCH FULL QF VALUE HISTORY FROM DATABASE
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query`
+        SELECT qfValue, date 
+        FROM PreOperationQFvalues 
+        WHERE formName = 'pre-operation-checklist' 
+        ORDER BY date DESC, id DESC
+      `;
+      qfHistory = qfRes.recordset;
+    } catch (e) {
+      console.error("PreOperationQFvalues table error or not found.");
+    }
+
     const request = new sql.Request();
     request.input('fromDate', sql.NVarChar(50), cleanFromDate);
     request.input('toDate', sql.NVarChar(50), cleanToDate);
@@ -354,7 +368,6 @@ const generatePreOperationReport = async (req, res) => {
       return res.status(404).send("No records found for the selected date range.");
     }
 
-    // Group records by unique combination: lineCode + machineNo + checklistDate
     const groupedMap = new Map();
     records.forEach((r) => {
       const groupKey = `${r.lineCode}_${r.machineNo}_${r.checklistDate}`;
@@ -367,13 +380,18 @@ const generatePreOperationReport = async (req, res) => {
     const groups = Array.from(groupedMap.values());
 
     const doc = new PDFDocument({ margin: 20, size: "A4", layout: "portrait", bufferPages: true, autoPageBreak: false });
+    
+    // Add an error event listener to the document to prevent crashing the server
+    doc.on('error', (err) => {
+      console.error("PDFKit error occurred:", err);
+    });
+
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename=PreOperation_Checklist_Report_${cleanFromDate}_to_${cleanToDate}.pdf`);
     doc.pipe(res);
 
     const startX = 20;
-    const totalWidth = doc.page.width - 40; // 555pt printable width
-    const pageHeight = doc.page.height;     // 841.89pt
+    const totalWidth = doc.page.width - 40; 
 
     const labels = {
       1: { name: "System pressure", unit: "KGF/CM2", method: "PRESSURE GAUGE" },
@@ -403,13 +421,28 @@ const generatePreOperationReport = async (req, res) => {
       return `APPROVED (${trimmed.toUpperCase()})`;
     };
 
-    // Helper to draw one full entry block at a given Y offset (compact height ~380pt)
+    // Helper to draw one full entry block at a given Y offset
     const drawEntryBlock = (groupRecords, blockStartY) => {
       const first = groupRecords[0];
       const [yy, mm, dd] = String(first.checklistDate).split('-');
       const displayDate = `${dd}/${mm}/${yy}`;
 
-      // 1. Header Box (34pt height)
+      // 🔥 2. FIND CORRECT QF VALUE FOR THIS SPECIFIC PAGE DATE
+      let currentPageQfValue = "QF/07/MPD-13, Rev.No: 12 dt 31.01.2025"; // Fallback
+      const currentReportDate = new Date(first.checklistDate);
+      currentReportDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+          if (qfDate <= currentReportDate) {
+              currentPageQfValue = qf.qfValue;
+              break; 
+          }
+      }
+
+      // 1. Header Box
       const headerH = 34;
       doc.lineWidth(0.8).strokeColor('black');
       doc.rect(startX, blockStartY, 80, headerH).stroke();
@@ -437,8 +470,8 @@ const generatePreOperationReport = async (req, res) => {
       doc.font("Helvetica").fontSize(6.5).fillColor('black')
          .text(`DATE: ${displayDate}`, startX + totalWidth - rightWidth + 4, blockStartY + 24, { width: rightWidth - 8 });
 
-      // 2. Table Header (13pt height)
-      let currentY = blockStartY + headerH + 3;
+      // 2. Table Header
+      let currentY = blockStartY + headerH + 3; // explicitly scoped currentY definition
       doc.font("Helvetica-Bold").fontSize(fontSize);
       let colX = startX;
       tableHeaders.forEach((h, i) => {
@@ -512,7 +545,10 @@ const generatePreOperationReport = async (req, res) => {
         doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", inchargeX + 10, sigY + 16, { width: sigColWidth - 20, align: "center" });
       }
 
-      return sigY + 34;
+      // 🔥 3. PRINT QF VALUE AT THE BOTTOM LEFT
+      doc.fontSize(6).font('Helvetica').fillColor('black').text(currentPageQfValue, startX, sigY + 32);
+
+      return sigY + 38; 
     };
 
     // Loop through groups and render 2 per page
@@ -548,11 +584,28 @@ const generatePreOperationReport = async (req, res) => {
     doc.end();
   } catch (err) {
     console.error("PDF generation error:", err);
+    // Safe fallback to prevent the ERR_STREAM_WRITE_AFTER_END server crash
     if (!res.headersSent) {
-      res.status(500).json({ message: "PDF generation failed" });
-    } else {
-      res.end();
+      res.status(500).json({ message: "PDF generation failed", error: err.message });
     }
+  }
+};
+
+// ============================================================
+// GET QF HISTORY FOR DYNAMIC FRONTEND DISPLAY
+// ============================================================
+const getPreOperationQfHistory = async (req, res) => {
+  try {
+    const qfRes = await sql.query`
+      SELECT qfValue, date 
+      FROM PreOperationQFvalues 
+      WHERE formName = 'pre-operation-checklist' 
+      ORDER BY date DESC, id DESC
+    `;
+    res.status(200).json(qfRes.recordset);
+  } catch (err) {
+    console.error("Error fetching QF history:", err);
+    res.status(500).json({ error: "Failed to fetch QF history" });
   }
 };
 
@@ -562,5 +615,6 @@ module.exports = {
   savePreOperationChecklist,
   getLatestMachineParams,
   getPreOperationRecord,
-  generatePreOperationReport
+  generatePreOperationReport,
+  getPreOperationQfHistory // ✅ Export the new function
 };

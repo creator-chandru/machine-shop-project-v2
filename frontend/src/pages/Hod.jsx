@@ -4,7 +4,7 @@ import Header from "../components/Header";
 import EditPartMapping from "../components/EditPartMapping";
 import JobSetupMasterConfigurator from "../components/jobSetupMasterConfigurator";
 import AddPartSetModal from "../components/AddPartSetModal.jsx";
-import { RefreshCw, Loader, X, ClipboardList, Settings2, Layers, ChevronRight } from "lucide-react";
+import { RefreshCw, Loader, X, ClipboardList, Settings2, Layers, ChevronRight, BookOpen } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -17,6 +17,11 @@ const Hod = () => {
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isAddPartSetOpen, setIsAddPartSetOpen] = useState(false);
+
+  // ✅ QF Manager States
+  const [isQfManagerOpen, setIsQfManagerOpen] = useState(false);
+  const [qfSettings, setQfSettings] = useState([]);
+  const [savingId, setSavingId] = useState(null);
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentHOD = currentUser.username || currentUser.employeeId || "HOD";
@@ -35,6 +40,47 @@ const Hod = () => {
     } catch (err) {
       toast.error("Failed to load Pending 4M Reports.");
     }
+  };
+
+  // ✅ Fetch QF Settings
+  const fetchQfSettings = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/qf-values`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setQfSettings(data);
+      }
+    } catch (error) {
+      toast.error("Failed to load QF values.");
+    }
+  };
+
+  // ✅ Update specific QF Setting
+  const handleSaveSingleQfSetting = async (setting) => {
+    setSavingId(setting.formName);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/qf-values`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ setting })
+      });
+      if (res.ok) {
+        toast.success(`${setting.formName.replace('-', ' ')} QF updated!`);
+        fetchQfSettings();
+      } else {
+        toast.error("Failed to save QF value.");
+      }
+    } catch (error) {
+      toast.error("Failed to save QF value.");
+    }
+    setSavingId(null);
   };
 
   useEffect(() => {
@@ -163,6 +209,18 @@ const Hod = () => {
               <Settings2 className="w-4 h-4" />
               Set Job Verification Set Up
             </button>
+
+            {/* ✅ QF MANAGER BUTTON */}
+            <button
+              onClick={() => {
+                fetchQfSettings();
+                setIsQfManagerOpen(true);
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer bg-gray-100 text-gray-700 hover:bg-gray-200 ml-auto"
+            >
+              <BookOpen className="w-4 h-4" />
+              Manage QF Values
+            </button>
           </div>
 
           {activeTab === "four-m" && (
@@ -213,7 +271,6 @@ const Hod = () => {
             <EditPartMapping shopId={shopId} />
           </div>
 
-          {/* Add Part Sets Action Card */}
           <button
             type="button"
             onClick={() => setIsAddPartSetOpen(true)}
@@ -241,16 +298,86 @@ const Hod = () => {
 
       </div>
 
-      {/* Add Part Set Modal */}
       <AddPartSetModal
         isOpen={isAddPartSetOpen}
         onClose={() => setIsAddPartSetOpen(false)}
         defaultShopId={shopId || "3"}
       />
 
+      {/* ✅ IN-COMPONENT QF MANAGER MODAL */}
+      {isQfManagerOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#383838] border border-[#4a4a4a] w-full max-w-4xl rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="bg-gradient-to-r from-indigo-600 to-[#ff9100] px-6 py-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-black/20 p-2.5 rounded-lg shadow-inner">
+                  <BookOpen size={22} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-white uppercase tracking-widest leading-tight">
+                    Manage QF Document Numbers
+                  </h2>
+                </div>
+              </div>
+              <button onClick={() => setIsQfManagerOpen(false)} className="text-white/70 hover:text-white bg-black/20 p-1.5 rounded-lg transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto bg-[#2d2d2d] flex-1">
+              {qfSettings.length === 0 ? (
+                <div className="text-center text-gray-500 py-10 font-black uppercase tracking-widest">No QF Settings Found.</div>
+              ) : (
+                <div className="space-y-4">
+                  {qfSettings.map((setting) => (
+                    <div key={setting.formName} className="bg-[#222] p-5 rounded-xl border border-[#4a4a4a] flex flex-col md:flex-row gap-5 items-end">
+                      <div className="flex-1 w-full">
+                        <label className="block text-[10px] font-black uppercase tracking-widest text-[#ff9100] mb-2">{setting.formName.replace(/-/g, ' ')} - QF Value</label>
+                        <input 
+                          type="text" 
+                          value={setting.qfValue} 
+                          onChange={(e) => {
+                            const newSettings = [...qfSettings];
+                            const idx = newSettings.findIndex(s => s.formName === setting.formName);
+                            newSettings[idx].qfValue = e.target.value;
+                            setQfSettings(newSettings);
+                          }}
+                          className="w-full bg-[#1a1a1a] border border-[#4a4a4a] p-3.5 rounded-xl text-gray-200 font-mono text-sm focus:outline-none focus:border-[#ff9100] shadow-inner"
+                        />
+                      </div>
+                      <div className="w-full md:w-1/4">
+                        <label className="block text-[10px] font-black uppercase tracking-widest text-[#ff9100] mb-2">Effective Date</label>
+                        <input 
+                          type="date" 
+                          value={setting.date ? setting.date.split('T')[0] : ''} 
+                          onChange={(e) => {
+                            const newSettings = [...qfSettings];
+                            const idx = newSettings.findIndex(s => s.formName === setting.formName);
+                            newSettings[idx].date = e.target.value;
+                            setQfSettings(newSettings);
+                          }}
+                          className="w-full bg-[#1a1a1a] border border-[#4a4a4a] p-3.5 rounded-xl text-gray-200 font-mono text-sm focus:outline-none focus:border-[#ff9100] shadow-inner [color-scheme:dark]"
+                        />
+                      </div>
+                      <button 
+                        onClick={() => handleSaveSingleQfSetting(setting)} 
+                        disabled={savingId === setting.formName}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider px-6 py-3.5 rounded-xl transition-all shadow-md flex justify-center items-center gap-2 disabled:opacity-50"
+                      >
+                        {savingId === setting.formName ? <Loader className="w-4 h-4 animate-spin" /> : "Update"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FULL-SCREEN SPLIT MODAL FOR REVIEW */}
       {selectedReport && (
-        <div className="fixed inset-0 z-[9999] bg-white flex flex-col overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 z-[8000] bg-white flex flex-col overflow-hidden animate-fade-in">
           <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
             <h3 className="font-bold text-xl uppercase tracking-wider">
               Verify 4M Checksheet

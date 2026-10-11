@@ -24,7 +24,9 @@ const eightDProblemSolvingReportRoutes = require("./routes/8DProblemSolvingRepor
 const operatorAllotmentRoutes = require("./routes/OperatorAllotment.js");
 const jobSetupVerificationRoutes = require("./routes/jobSetupVerificationRoutes.js");
 const CompetencyExamRoutes = require("./routes/CompetencyExamRoutes.js");
-const partSets = require("./routes/partSetRoutes.js")
+const partSets = require("./routes/partSetRoutes.js");
+const qfRoutes = require("./routes/qfRoutes.js"); // ✅ Added QF Routes
+
 const app = express();
 
 app.use(cors({
@@ -59,6 +61,8 @@ app.use('/api', eightDProblemSolvingReportRoutes);
 app.use('/api', jobSetupVerificationRoutes);
 app.use('/api', CompetencyExamRoutes);
 app.use('/api/part-sets', partSets);
+app.use('/api', qfRoutes); // ✅ Registered QF Routes
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);

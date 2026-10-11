@@ -7,7 +7,8 @@ const {
   savePreOperationChecklist,
   getLatestMachineParams,
   getPreOperationRecord,
-  generatePreOperationReport
+  generatePreOperationReport,
+  getPreOperationQfHistory
 } = require('../controllers/preOperationChecklistController.js');
 
 // ============================================================
@@ -23,5 +24,6 @@ router.post('/pre-operation-checklist', savePreOperationChecklist);
 router.get('/pre-operation-checklist/record', getPreOperationRecord);
 router.get('/pre-operation-checklist/report', generatePreOperationReport);
 router.get('/machine-shop/:shopId/latest-params', getLatestMachineParams);
+router.get('/pre-operation-checklist/qf-history', getPreOperationQfHistory);
 
 module.exports = router;

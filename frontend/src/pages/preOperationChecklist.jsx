@@ -66,7 +66,6 @@ export default function PreOperationChecklist() {
   const [values, setValues] = useState({});
   const [specifications, setSpecifications] = useState({});
   
-  // State for signatures
   const [signatures, setSignatures] = useState({});
   
   const [isSaving, setIsSaving] = useState(false);
@@ -76,13 +75,11 @@ export default function PreOperationChecklist() {
   const [isSavedRecord, setIsSavedRecord] = useState(false);
   const lookupSeqRef = useRef(0);
 
-  // PDF Modal States
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfFromDate, setPdfFromDate] = useState('');
   const [pdfToDate, setPdfToDate] = useState('');
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  // Determine current user role from URL path
   const isOperatorRoute = location.pathname.includes('/operator');
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
@@ -95,9 +92,10 @@ export default function PreOperationChecklist() {
   const [lineMappings, setLineMappings] = useState([]);
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
 
-  // ==========================================================
-  // DYNAMIC RENDER-TIME VALIDATION
-  // ==========================================================
+  // ✅ DYNAMIC QF STATES
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-13, Rev.No: 12 dt 31.01.2025");
+
   const getValidationError = (slNo) => {
     if (![1, 2, 3].includes(slNo)) return null;
     
@@ -124,7 +122,6 @@ export default function PreOperationChecklist() {
     return null;
   };
 
-  // Helper: Verify prerequisites before approval
   const validateBeforeApprove = () => {
     if (!headerInfo.lineCode || !headerInfo.machineNo || !headerInfo.date) {
       triggerToast("Please select Line Code, Machine No, and Date first.", "error");
@@ -146,9 +143,6 @@ export default function PreOperationChecklist() {
     return true;
   };
 
-  // ==========================================================
-  // FETCH MACHINE DETAILS & MAPPINGS
-  // ==========================================================
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -177,9 +171,6 @@ export default function PreOperationChecklist() {
     fetchData();
   }, [shopId]);
 
-  // ==========================================================
-  // AUTO-FILL LATEST MACHINE PARAMETERS (slNo: 1, 2, 3, 4)
-  // ==========================================================
   useEffect(() => {
     const fetchLatestParams = async () => {
       if (!shopId || !headerInfo.lineCode || !headerInfo.machineNo) return;
@@ -213,9 +204,6 @@ export default function PreOperationChecklist() {
     fetchLatestParams();
   }, [shopId, headerInfo.lineCode, headerInfo.machineNo]);
 
-  // ==========================================================
-  // FETCH EXISTING DATA BY SELECTED DATE, LINE & MACHINE
-  // ==========================================================
   useEffect(() => {
     const checkExistingRecord = async () => {
       if (!headerInfo.lineCode || !headerInfo.machineNo || !headerInfo.date) {
@@ -270,9 +258,6 @@ export default function PreOperationChecklist() {
     checkExistingRecord();
   }, [shopId, headerInfo.lineCode, headerInfo.machineNo, headerInfo.date]);
 
-  // ==========================================================
-  // SYNC SHARED LINE SET
-  // ==========================================================
   useEffect(() => {
     setHeaderInfo((prev) => ({
       ...prev,
@@ -283,9 +268,52 @@ export default function PreOperationChecklist() {
     }));
   }, [lineSet]);
 
-  // ==========================================================
-  // OPTIONS CALCULATION
-  // ==========================================================
+  // ✅ FETCH QF HISTORY ON MOUNT
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/pre-operation-checklist/qf-history`, {
+           headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (res.ok) {
+           const historyData = await res.json();
+           setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // ✅ CALCULATE QF BASED ON SELECTED DATE
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-13, Rev.No: 12 dt 31.01.2025"; // Fallback
+    
+    if (headerInfo.date && qfHistory.length > 0) {
+      const selectedDate = new Date(headerInfo.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      // qfHistory is ordered DESC by date in the backend
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+        
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break; 
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue; // Default to latest if no date selected
+    }
+    
+    setQfValue(currentQf);
+  }, [headerInfo.date, qfHistory]);
+
   const lineCodes = lineMappings.length > 0 
     ? lineMappings.map(m => m.lineCode)
     : [...new Set(machineDetails.map(item => item.lineCode).filter(Boolean))];
@@ -295,9 +323,6 @@ export default function PreOperationChecklist() {
   const machineOptions = Array.from(new Set(machineOptionsRaw.map(m => m.machineNo)))
     .map(mNo => machineOptionsRaw.find(m => m.machineNo === mNo));
 
-  // ==========================================================
-  // HANDLERS
-  // ==========================================================
   const handleHeaderChange = (field, val) => {
     setHeaderInfo((prev) => ({ ...prev, [field]: val }));
   };
@@ -348,7 +373,6 @@ export default function PreOperationChecklist() {
     });
   };
 
-  // Separate Approval Handlers with strict validations
   const handleApproveOperator = () => {
     if (!validateBeforeApprove()) return;
 
@@ -369,7 +393,6 @@ export default function PreOperationChecklist() {
     triggerToast("Shift Incharge signature approved successfully", "success");
   };
 
-  // Download PDF Report by Date Range
   const handleDownloadPdfRange = async () => {
     if (!pdfFromDate || !pdfToDate) {
       triggerToast("Please select both From Date and To Date.", "error");
@@ -432,7 +455,6 @@ export default function PreOperationChecklist() {
       return;
     }
 
-    // Role-specific validation before saving
     if (isOperatorRoute && !signatures["Operator"]) {
       triggerToast("Please approve the Operator signature before saving.", "error");
       return;
@@ -584,10 +606,9 @@ export default function PreOperationChecklist() {
           <div>
             <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">{initialFormData.company}</span>
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">{initialFormData.title}</h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {initialFormData.formCode}</span> |
-              <span>Revision: {initialFormData.revision}</span> |
-              <span>Revision Date: {initialFormData.revisionDate}</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+               {/* ✅ DISPLAY DYNAMIC QF VALUE HERE */}
+              <span>{qfValue}</span>
             </div>
           </div>
 

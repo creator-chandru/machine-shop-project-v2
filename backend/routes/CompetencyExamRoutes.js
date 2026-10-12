@@ -3,27 +3,37 @@ const router = express.Router();
 
 const {
     getAllLines,
+    getShiftIncharges,
     getCompetencyQuestions,
     addCompetencyQuestion,
     deleteCompetencyQuestion,
     saveCompetencyExam,
     getCompetencyExam,
+    getCompetencyReports,
+    verifyCompetencyExam,
     generateCompetencyReport
 } = require('../controllers/CompetencyExamController.js');
 
 // 1. Line Codes Dropdown
 router.get('/competency-exam/lines', getAllLines);
 
-// 2. Dynamic Questions Endpoints
+// 2. Shift Incharge Dropdown (For Operator to Select)
+router.get('/competency-exam/shift-incharges', getShiftIncharges);
+
+// 3. Dynamic Questions Endpoints
 router.get('/competency-exam/questions', getCompetencyQuestions);
 router.post('/competency-exam/questions', addCompetencyQuestion);
 router.delete('/competency-exam/questions/:id', deleteCompetencyQuestion);
 
-// 3. Main Exam CRUD Endpoints
+// 4. Main Exam CRUD Endpoints
 router.post('/competency-exam', saveCompetencyExam);
 router.get('/competency-exam', getCompetencyExam);
 
-// 4. Download PDF Report
+// 5. Shift Incharge Reports & Verification
+router.get('/competency-exam/reports', getCompetencyReports);
+router.post('/competency-exam/verify', verifyCompetencyExam);
+
+// 6. Download PDF Report
 router.get('/competency-exam/report', generateCompetencyReport);
 
 module.exports = router;

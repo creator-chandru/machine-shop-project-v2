@@ -2,6 +2,25 @@ const sql = require('../db');
 const PDFDocument = require("pdfkit");
 
 // ============================================================
+// HELPER: SAFELY ENSURE TABLE COLUMNS EXIST
+// ============================================================
+const ensureCompetencyColumns = async () => {
+    try {
+        const req = new sql.Request();
+        await req.query(`
+            IF COL_LENGTH('CompetencyQualificationExam', 'status') IS NULL
+                ALTER TABLE CompetencyQualificationExam ADD status NVARCHAR(50) DEFAULT 'Pending Verification';
+            IF COL_LENGTH('CompetencyQualificationExam', 'verifiedBy') IS NULL
+                ALTER TABLE CompetencyQualificationExam ADD verifiedBy NVARCHAR(100) NULL;
+            IF COL_LENGTH('CompetencyQualificationExam', 'verifiedAt') IS NULL
+                ALTER TABLE CompetencyQualificationExam ADD verifiedAt DATETIME NULL;
+        `);
+    } catch (e) {
+        console.warn("Table column migration notice:", e.message);
+    }
+};
+
+// ============================================================
 // 1. GET ALL LINE CODES FOR DROPDOWN
 // ============================================================
 const getAllLines = async (req, res) => {
@@ -10,7 +29,7 @@ const getAllLines = async (req, res) => {
         
         const query = `
             SELECT DISTINCT lineCode 
-            FROM ErrorProofingCheckSheet 
+            FROM MachineShop3Details 
             WHERE lineCode IS NOT NULL AND lineCode <> ''
             ORDER BY lineCode ASC
         `;
@@ -26,7 +45,65 @@ const getAllLines = async (req, res) => {
 };
 
 // ============================================================
-// 2. GET DYNAMIC COMPETENCY QUESTIONS
+// 2. GET ALL SHIFT INCHARGES FOR OPERATOR DROPDOWN
+// ============================================================
+const getShiftIncharges = async (req, res) => {
+    try {
+        const request = new sql.Request();
+        let inchargeList = [];
+
+        // 1. Query registered users matching Shift Incharge role / title
+        try {
+            const userResult = await request.query(`
+                SELECT DISTINCT 
+                    COALESCE(NULLIF(fullName, ''), username) AS inchargeName
+                FROM Users 
+                WHERE LOWER(role) LIKE '%shift%' 
+                   OR LOWER(role) LIKE '%incharge%'
+                   OR LOWER(designation) LIKE '%shift%'
+                ORDER BY inchargeName ASC
+            `);
+            inchargeList = userResult.recordset
+                .map(u => u.inchargeName)
+                .filter(name => name && name.trim() !== "");
+        } catch (e) {
+            console.warn("Could not query Users for shift incharges:", e.message);
+        }
+
+        // 2. Fetch distinct historical evaluators from exam records
+        try {
+            const prev = await request.query(`
+                SELECT DISTINCT evaluatedBy 
+                FROM CompetencyQualificationExam 
+                WHERE evaluatedBy IS NOT NULL AND evaluatedBy <> ''
+            `);
+            const prevList = prev.recordset.map(r => r.evaluatedBy);
+            inchargeList = [...inchargeList, ...prevList];
+        } catch (err2) {}
+
+        // 3. Fallback list to ensure dropdown always has complete options
+        const standardList = [
+            "Shift Incharge - Shift A",
+            "Shift Incharge - Shift B",
+            "Shift Incharge - Shift C",
+            "Shift Incharge 1",
+            "Shift Incharge 2"
+        ];
+
+        // Deduplicate and filter empty values
+        const allUniqueIncharges = Array.from(new Set([...inchargeList, ...standardList]))
+            .filter(Boolean)
+            .sort();
+
+        return res.status(200).json(allUniqueIncharges);
+    } catch (err) {
+        console.error("Fetch shift incharges error:", err);
+        return res.status(200).json(["Shift Incharge 1", "Shift Incharge 2"]);
+    }
+};
+
+// ============================================================
+// 3. GET DYNAMIC COMPETENCY QUESTIONS
 // ============================================================
 const getCompetencyQuestions = async (req, res) => {
     try {
@@ -52,7 +129,7 @@ const getCompetencyQuestions = async (req, res) => {
 };
 
 // ============================================================
-// 3. ADD DYNAMIC COMPETENCY QUESTION (HOD)
+// 4. ADD DYNAMIC COMPETENCY QUESTION (HOD)
 // ============================================================
 const addCompetencyQuestion = async (req, res) => {
     const { questionText, options, correctAnswer } = req.body;
@@ -79,7 +156,7 @@ const addCompetencyQuestion = async (req, res) => {
 };
 
 // ============================================================
-// 4. DELETE COMPETENCY QUESTION (HOD)
+// 5. DELETE COMPETENCY QUESTION (HOD)
 // ============================================================
 const deleteCompetencyQuestion = async (req, res) => {
     const { id } = req.params;
@@ -96,7 +173,7 @@ const deleteCompetencyQuestion = async (req, res) => {
 };
 
 // ============================================================
-// 5. SAVE OR UPDATE EXAM RESPONSE (Dynamic Score Calculation)
+// 6. SAVE OR UPDATE EXAM RESPONSE (LOCKED EVALUATOR ENFORCEMENT)
 // ============================================================
 const saveCompetencyExam = async (req, res) => {
     const { header, answers } = req.body;
@@ -107,6 +184,8 @@ const saveCompetencyExam = async (req, res) => {
     }
 
     try {
+        await ensureCompetencyColumns();
+
         // Fetch active questions & answer key dynamically from DB
         const request = new sql.Request();
         const qResult = await request.query(`SELECT id, correctAnswer FROM CompetencyExamQuestions`);
@@ -127,6 +206,26 @@ const saveCompetencyExam = async (req, res) => {
 
         const cleanDate = String(header.examDate).split('T')[0];
 
+        // Check if an existing exam record is already saved
+        const checkReq = new sql.Request();
+        checkReq.input('employeeNo', sql.NVarChar(50), header.employeeNo)
+            .input('line', sql.NVarChar(50), lineValue)
+            .input('examDate', sql.NVarChar(50), cleanDate);
+
+        const checkQuery = `
+            SELECT id, evaluatedBy FROM CompetencyQualificationExam 
+            WHERE employeeNo = @employeeNo 
+              AND line = @line 
+              AND CONVERT(date, examDate) = CONVERT(date, @examDate)
+        `;
+        const existing = await checkReq.query(checkQuery);
+
+        // ENFORCEMENT: Once chosen and saved, evaluatedBy CANNOT be changed!
+        let finalEvaluatedBy = (header.evaluatedBy || '').trim();
+        if (existing.recordset.length > 0 && existing.recordset[0].evaluatedBy) {
+            finalEvaluatedBy = existing.recordset[0].evaluatedBy;
+        }
+
         const saveReq = new sql.Request();
         saveReq.input('employeeNo', sql.NVarChar(50), header.employeeNo)
             .input('employeeName', sql.NVarChar(100), header.employeeName || '')
@@ -136,15 +235,8 @@ const saveCompetencyExam = async (req, res) => {
             .input('qualification', sql.NVarChar(100), header.qualification || '')
             .input('answers', sql.NVarChar(sql.MAX), JSON.stringify(answers || {}))
             .input('score', sql.Int, calculatedScore)
-            .input('evaluatedBy', sql.NVarChar(100), header.evaluatedBy || '');
-
-        const checkQuery = `
-            SELECT id FROM CompetencyQualificationExam 
-            WHERE employeeNo = @employeeNo 
-              AND line = @line 
-              AND CONVERT(date, examDate) = CONVERT(date, @examDate)
-        `;
-        const existing = await saveReq.query(checkQuery);
+            .input('evaluatedBy', sql.NVarChar(100), finalEvaluatedBy)
+            .input('status', sql.NVarChar(50), 'Pending Verification');
 
         if (existing.recordset.length > 0) {
             await saveReq.query(`
@@ -154,7 +246,8 @@ const saveCompetencyExam = async (req, res) => {
                     qualification = @qualification,
                     answers = @answers, 
                     score = @score, 
-                    evaluatedBy = @evaluatedBy
+                    evaluatedBy = @evaluatedBy,
+                    status = @status
                 WHERE employeeNo = @employeeNo 
                   AND line = @line 
                   AND CONVERT(date, examDate) = CONVERT(date, @examDate)
@@ -162,13 +255,17 @@ const saveCompetencyExam = async (req, res) => {
         } else {
             await saveReq.query(`
                 INSERT INTO CompetencyQualificationExam 
-                (employeeNo, employeeName, line, doj, examDate, qualification, answers, score, evaluatedBy)
+                (employeeNo, employeeName, line, doj, examDate, qualification, answers, score, evaluatedBy, status)
                 VALUES 
-                (@employeeNo, @employeeName, @line, @doj, @examDate, @qualification, @answers, @score, @evaluatedBy)
+                (@employeeNo, @employeeName, @line, @doj, @examDate, @qualification, @answers, @score, @evaluatedBy, @status)
             `);
         }
 
-        return res.status(200).json({ message: 'Exam saved successfully', score: calculatedScore });
+        return res.status(200).json({ 
+            message: 'Exam saved successfully', 
+            score: calculatedScore,
+            evaluatedBy: finalEvaluatedBy 
+        });
     } catch (err) {
         console.error("Save exam error:", err);
         return res.status(500).json({ error: 'Failed to save exam response' });
@@ -176,7 +273,7 @@ const saveCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 6. FETCH SAVED EXAM DATA
+// 7. FETCH SAVED EXAM DATA
 // ============================================================
 const getCompetencyExam = async (req, res) => {
     const employeeNo = req.query.employeeNo;
@@ -206,7 +303,10 @@ const getCompetencyExam = async (req, res) => {
                 qualification,
                 answers,
                 score,
-                evaluatedBy
+                evaluatedBy,
+                ISNULL(status, 'Pending Verification') AS status,
+                verifiedBy,
+                FORMAT(verifiedAt, 'yyyy-MM-dd HH:mm') AS verifiedAt
             FROM CompetencyQualificationExam 
             WHERE employeeNo = @employeeNo 
               AND line = @line 
@@ -225,7 +325,92 @@ const getCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 7. GENERATE STRUCTURED TABLE PDF REPORT
+// 8. FETCH PENDING EXAMS FOR SUPERVISOR QUEUE
+// ============================================================
+const getCompetencyReports = async (req, res) => {
+    try {
+        await ensureCompetencyColumns();
+        const { shiftIncharge } = req.query;
+        const request = new sql.Request();
+
+        // Only fetch exams that are PENDING verification!
+        let query = `
+            SELECT 
+                id,
+                employeeNo,
+                employeeName,
+                line,
+                FORMAT(doj, 'yyyy-MM-dd') AS doj,
+                FORMAT(CONVERT(date, examDate), 'yyyy-MM-dd') AS examDate,
+                qualification,
+                score,
+                evaluatedBy,
+                ISNULL(status, 'Pending Verification') AS status,
+                verifiedBy,
+                FORMAT(verifiedAt, 'yyyy-MM-dd HH:mm') AS verifiedAt
+            FROM CompetencyQualificationExam
+            WHERE ISNULL(status, 'Pending Verification') = 'Pending Verification'
+        `;
+
+        if (shiftIncharge) {
+            request.input('shiftIncharge', sql.NVarChar(100), shiftIncharge.trim());
+            query += ` AND (LOWER(evaluatedBy) = LOWER(@shiftIncharge) OR evaluatedBy IS NULL OR evaluatedBy = '')`;
+        }
+
+        query += ` ORDER BY id DESC`;
+
+        const result = await request.query(query);
+        return res.status(200).json(result.recordset);
+    } catch (err) {
+        console.error("Fetch reports error:", err);
+        return res.status(500).json({ error: 'Failed to fetch exam reports' });
+    }
+};
+
+// ============================================================
+// 9. SHIFT INCHARGE VERIFY EXAM
+// ============================================================
+const verifyCompetencyExam = async (req, res) => {
+    const { employeeNo, line, examDate, verifiedBy } = req.body;
+
+    if (!employeeNo || !line || !examDate) {
+        return res.status(400).json({ error: 'Missing employeeNo, line, or examDate' });
+    }
+
+    try {
+        await ensureCompetencyColumns();
+        const cleanDate = String(examDate).split('T')[0];
+
+        const request = new sql.Request();
+        request.input('employeeNo', sql.NVarChar(50), employeeNo)
+            .input('line', sql.NVarChar(50), line)
+            .input('examDate', sql.NVarChar(50), cleanDate)
+            .input('verifiedBy', sql.NVarChar(100), verifiedBy || 'Shift Incharge');
+
+        const updateQuery = `
+            UPDATE CompetencyQualificationExam
+            SET status = 'Verified',
+                verifiedBy = @verifiedBy,
+                verifiedAt = GETDATE()
+            WHERE employeeNo = @employeeNo
+              AND line = @line
+              AND CONVERT(date, examDate) = CONVERT(date, @examDate)
+        `;
+
+        const result = await request.query(updateQuery);
+        if (result.rowsAffected[0] === 0) {
+            return res.status(404).json({ error: 'Exam record not found for verification' });
+        }
+
+        return res.status(200).json({ message: 'Exam verified successfully!' });
+    } catch (err) {
+        console.error("Verify exam error:", err);
+        return res.status(500).json({ error: 'Failed to verify exam record' });
+    }
+};
+
+// ============================================================
+// 10. GENERATE STRUCTURED TABLE PDF REPORT
 // ============================================================
 const generateCompetencyReport = async (req, res) => {
     try {
@@ -278,34 +463,42 @@ const generateCompetencyReport = async (req, res) => {
 
         // --- EMPLOYEE DETAILS PANEL ---
         const boxTop = doc.y;
-        doc.rect(30, boxTop, 535, 55).strokeColor("#B0B0B0").lineWidth(1).stroke();
+        doc.rect(30, boxTop, 535, 60).strokeColor("#B0B0B0").lineWidth(1).stroke();
         
         doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000");
-        doc.text(`Emp No:`, 40, boxTop + 10);
-        doc.font("Helvetica").text(data.employeeNo, 90, boxTop + 10);
+        doc.text(`Emp No:`, 40, boxTop + 8);
+        doc.font("Helvetica").text(data.employeeNo, 90, boxTop + 8);
 
-        doc.font("Helvetica-Bold").text(`Name:`, 210, boxTop + 10);
-        doc.font("Helvetica").text(data.employeeName || 'N/A', 245, boxTop + 10);
+        doc.font("Helvetica-Bold").text(`Name:`, 210, boxTop + 8);
+        doc.font("Helvetica").text(data.employeeName || 'N/A', 245, boxTop + 8);
 
-        doc.font("Helvetica-Bold").text(`Line:`, 410, boxTop + 10);
-        doc.font("Helvetica").text(data.line, 440, boxTop + 10);
+        doc.font("Helvetica-Bold").text(`Line:`, 410, boxTop + 8);
+        doc.font("Helvetica").text(data.line, 440, boxTop + 8);
 
-        doc.font("Helvetica-Bold").text(`DOJ:`, 40, boxTop + 25);
-        doc.font("Helvetica").text(data.doj ? new Date(data.doj).toISOString().split('T')[0] : 'N/A', 90, boxTop + 25);
+        doc.font("Helvetica-Bold").text(`DOJ:`, 40, boxTop + 24);
+        doc.font("Helvetica").text(data.doj ? new Date(data.doj).toISOString().split('T')[0] : 'N/A', 90, boxTop + 24);
 
-        doc.font("Helvetica-Bold").text(`Date:`, 210, boxTop + 25);
-        doc.font("Helvetica").text(cleanDate, 245, boxTop + 25);
+        doc.font("Helvetica-Bold").text(`Date:`, 210, boxTop + 24);
+        doc.font("Helvetica").text(cleanDate, 245, boxTop + 24);
 
-        doc.font("Helvetica-Bold").text(`Qualification:`, 410, boxTop + 25);
-        doc.font("Helvetica").text(data.qualification || 'N/A', 475, boxTop + 25);
+        doc.font("Helvetica-Bold").text(`Qualification:`, 410, boxTop + 24);
+        doc.font("Helvetica").text(data.qualification || 'N/A', 475, boxTop + 24);
 
         doc.font("Helvetica-Bold").text(`Evaluated By:`, 40, boxTop + 40);
         doc.font("Helvetica").text(data.evaluatedBy || 'N/A', 110, boxTop + 40);
 
-        doc.font("Helvetica-Bold").text(`Score:`, 410, boxTop + 40);
+        doc.font("Helvetica-Bold").text(`Status:`, 210, boxTop + 40);
+        const isVerified = (data.status === 'Verified');
+        doc.font("Helvetica-Bold").fillColor(isVerified ? "#008000" : "#D97706").text(
+            isVerified ? `Verified (${data.verifiedBy || 'Shift Incharge'})` : 'Pending Verification', 
+            250, 
+            boxTop + 40
+        );
+
+        doc.font("Helvetica-Bold").fillColor("#000000").text(`Score:`, 410, boxTop + 40);
         doc.font("Helvetica-Bold").fillColor(data.score >= 70 ? "#008000" : "#D32F2F").text(`${data.score} / 100`, 445, boxTop + 40);
 
-        doc.moveDown(2.8);
+        doc.moveDown(3.2);
 
         // --- TABLE LAYOUT CONFIGURATION ---
         const startX = 30;
@@ -380,10 +573,13 @@ const generateCompetencyReport = async (req, res) => {
 
 module.exports = {
     getAllLines,
+    getShiftIncharges,
     getCompetencyQuestions,
     addCompetencyQuestion,
     deleteCompetencyQuestion,
     saveCompetencyExam,
     getCompetencyExam,
+    getCompetencyReports,
+    verifyCompetencyExam,
     generateCompetencyReport
 };

@@ -300,8 +300,18 @@ const generateOperatorObservationPDF = async (req, res) => {
         doc.font("Helvetica-Bold").fontSize(9).text(`Date: ${reviewDisplayDate}`, startX + 5, currentY + 6);
         doc.rect(startX + (fullW / 2), currentY, fullW / 4, 20).stroke();
         doc.text(`Reviewed By: ${header.reviewedBy || ''}`, startX + (fullW / 2) + 5, currentY + 6);
+
+        // --- NEW LOGIC FOR APPROVED BY DISPLAY ---
+        let approvedDisplay = "";
+        if (header.approvedBy) {
+            if (header.approvedBy.includes('(Verified)')) {
+                approvedDisplay = header.approvedBy.replace(' (Verified)', ''); // Show name if verified
+            } else {
+                approvedDisplay = "Pending"; // Show pending if HOF is selected but hasn't signed
+            }
+        }
         doc.rect(startX + (fullW * 0.75), currentY, fullW / 4, 20).stroke();
-        doc.text(`Approved By: ${header.approvedBy || ''}`, startX + (fullW * 0.75) + 5, currentY + 6);
+        doc.text(`Approved By: ${approvedDisplay}`, startX + (fullW * 0.75) + 5, currentY + 6);
         currentY += 20;
 
         doc.rect(startX, currentY, fullW, 15).fillAndStroke('#f3f4f6', 'black');
@@ -321,8 +331,86 @@ const generateOperatorObservationPDF = async (req, res) => {
     }
 };
 
+// ============================================================
+// GET HOF USERS (For Dropdown)
+// ============================================================
+const getHofUsers = async (req, res) => {
+    try {
+        const result = await sql.query(`
+            SELECT username, employeeId 
+            FROM MachineShopUsers 
+            WHERE role = 'hof' 
+        `);
+        return res.status(200).json(result.recordset);
+    } catch (err) {
+        console.error('Error fetching HOF users:', err);
+        return res.status(500).json({ error: 'Failed to fetch HOF users' });
+    }
+};
+
+// ============================================================
+// GET PENDING OPERATOR OBSERVATIONS FOR HOF
+// ============================================================
+const getPendingObservationsForHof = async (req, res) => {
+    const { hofUsername } = req.params;
+    const { shopId } = req.query;
+
+    try {
+        const request = new sql.Request();
+        request.input('hofUsername', sql.NVarChar(100), hofUsername);
+        
+        let query = `
+            SELECT DISTINCT
+                employeeCode, employeeName, testDate as reportDate, machineShop, approvedBy
+            FROM OperatorObservationSheet
+            WHERE approvedBy = @hofUsername
+        `;
+
+        if (shopId) {
+            query += ` AND machineShop = @shopId`;
+            request.input('shopId', sql.Int, parseInt(shopId));
+        }
+
+        const result = await request.query(query);
+        return res.status(200).json(result.recordset);
+    } catch (err) {
+        console.error('Error fetching pending operator observations:', err);
+        return res.status(500).json({ error: 'Failed to fetch pending observations' });
+    }
+};
+
+// ============================================================
+// SIGN OPERATOR OBSERVATION (HOF)
+// ============================================================
+const signOperatorObservationHof = async (req, res) => {
+    const { employeeCode, date, signature } = req.body;
+
+    try {
+        const request = new sql.Request();
+        request.input('employeeCode', sql.NVarChar(50), employeeCode)
+               .input('testDate', sql.Date, date)
+               .input('signature', sql.NVarChar(100), signature + ' (Verified)');
+
+        // We append '(Verified)' so it no longer shows as pending for the exact username
+        await request.query(`
+            UPDATE OperatorObservationSheet
+            SET approvedBy = @signature
+            WHERE employeeCode = @employeeCode 
+              AND CONVERT(date, testDate) = CONVERT(date, @testDate)
+        `);
+
+        return res.status(200).json({ message: 'Observation Sheet approved successfully' });
+    } catch (err) {
+        console.error('Error signing observation sheet:', err);
+        return res.status(500).json({ error: 'Failed to approve observation sheet' });
+    }
+};
+
 module.exports = {
     saveOperatorObservationSheet,
     getOperatorObservationSheet,
-    generateOperatorObservationPDF
+    generateOperatorObservationPDF,
+    getHofUsers,
+    getPendingObservationsForHof,
+    signOperatorObservationHof
 };

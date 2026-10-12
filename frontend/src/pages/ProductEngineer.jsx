@@ -48,6 +48,7 @@ const ProductEngineer = () => {
   const [pendingEightDReports, setPendingEightDReports] = useState([]);
   const [pendingLevel1Reports, setPendingLevel1Reports] = useState([]);
   const [pendingBreakdownReports, setPendingBreakdownReports] = useState([]);
+  const [pendingCorrectiveActionReports, setPendingCorrectiveActionReports] = useState([]);
 
   // ============================================================
   // PDF REVIEW MODAL STATES
@@ -367,6 +368,23 @@ const ProductEngineer = () => {
     }
   };
 
+  // FETCH PENDING CORRECTIVE ACTION REGISTER ROWS
+  const fetchPendingCorrectiveActionReports = async () => {
+    try {
+      if (!currentPE) return;
+      const response = await fetch(
+        `${API_BASE}/corrective-action-register/pe/${encodeURIComponent(currentPE)}?shopId=${currentShop}`,
+        { headers: getAuthHeaders() }
+      );
+      if (!response.ok) throw new Error("Failed to fetch Corrective Action Register rows");
+      const data = await response.json();
+      setPendingCorrectiveActionReports(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Corrective Action Register fetch error:", error);
+      toast.error("Failed to load Pending Corrective Action Register rows.");
+    }
+  };
+
   // ============================================================
   // FETCH ALL REPORTS
   // ============================================================
@@ -380,6 +398,7 @@ const ProductEngineer = () => {
     fetchPendingEightDReports();
     fetchPendingLevel1Reports();
     fetchPendingBreakdownReports();
+    fetchPendingCorrectiveActionReports();
   };
 
   useEffect(() => {
@@ -493,6 +512,17 @@ const ProductEngineer = () => {
         });
         apiUrl =
           `${API_BASE}/breakdown-intimation-report/report?` + params.toString();
+      }
+
+      // CORRECTIVE ACTION REGISTER
+      else if (type === "correctiveaction") {
+        const params = new URLSearchParams({
+          shopId: String(report.machineShop || currentShop),
+          fromDate: isoDate,
+          toDate: isoDate,
+          partName: report.partName || "",
+        });
+        apiUrl = `${API_BASE}/corrective-action-register/report?` + params.toString();
       }
 
       // DAILY PRODUCTION
@@ -656,6 +686,12 @@ const ProductEngineer = () => {
         };
       }
 
+      // CORRECTIVE ACTION REGISTER
+      else if (reviewReportType === "correctiveaction") {
+        endpoint = `${API_BASE}/corrective-action-register/sign-pe`;
+        payload = { id: selectedReport.id, signature: currentPE, peUsername: currentPE };
+      }
+
       // DAILY PRODUCTION
       else {
         endpoint = `${API_BASE}/daily-production-report/sign-pe`;
@@ -700,6 +736,8 @@ const ProductEngineer = () => {
           ? "Level 1 Maintenance report verified and approved successfully!"
           : reviewReportType === "breakdown"
           ? "Breakdown Intimation Report verified and approved successfully!"
+          : reviewReportType === "correctiveaction"
+          ? "Corrective Action Register row verified and approved successfully!"
           : "Daily Production Report verified and approved successfully!";
 
       toast.success(successMsg, {
@@ -778,6 +816,13 @@ const ProductEngineer = () => {
       icon: Activity,
       reports: pendingBreakdownReports,
       color: "rose",
+    },
+    {
+      id: "correctiveaction",
+      title: "Corrective Action Register",
+      icon: FileText,
+      reports: pendingCorrectiveActionReports,
+      color: "orange",
     },
   ];
 
@@ -989,6 +1034,15 @@ const ProductEngineer = () => {
           },
         ];
 
+      case "correctiveaction":
+        return [
+          { key: "date", label: "Date", render: (report) => formatDate(report.recordDate) },
+          { key: "lineCode", label: "Line Code" },
+          { key: "partName", label: "Part Name" },
+          { key: "problemCategory", label: "Category" },
+          { key: "problemDescription", label: "Problem Description" },
+        ];
+
       default:
         return [];
     }
@@ -1048,6 +1102,12 @@ const ProductEngineer = () => {
       badge: "bg-rose-600",
       button: "bg-rose-600 hover:bg-rose-700",
       row: "hover:bg-rose-50/40",
+    },
+    correctiveaction: {
+      active: "border-orange-600 text-orange-600 bg-orange-50/50",
+      badge: "bg-orange-600",
+      button: "bg-orange-600 hover:bg-orange-700",
+      row: "hover:bg-orange-50/40",
     },
   };
 
@@ -1236,6 +1296,8 @@ const ProductEngineer = () => {
                   ? "REVIEW & SIGN LEVEL 1 MAINTENANCE CHECK SHEET"
                   : reviewReportType === "breakdown"
                   ? "REVIEW & SIGN BREAKDOWN INTIMATION REPORT"
+                  : reviewReportType === "correctiveaction"
+                  ? "REVIEW & SIGN CORRECTIVE ACTION REGISTER"
                   : "REVIEW & SIGN IDLE TIME REPORT"}
               </h2>
 
@@ -1347,6 +1409,13 @@ const ProductEngineer = () => {
                           {selectedReport.productEngineer}
                         </p>
                       )}
+
+                    {reviewReportType === "correctiveaction" && (
+                      <p>
+                        <span className="font-extrabold">Assigned Product Engineer:</span>{" "}
+                        {selectedReport.productEngineer || currentPE}
+                      </p>
+                    )}
 
                     {reviewReportType === "level1maintenance" && (
                       <p>

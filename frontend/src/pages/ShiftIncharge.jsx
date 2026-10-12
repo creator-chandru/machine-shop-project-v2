@@ -164,7 +164,7 @@ const ShiftIncharge = () => {
     { name: "Daily Production Report", path: `/shift-incharge/${shopId}/daily-production-report`, icon: FileText },
     { name: "Daily Production Idle Time Report", path: `/shift-incharge/${shopId}/daily-production-idle-time-report`, icon: Clock },
     { name: "Breakdown Intimation / Service Report", path: `/shift-incharge/${shopId}/breakdown-intimation-service-report`, icon: AlertTriangle },
-    { name: "Skill Evaluation - Practical Production and Quantity", path: `/shift-incharge/${shopId}/skill-evaluation-practical`, icon: BadgeCheck },
+    //{ name: "Skill Evaluation - Practical Production and Quantity", path: `/shift-incharge/${shopId}/skill-evaluation-practical`, icon: BadgeCheck },
     { name: "Operator Observation Sheet", path: `/shift-incharge/${shopId}/operator-observation-sheet`, icon: SearchCheck },
     { name: "Competency Evaluation Form", path: `/shift-incharge/${shopId}/competency-evaluation-form`, icon: ShieldCheck },
     { name: "Corrective Action Register", path: `/shift-incharge/${shopId}/corrective-action-register`, icon: ClipboardCheck },

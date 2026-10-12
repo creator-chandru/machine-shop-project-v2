@@ -3,6 +3,21 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
+const getProductEngineers = async (req, res) => {
+    try {
+        const result = await sql.query(`
+            SELECT username AS name, username, employeeId
+            FROM dbo.MachineShopUsers
+            WHERE LOWER(role) IN ('pe', 'productengineer', 'productionengineer')
+            ORDER BY username ASC
+        `);
+        return res.status(200).json({ peList: result.recordset || [] });
+    } catch (error) {
+        console.error('Get Product Engineers Error:', error);
+        return res.status(500).json({ message: 'Failed to fetch Product Engineers' });
+    }
+};
+
 /*
 ============================================================
 GET PART NAMES
@@ -105,10 +120,11 @@ const getRecord = async (req, res) => {
             rootCause: row.rootCause || '',
             correctiveAction: row.correctiveAction || '',
             result: row.result || 'OK',
+            productEngineer: row.shiftInchargeSignature || '',
             signature: row.operatorSignature || ''
         }));
 
-        return res.status(200).json({ entries });
+        return res.status(200).json({ entries, productEngineer: entries[0]?.productEngineer || '' });
     } catch (error) {
         console.error('Get corrective action record error:', error);
         return res.status(500).json({
@@ -117,34 +133,6 @@ const getRecord = async (req, res) => {
         });
     }
 };
-
-/*
-============================================================
-HELPER: GET LINE CODE FOR PART NAME
-============================================================
-*/
-const getLineCodeForPart = async (pool, partName) => {
-    if (!partName || !String(partName).trim()) return null;
-
-    const result = await pool
-        .request()
-        .input('partName', sql.NVarChar(200), String(partName).trim())
-        .query(`
-            SELECT TOP 1 lineCode
-            FROM MachineShop3Details
-            WHERE partName = @partName
-              AND lineCode IS NOT NULL
-              AND LTRIM(RTRIM(lineCode)) <> ''
-            ORDER BY id ASC
-        `);
-
-    if (!result.recordset || result.recordset.length === 0) {
-        return null;
-    }
-
-    return result.recordset[0].lineCode;
-};
-
 /*
 ============================================================
 SAVE CORRECTIVE ACTION RECORD
@@ -182,6 +170,8 @@ const saveRecord = async (req, res) => {
 
         for (let index = 0; index < entries.length; index++) {
             const entry = entries[index];
+            const entryDate = String(entry.date || recordDate).split('T')[0];
+            const productEngineer = String(entry.productEngineer || '').trim();
             const partName =
                 typeof entry.partName === 'object'
                     ? entry.partName?.partName || ''
@@ -193,28 +183,25 @@ const saveRecord = async (req, res) => {
                 });
             }
 
+            if (!entry.date) {
+                return res.status(400).json({ message: `Date is required for row ${index + 1}` });
+            }
+
+            if (!productEngineer) {
+                return res.status(400).json({ message: `Product Engineer selection is required for row ${index + 1}` });
+            }
+
             if (!entry.problemCategory || !['A', 'B', 'C', 'D', 'E'].includes(entry.problemCategory)) {
                 return res.status(400).json({
                     message: `Problem category (A, B, C, D, or E) is required for row ${index + 1}`
                 });
             }
-
-            // Approval Constraint Validation
-            const signature = entry.signature || entry.operatorSignature;
-            if (!signature || !String(signature).trim()) {
-                return res.status(400).json({
-                    message: `Operator approval signature is required for row ${index + 1} before saving`
-                });
-            }
-
-            const lineCode = await getLineCodeForPart(pool, partName);
-            if (!lineCode) {
-                return res.status(400).json({
-                    message: `No Line Code found in MachineShop3Details for Part Name: ${partName}`
-                });
-            }
+            // Corrective Action Register does not depend on lineCode.
+            // The database column is NOT NULL, so store an empty string.
+            const lineCode = '';
 
             preparedEntries.push({
+                recordDate: entryDate,
                 lineCode,
                 partName,
                 problemDescription: entry.problemDescription || '',
@@ -223,8 +210,8 @@ const saveRecord = async (req, res) => {
                 rootCause: entry.rootCause || '',
                 correctiveAction: entry.correctiveAction || '',
                 result: entry.result || 'OK',
-                operatorSignature: signature.trim(),
-                shiftInchargeSignature: entry.shiftInchargeSignature || null
+                operatorSignature: '',
+                shiftInchargeSignature: productEngineer
             });
         }
 
@@ -236,7 +223,7 @@ const saveRecord = async (req, res) => {
             await transaction
                 .request()
                 .input('machineShop', sql.Int, machineShopNumber)
-                .input('recordDate', sql.Date, cleanDate)
+                .input('recordDate', sql.Date, entry.recordDate)
                 .input('partName', sql.NVarChar(200), entry.partName)
                 .query(`
                     DELETE FROM CorrectiveActionRegister
@@ -251,7 +238,7 @@ const saveRecord = async (req, res) => {
                 .request()
                 .input('machineShop', sql.Int, machineShopNumber)
                 .input('lineCode', sql.NVarChar(100), entry.lineCode)
-                .input('recordDate', sql.Date, cleanDate)
+                .input('recordDate', sql.Date, entry.recordDate)
                 .input('partName', sql.NVarChar(200), entry.partName)
                 .input('problemDescription', sql.NVarChar(sql.MAX), entry.problemDescription)
                 .input('problemCategory', sql.NVarChar(10), entry.problemCategory)
@@ -320,25 +307,86 @@ const saveRecord = async (req, res) => {
     }
 };
 
+const getPendingPeRecords = async (req, res) => {
+    try {
+        const productEngineer = String(req.params.name || '').trim();
+        const machineShop = parseInt(req.query.shopId, 10);
+        if (!productEngineer || Number.isNaN(machineShop)) {
+            return res.status(400).json({ message: 'Product Engineer and shopId are required' });
+        }
+        const pool = await sql.connect();
+        const result = await pool.request()
+            .input('productEngineer', sql.NVarChar(100), productEngineer)
+            .input('machineShop', sql.Int, machineShop)
+            .query(`
+                SELECT id, machineShop, lineCode, recordDate, partName, problemDescription,
+                       problemCategory, quantity, rootCause, correctiveAction, result,
+                       shiftInchargeSignature AS productEngineer
+                FROM CorrectiveActionRegister
+                WHERE machineShop = @machineShop
+                  AND shiftInchargeSignature = @productEngineer
+                  AND NULLIF(LTRIM(RTRIM(ISNULL(operatorSignature, ''))), '') IS NULL
+                ORDER BY recordDate DESC, id ASC
+            `);
+        return res.status(200).json(result.recordset || []);
+    } catch (error) {
+        console.error('Get pending corrective action approvals error:', error);
+        return res.status(500).json({ message: 'Failed to fetch pending corrective action approvals' });
+    }
+};
+
+const signPeApproval = async (req, res) => {
+    try {
+        const id = parseInt(req.body.id, 10);
+        const signature = String(req.body.signature || req.body.peUsername || '').trim();
+        if (Number.isNaN(id) || !signature) {
+            return res.status(400).json({ message: 'Record id and Product Engineer signature are required' });
+        }
+        const pool = await sql.connect();
+        const result = await pool.request()
+            .input('id', sql.Int, id)
+            .input('signature', sql.NVarChar(100), signature)
+            .query(`
+                UPDATE CorrectiveActionRegister
+                SET operatorSignature = @signature
+                WHERE id = @id
+                  AND shiftInchargeSignature = @signature
+                  AND NULLIF(LTRIM(RTRIM(ISNULL(operatorSignature, ''))), '') IS NULL;
+                SELECT @@ROWCOUNT AS affectedRows;
+            `);
+        if (!result.recordset?.[0]?.affectedRows) {
+            return res.status(404).json({ message: 'Pending approval was not found for this Product Engineer' });
+        }
+        return res.status(200).json({ message: 'Corrective Action Register row approved successfully' });
+    } catch (error) {
+        console.error('Sign corrective action approval error:', error);
+        return res.status(500).json({ message: 'Failed to approve corrective action row' });
+    }
+};
+
 /*
 ============================================================
-GENERATE CORRECTIVE ACTION PDF (BY DATE + PART NAME)
+GENERATE CORRECTIVE ACTION PDF (BY DATE RANGE)
 ============================================================
 */
 const generatePdfReport = async (req, res) => {
     try {
-        const { shopId, date, partName } = req.query;
+        const { shopId, date, fromDate, toDate, partName } = req.query;
+        const rangeStart = fromDate || date;
+        const rangeEnd = toDate || date;
 
-        if (!shopId || !date) {
-            return res.status(400).json({ message: 'shopId and date are required' });
+        if (!shopId || !rangeStart || !rangeEnd) {
+            return res.status(400).json({ message: 'shopId, fromDate and toDate are required' });
         }
+        if (new Date(rangeStart) > new Date(rangeEnd)) return res.status(400).json({ message: 'fromDate cannot be later than toDate' });
 
         const machineShop = parseInt(shopId, 10);
         if (Number.isNaN(machineShop)) {
             return res.status(400).json({ message: 'Invalid shopId' });
         }
 
-        const cleanDate = String(date).split('T')[0];
+        const cleanFromDate = String(rangeStart).split('T')[0];
+        const cleanToDate = String(rangeEnd).split('T')[0];
         const pool = await sql.connect();
 
         let query = `
@@ -358,12 +406,13 @@ const generatePdfReport = async (req, res) => {
                 shiftInchargeSignature
             FROM CorrectiveActionRegister
             WHERE machineShop = @machineShop
-              AND CAST(recordDate AS DATE) = @recordDate
+              AND CAST(recordDate AS DATE) BETWEEN @fromDate AND @toDate
         `;
 
         const request = pool.request();
         request.input('machineShop', sql.Int, machineShop);
-        request.input('recordDate', sql.Date, cleanDate);
+        request.input('fromDate', sql.Date, cleanFromDate);
+        request.input('toDate', sql.Date, cleanToDate);
 
         if (partName && partName.trim()) {
             request.input('partName', sql.NVarChar(200), partName.trim());
@@ -377,7 +426,7 @@ const generatePdfReport = async (req, res) => {
 
         if (!records || records.length === 0) {
             return res.status(404).json({
-                message: 'No corrective action records found for this Part Name and Date.'
+                message: 'No corrective action records found for the selected date range.'
             });
         }
 
@@ -392,7 +441,7 @@ const generatePdfReport = async (req, res) => {
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader(
             'Content-Disposition',
-            `attachment; filename="Corrective_Action_Register_${cleanDate}.pdf"`
+            `attachment; filename="Corrective_Action_Register_${cleanFromDate}_to_${cleanToDate}.pdf"`
         );
 
         doc.pipe(res);
@@ -447,7 +496,7 @@ const generatePdfReport = async (req, res) => {
         doc.rect(metaX, startY, metaBoxWidth, headerHeight).stroke();
         doc.font('Helvetica-Bold').fontSize(8).text('FORM: QF/08/MRO-04 | REV: 03', metaX + 8, startY + 8);
         doc.text(`MACHINE SHOP: ${machineShop}`, metaX + 8, startY + 22);
-        doc.font('Helvetica').fontSize(8).text(`DATE: ${cleanDate}`, metaX + 8, startY + 36);
+        doc.font('Helvetica').fontSize(8).text(`PERIOD: ${cleanFromDate} to ${cleanToDate}`, metaX + 8, startY + 36);
 
         startY += headerHeight + 10;
 
@@ -489,7 +538,7 @@ const generatePdfReport = async (req, res) => {
             const rowData = [
                 record.recordDate
                     ? new Date(record.recordDate).toISOString().split('T')[0]
-                    : cleanDate,
+                    : cleanFromDate,
                 record.lineCode || '-',
                 record.partName || '-',
                 record.problemDescription || '-',
@@ -498,7 +547,7 @@ const generatePdfReport = async (req, res) => {
                 record.rootCause || '-',
                 record.correctiveAction || '-',
                 record.result || '-',
-                record.operatorSignature || '-'
+                record.operatorSignature || 'Pending'
             ];
 
             doc.font('Helvetica').fontSize(7);
@@ -521,7 +570,7 @@ const generatePdfReport = async (req, res) => {
             rowData.forEach((val, i) => {
                 doc.rect(currentX, currentY, headers[i].w, rowHeight).stroke();
 
-                if (i === 9 && val && val !== '-') {
+                if (i === 9 && val && val !== '-' && val !== 'Pending') {
                     doc.save()
                         .lineWidth(1.2)
                         .strokeColor('#16a34a')
@@ -582,7 +631,10 @@ const generatePdfReport = async (req, res) => {
 
 module.exports = {
     getPartNames,
+    getProductEngineers,
     getRecord,
     saveRecord,
+    getPendingPeRecords,
+    signPeApproval,
     generatePdfReport
 };

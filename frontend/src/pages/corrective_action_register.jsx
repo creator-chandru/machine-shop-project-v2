@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FileDown, Plus, Trash2, ArrowLeft } from 'lucide-react';
+import { FileDown, Plus, Trash2, ArrowLeft, Calendar, X } from 'lucide-react';
 import Header from '../components/Header';
 
 const formMeta = {
@@ -60,22 +60,19 @@ export default function CorrectiveActionRegister() {
   const navigate = useNavigate();
   const actualShopId = shopId || '3';
 
-  const [headerInfo, setHeaderInfo] = useState({
-    date: new Date().toISOString().split('T')[0],
-    partName: ""
-  });
-
-  const [partNameOptions, setPartNameOptions] = useState();
+  const [partNameOptions, setPartNameOptions] = useState([]);
   const [loadingPartNames, setLoadingPartNames] = useState(false);
+  const [productEngineers, setProductEngineers] = useState([]);
   const [entries, setEntries] = useState([createFreshRow()]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
   const [isSavedRecord, setIsSavedRecord] = useState(false);
-
-  const lookupSeqRef = useRef(0);
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}')?.username || 'Unknown';
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfFromDate, setPdfFromDate] = useState("");
+  const [pdfToDate, setPdfToDate] = useState("");
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
@@ -133,73 +130,26 @@ export default function CorrectiveActionRegister() {
     fetchPartNames();
   }, [actualShopId]);
 
-  // Check Existing Record by (Date + Part Name) Combo
+  // Fetch the Product Engineers that can receive a register for approval.
   useEffect(() => {
-    const checkExistingRecord = async () => {
-      if (!headerInfo.date || !headerInfo.partName) {
-        setIsSavedRecord(false);
-        return;
-      }
-
-      const seq = ++lookupSeqRef.current;
-
+    const fetchProductEngineers = async () => {
       try {
         const token = localStorage.getItem('token');
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-        const params = new URLSearchParams({
-          machineShop: actualShopId,
-          date: headerInfo.date,
-          partName: headerInfo.partName
-        });
-
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL || ""}/api/corrective-action-register/record?${params.toString()}`,
-          { headers }
+          `${process.env.REACT_APP_API_URL || ""}/api/corrective-action-register/product-engineers`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
-
-        if (seq !== lookupSeqRef.current || !res.ok) return;
-
-        const record = await res.json();
-        if (seq !== lookupSeqRef.current) return;
-
-        if (record && Array.isArray(record.entries) && record.entries.length > 0) {
-          setIsSavedRecord(true);
-          const normalizedEntries = record.entries.map((entry) => ({
-            ...entry,
-            partName:
-              typeof entry.partName === 'object' && entry.partName !== null
-                ? entry.partName.partName || ""
-                : entry.partName || "",
-            signature: entry.signature || entry.operatorSignature || ""
-          }));
-
-          setEntries(normalizedEntries);
-          triggerToast("Existing register entries loaded for this Part and Date.", "success");
-        } else {
-          setIsSavedRecord(false);
-          setEntries([
-            {
-              ...createFreshRow(),
-              date: headerInfo.date,
-              partName: headerInfo.partName
-            }
-          ]);
-        }
+        if (!res.ok) throw new Error('Unable to load Product Engineers');
+        const data = await res.json();
+        setProductEngineers(Array.isArray(data.peList) ? data.peList : []);
       } catch (err) {
-        console.warn('Check existing record error:', err);
+        console.warn('Product Engineer fetch error:', err);
+        triggerToast('Unable to load Product Engineers. Please try again.', 'error');
       }
     };
 
-    checkExistingRecord();
-  }, [actualShopId, headerInfo.date, headerInfo.partName]);
-
-  const handleHeaderChange = (field, val) => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      [field]: val
-    }));
-  };
+    fetchProductEngineers();
+  }, []);
 
   const handleRowChange = (index, field, val) => {
     if (isSavedRecord) return;
@@ -228,41 +178,24 @@ export default function CorrectiveActionRegister() {
     setEntries((prev) => prev.slice(0, -1));
   };
 
-  const handleApproveRowSignature = (index) => {
-    if (isSavedRecord) return;
-    setEntries((prev) => {
-      const updated = [...prev];
-      updated[index] = {
-        ...updated[index],
-        signature: currentUser
-      };
-      return updated;
-    });
-
-    triggerToast(`Row ${index + 1} signed by ${currentUser}`, "success");
-  };
-
-  const handleDownloadPdf = async () => {
-    if (!headerInfo.date || !headerInfo.partName) {
-      triggerToast("Please select both Date and Part Name to preview PDF.", "error");
+  const handleDownloadPdfRange = async () => {
+    if (!pdfFromDate || !pdfToDate) {
+      triggerToast("Please select both From Date and To Date.", "error");
+      return;
+    }
+    if (new Date(pdfFromDate) > new Date(pdfToDate)) {
+      triggerToast("From Date cannot be later than To Date.", "error");
       return;
     }
 
-    if (!isSavedRecord) {
-      triggerToast(
-        "No saved record found for this Part Name and Date. Submit the register first.",
-        "error"
-      );
-      return;
-    }
-
+    setIsDownloadingPdf(true);
     try {
       const token = localStorage.getItem("token");
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
       const params = new URLSearchParams({
-        date: headerInfo.date,
-        partName: headerInfo.partName,
+        fromDate: pdfFromDate,
+        toDate: pdfToDate,
         shopId: String(actualShopId)
       });
 
@@ -286,17 +219,18 @@ export default function CorrectiveActionRegister() {
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `Corrective_Action_Register_${headerInfo.partName.replace(/[^a-zA-Z0-9]/g, '_')}_${headerInfo.date}.pdf`;
+      link.download = `Corrective_Action_Register_${pdfFromDate}_to_${pdfToDate}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
+      setShowPdfModal(false);
       triggerToast("PDF generated and downloaded!", "success");
     } catch (err) {
       console.error("PDF generation error:", err);
       triggerToast(err.message || "Failed to generate PDF", "error");
-    }
+    } finally { setIsDownloadingPdf(false); }
   };
 
   const handleSave = async () => {
@@ -324,13 +258,16 @@ export default function CorrectiveActionRegister() {
       return;
     }
 
-    // Enforce Approval Requirement Constraint
-    const unsignedEntries = entries.some((e) => !e.signature || e.signature.trim() === "");
-    if (unsignedEntries) {
-      triggerToast(
-        "All rows must be approved and signed before saving.",
-        "error"
-      );
+    if (entries.some((e) => !e.date)) {
+      triggerToast("Please select the Date for every row.", "error");
+      return;
+    }
+    if (entries.some((e) => !e.partName)) {
+      triggerToast("Please select the Part Name for every row.", "error");
+      return;
+    }
+    if (entries.some((e) => !e.productEngineer)) {
+      triggerToast("Please select a Product Engineer in the Signature field for every row.", "error");
       return;
     }
 
@@ -353,14 +290,13 @@ export default function CorrectiveActionRegister() {
       correctiveAction: entry.correctiveAction || "",
       result: entry.result || "OK",
       signature: entry.signature || "",
-      operatorSignature: entry.signature || "",
-      shiftInchargeSignature: null
+      productEngineer: entry.productEngineer || ""
     }));
 
     const payload = {
       machineShop: Number(actualShopId),
-      recordDate: headerInfo.date,
-      partName: headerInfo.partName || cleanEntries[0]?.partName,
+      recordDate: cleanEntries[0]?.date || "",
+      partName: cleanEntries[0]?.partName || "",
       entries: cleanEntries,
       formCode: formMeta.formCode,
       revision: formMeta.revision,
@@ -398,10 +334,10 @@ export default function CorrectiveActionRegister() {
 
       setIsSavedRecord(true);
       setSaveSuccess(true);
-      triggerToast("Corrective Action Register saved successfully!", "success");
+      triggerToast("Corrective Action Register submitted and routed for Product Engineer approval!", "success");
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      navigate(`/operator/${actualShopId}/dashboard`);
+      navigate(`/shift-incharge/${actualShopId}`);
     } catch (err) {
       console.error('Save error:', err);
       triggerToast(err.message || 'Failed to save register.', 'error');
@@ -427,7 +363,7 @@ export default function CorrectiveActionRegister() {
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
                 <h2 className="text-xl font-bold text-gray-800">Saving Register Data...</h2>
-                <p className="text-gray-500 mt-2 text-sm">Validating row signatures and entries</p>
+                <p className="text-gray-500 mt-2 text-sm">Validating entries and routing approval</p>
               </>
             ) : (
               <>
@@ -472,58 +408,16 @@ export default function CorrectiveActionRegister() {
 
           <button
             type="button"
-            onClick={handleDownloadPdf}
+            onClick={() => {
+              const today = new Date().toISOString().split('T')[0];
+              setPdfFromDate(today);
+              setPdfToDate(today);
+              setShowPdfModal(true);
+            }}
             className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
           >
             <FileDown className="w-4 h-4" /> Download PDF
           </button>
-        </div>
-
-        {/* Filter / Primary Header Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-orange-50 border border-orange-200 p-4 rounded-lg">
-          <div>
-            <label className="font-bold text-gray-700 block mb-1 text-sm">Register Date</label>
-            <input
-              type="date"
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white cursor-pointer"
-              value={headerInfo.date}
-              onChange={(e) => handleHeaderChange("date", e.target.value)}
-            />
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className="font-bold text-gray-700 block mb-1 text-sm">
-              Part Name (Search / Filter)
-            </label>
-            <select
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white cursor-pointer"
-              value={headerInfo.partName}
-              onChange={(e) => handleHeaderChange("partName", e.target.value)}
-            >
-              <option value="">-- Select Part Name to Inspect / Add --</option>
-              {partNameOptions.map((part, pIdx) => {
-                const pName = typeof part === 'object' && part !== null ? part.partName : String(part);
-                return (
-                  <option key={`${pName}-${pIdx}`} value={pName}>
-                    {pName}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          <div className="flex flex-col justify-end">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Status</span>
-            <div
-              className={`text-center py-2 px-3 rounded text-xs font-extrabold uppercase tracking-wide border ${
-                isSavedRecord
-                  ? 'bg-green-100 text-green-800 border-green-300'
-                  : 'bg-yellow-100 text-yellow-800 border-yellow-300'
-              }`}
-            >
-              {isSavedRecord ? 'Record Locked (Saved)' : 'Draft / New Entry'}
-            </div>
-          </div>
         </div>
 
         {/* Entries Table Toolbar */}
@@ -640,7 +534,7 @@ export default function CorrectiveActionRegister() {
                       value={row.problemCategory || ""}
                       onChange={(e) => handleRowChange(idx, 'problemCategory', e.target.value)}
                     >
-                      <option value="">- Select -</option>
+                      <option value="">Select</option>
                       <option value="A">A</option>
                       <option value="B">B</option>
                       <option value="C">C</option>
@@ -715,14 +609,18 @@ export default function CorrectiveActionRegister() {
                         </span>
                       </div>
                     ) : (
-                      <button
-                        type="button"
+                      <select
                         disabled={isSavedRecord}
-                        onClick={() => handleApproveRowSignature(idx)}
-                        className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-3 py-1 rounded shadow transition-all hover:scale-105 uppercase tracking-wider cursor-pointer disabled:opacity-50"
+                        value={row.productEngineer || ''}
+                        onChange={(e) => handleRowChange(idx, 'productEngineer', e.target.value)}
+                        className="w-full min-w-[140px] text-center bg-transparent outline-none p-1 text-[10px] font-bold text-orange-700 cursor-pointer disabled:text-gray-700"
                       >
-                        Approve
-                      </button>
+                        <option value="">Select Product Engineer</option>
+                        {productEngineers.map((engineer, peIndex) => {
+                          const username = engineer.username || engineer.employeeId || engineer.name || '';
+                          return username ? <option key={`${username}-${peIndex}`} value={username}>{engineer.name || username}</option> : null;
+                        })}
+                      </select>
                     )}
                   </td>
                 </tr>
@@ -730,6 +628,74 @@ export default function CorrectiveActionRegister() {
             </tbody>
           </table>
         </div>
+
+        {/* Date Range Modal for PDF Download */}
+        {showPdfModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
+              <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-orange-500" />
+                  <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">
+                    Download PDF by Date Range
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPdfModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">
+                    From Date
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                    value={pdfFromDate}
+                    onChange={(e) => setPdfFromDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">
+                    To Date
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                    value={pdfToDate}
+                    onChange={(e) => setPdfToDate(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPdfModal(false)}
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadPdfRange}
+                  disabled={isDownloadingPdf}
+                  className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4" />
+                  {isDownloadingPdf ? "Downloading..." : "Download PDF"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Legend */}
         <div className="border-2 border-gray-800 rounded-lg overflow-hidden mt-6">

@@ -20,6 +20,7 @@ import OperatorAllotment from "./OperationAllotment";
 import JobSetupVerification from "./jobSetupVerification.jsx";
 import CompetencyExam from "./CompetencyExam.jsx";
 import Level1MaintenanceChecksheet from "./Level1MaintenanceCheckSheet.jsx";
+import OperatorObservationPlan from "./operatorObservationPlan.jsx";
 /**
  * Central map for operator forms
  *
@@ -53,13 +54,23 @@ const formMap = {
    "operator-observation-sheet": <OperatorObservationSheet />,
    
    "competency-evaluation-form": <CompetencyEvaluationForm />,
+
    "corrective-action-register":<CorrectiveActionRegister />,
+
    "jig-fixture-intimation-report":<JigFixtureIssueIntimation/>,
+
    "8d-problem-solving-report":<EightDProblemSolvingReport />,
+
     "operator-allotment":<OperatorAllotment />,
+
     "job-setup-verification" : <JobSetupVerification />,
+
     "competency-exam" : <CompetencyExam />,
-    "level1-maintenance" : <Level1MaintenanceChecksheet/>
+
+    "level1-maintenance" : <Level1MaintenanceChecksheet/>,
+
+    "operator-observation-plan" : <OperatorObservationPlan />
+
   // Future forms:
   // "some-form": <SomeForm />,
 };

@@ -28,6 +28,7 @@ const partSets = require("./routes/partSetRoutes.js");
 const qfRoutes = require("./routes/qfRoutes.js"); // ✅ Added QF Routes
 const Level1Routes = require("./routes/Level1MaintenanceRoutes.js"); // ✅ Added Level 1 Routes
 const breakDownReportRoutes = require("./routes/breakDownReportRoutes.js");
+const operatorObservationPlanRoutes = require("./routes/operatorObservationPlanRoutes.js");
 
 const app = express();
 
@@ -66,6 +67,8 @@ app.use('/api/part-sets', partSets);
 app.use('/api', qfRoutes); // ✅ Registered QF Routes
 app.use('/api', Level1Routes); // ✅ Registered Level 1 Routes
 app.use('/api', breakDownReportRoutes);
+app.use('/api', operatorObservationPlanRoutes);
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);

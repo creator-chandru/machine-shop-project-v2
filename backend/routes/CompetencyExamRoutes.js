@@ -14,7 +14,7 @@ const {
     generateCompetencyReport
 } = require('../controllers/CompetencyExamController.js');
 
-// 1. Line Codes Dropdown
+// 1. Line Codes Dropdown / Helper
 router.get('/competency-exam/lines', getAllLines);
 
 // 2. Shift Incharge Dropdown (For Operator to Select)
@@ -33,7 +33,7 @@ router.get('/competency-exam', getCompetencyExam);
 router.get('/competency-exam/reports', getCompetencyReports);
 router.post('/competency-exam/verify', verifyCompetencyExam);
 
-// 6. Download PDF Report
+// 6. Download PDF Report (Single or Date-Range)
 router.get('/competency-exam/report', generateCompetencyReport);
 
 module.exports = router;

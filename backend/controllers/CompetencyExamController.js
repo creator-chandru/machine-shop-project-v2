@@ -8,51 +8,82 @@ const ensureCompetencyColumns = async () => {
     try {
         const req = new sql.Request();
         await req.query(`
-            IF COL_LENGTH('CompetencyQualificationExam', 'status') IS NULL
-                ALTER TABLE CompetencyQualificationExam ADD status NVARCHAR(50) DEFAULT 'Pending Verification';
-            IF COL_LENGTH('CompetencyQualificationExam', 'verifiedBy') IS NULL
-                ALTER TABLE CompetencyQualificationExam ADD verifiedBy NVARCHAR(100) NULL;
-            IF COL_LENGTH('CompetencyQualificationExam', 'verifiedAt') IS NULL
-                ALTER TABLE CompetencyQualificationExam ADD verifiedAt DATETIME NULL;
+            IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='CompetencyQualificationExam' AND xtype='U')
+            BEGIN
+                CREATE TABLE CompetencyQualificationExam (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    employeeNo NVARCHAR(50),
+                    employeeName NVARCHAR(100),
+                    line NVARCHAR(50),
+                    doj NVARCHAR(50) NULL,
+                    examDate NVARCHAR(50) NULL,
+                    qualification NVARCHAR(100) NULL,
+                    answers NVARCHAR(MAX) NULL,
+                    score INT DEFAULT 0,
+                    evaluatedBy NVARCHAR(100) NULL,
+                    status NVARCHAR(50) DEFAULT 'Pending Verification',
+                    verifiedBy NVARCHAR(100) NULL,
+                    verifiedAt DATETIME NULL,
+                    createdAt DATETIME DEFAULT GETDATE()
+                );
+            END
+            ELSE
+            BEGIN
+                IF COL_LENGTH('CompetencyQualificationExam', 'status') IS NULL
+                    ALTER TABLE CompetencyQualificationExam ADD status NVARCHAR(50) DEFAULT 'Pending Verification';
+                IF COL_LENGTH('CompetencyQualificationExam', 'verifiedBy') IS NULL
+                    ALTER TABLE CompetencyQualificationExam ADD verifiedBy NVARCHAR(100) NULL;
+                IF COL_LENGTH('CompetencyQualificationExam', 'verifiedAt') IS NULL
+                    ALTER TABLE CompetencyQualificationExam ADD verifiedAt DATETIME NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='CompetencyExamQuestions' AND xtype='U')
+            BEGIN
+                CREATE TABLE CompetencyExamQuestions (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    questionText NVARCHAR(MAX) NOT NULL,
+                    optionsJson NVARCHAR(MAX) NOT NULL,
+                    correctAnswer VARCHAR(10) NOT NULL,
+                    createdAt DATETIME DEFAULT GETDATE()
+                );
+            END
         `);
     } catch (e) {
         console.warn("Table column migration notice:", e.message);
     }
 };
 
+ensureCompetencyColumns();
+
 // ============================================================
-// 1. GET ALL LINE CODES FOR DROPDOWN
+// 1. GET ALL LINE CODES
 // ============================================================
 const getAllLines = async (req, res) => {
     try {
         const request = new sql.Request();
-        
         const query = `
             SELECT DISTINCT lineCode 
             FROM MachineShop3Details 
             WHERE lineCode IS NOT NULL AND lineCode <> ''
             ORDER BY lineCode ASC
         `;
-
         const result = await request.query(query);
         const lineList = result.recordset.map(row => row.lineCode);
-        
         return res.status(200).json(lineList);
     } catch (err) {
-        console.error("Fetch lines error from ErrorProofingCheckSheet:", err);
+        console.error("Fetch lines error:", err);
         return res.status(500).json({ error: 'Failed to fetch line codes' });
     }
 };
 
 // ============================================================
-// 2. GET ALL SHIFT INCHARGES FOR OPERATOR DROPDOWN
+// 2. GET ALL SHIFT INCHARGES FOR DROPDOWN
 // ============================================================
 const getShiftIncharges = async (req, res) => {
     try {
         const request = new sql.Request();
         let inchargeList = [];
 
-        // 1. Query registered users matching Shift Incharge role / title
         try {
             const userResult = await request.query(`
                 SELECT DISTINCT 
@@ -70,7 +101,6 @@ const getShiftIncharges = async (req, res) => {
             console.warn("Could not query Users for shift incharges:", e.message);
         }
 
-        // 2. Fetch distinct historical evaluators from exam records
         try {
             const prev = await request.query(`
                 SELECT DISTINCT evaluatedBy 
@@ -81,16 +111,10 @@ const getShiftIncharges = async (req, res) => {
             inchargeList = [...inchargeList, ...prevList];
         } catch (err2) {}
 
-        // 3. Fallback list to ensure dropdown always has complete options
         const standardList = [
-            "Shift Incharge - Shift A",
-            "Shift Incharge - Shift B",
-            "Shift Incharge - Shift C",
-            "Shift Incharge 1",
-            "Shift Incharge 2"
+            
         ];
 
-        // Deduplicate and filter empty values
         const allUniqueIncharges = Array.from(new Set([...inchargeList, ...standardList]))
             .filter(Boolean)
             .sort();
@@ -114,12 +138,20 @@ const getCompetencyQuestions = async (req, res) => {
             ORDER BY id ASC
         `);
 
-        const questions = result.recordset.map(row => ({
-            id: row.id,
-            text: row.questionText,
-            options: JSON.parse(row.optionsJson || '[]'),
-            correctAnswer: row.correctAnswer
-        }));
+        const questions = result.recordset.map(row => {
+            let opts = [];
+            try {
+                opts = typeof row.optionsJson === 'string' ? JSON.parse(row.optionsJson || '[]') : row.optionsJson;
+            } catch (je) {
+                opts = [];
+            }
+            return {
+                id: row.id,
+                text: row.questionText,
+                options: opts,
+                correctAnswer: row.correctAnswer
+            };
+        });
 
         return res.status(200).json(questions);
     } catch (err) {
@@ -177,7 +209,7 @@ const deleteCompetencyQuestion = async (req, res) => {
 // ============================================================
 const saveCompetencyExam = async (req, res) => {
     const { header, answers } = req.body;
-    const lineValue = header?.line || header?.lineCode;
+    const lineValue = (header?.line || header?.lineCode || '').trim();
 
     if (!header || !header.employeeNo || !header.examDate || !lineValue) {
         return res.status(400).json({ error: 'Header parameters missing' });
@@ -186,7 +218,6 @@ const saveCompetencyExam = async (req, res) => {
     try {
         await ensureCompetencyColumns();
 
-        // Fetch active questions & answer key dynamically from DB
         const request = new sql.Request();
         const qResult = await request.query(`SELECT id, correctAnswer FROM CompetencyExamQuestions`);
         const answerKey = {};
@@ -206,7 +237,6 @@ const saveCompetencyExam = async (req, res) => {
 
         const cleanDate = String(header.examDate).split('T')[0];
 
-        // Check if an existing exam record is already saved
         const checkReq = new sql.Request();
         checkReq.input('employeeNo', sql.NVarChar(50), header.employeeNo)
             .input('line', sql.NVarChar(50), lineValue)
@@ -220,7 +250,6 @@ const saveCompetencyExam = async (req, res) => {
         `;
         const existing = await checkReq.query(checkQuery);
 
-        // ENFORCEMENT: Once chosen and saved, evaluatedBy CANNOT be changed!
         let finalEvaluatedBy = (header.evaluatedBy || '').trim();
         if (existing.recordset.length > 0 && existing.recordset[0].evaluatedBy) {
             finalEvaluatedBy = existing.recordset[0].evaluatedBy;
@@ -333,7 +362,6 @@ const getCompetencyReports = async (req, res) => {
         const { shiftIncharge } = req.query;
         const request = new sql.Request();
 
-        // Only fetch exams that are PENDING verification!
         let query = `
             SELECT 
                 id,
@@ -410,157 +438,175 @@ const verifyCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 10. GENERATE STRUCTURED TABLE PDF REPORT
+// 10. GENERATE STRUCTURED TABLE PDF (SINGLE OR MULTI-RECORD DATE RANGE)
 // ============================================================
 const generateCompetencyReport = async (req, res) => {
     try {
-        const employeeNo = req.query.employeeNo;
-        const lineParam = req.query.line || req.query.lineCode;
-        const examDate = req.query.examDate;
+        const { employeeNo, line, lineCode, examDate, fromDate, toDate } = req.query;
+        const lineParam = line || lineCode;
 
-        if (!employeeNo || !lineParam || !examDate) {
-            return res.status(400).json({ error: "Missing required query parameters" });
-        }
-
-        const cleanDate = String(examDate).split('T')[0];
+        await ensureCompetencyColumns();
 
         const request = new sql.Request();
-        request.input('employeeNo', sql.NVarChar(50), employeeNo)
-            .input('line', sql.NVarChar(50), lineParam)
-            .input('examDate', sql.NVarChar(50), cleanDate);
+        let query = `SELECT * FROM CompetencyQualificationExam WHERE 1=1`;
 
-        const result = await request.query(`
-            SELECT * FROM CompetencyQualificationExam 
-            WHERE employeeNo = @employeeNo 
-              AND line = @line 
-              AND CONVERT(date, examDate) = CONVERT(date, @examDate)
-        `);
+        if (fromDate && toDate) {
+            query += ` AND CONVERT(date, examDate) BETWEEN @fromDate AND @toDate`;
+            request.input('fromDate', sql.Date, fromDate);
+            request.input('toDate', sql.Date, toDate);
+        } else if (employeeNo && examDate) {
+            const cleanDate = String(examDate).split('T')[0];
+            query += ` AND employeeNo = @employeeNo AND CONVERT(date, examDate) = CONVERT(date, @examDate)`;
+            request.input('employeeNo', sql.NVarChar(50), employeeNo);
+            request.input('examDate', sql.NVarChar(50), cleanDate);
 
-        if (result.recordset.length === 0) {
-            return res.status(404).json({ error: "Record not found for PDF generation" });
+            if (lineParam) {
+                query += ` AND line = @line`;
+                request.input('line', sql.NVarChar(50), lineParam);
+            }
+        } else {
+            return res.status(400).json({ error: "Provide either (fromDate and toDate) or (employeeNo and examDate)." });
         }
 
-        const data = result.recordset[0];
-        const answers = JSON.parse(data.answers || '{}');
+        query += ` ORDER BY examDate ASC, employeeNo ASC`;
+
+        const result = await request.query(query);
+        if (result.recordset.length === 0) {
+            return res.status(404).json({ error: "No exam records found." });
+        }
+
+        const records = result.recordset;
 
         // Fetch dynamic answer key
         const qReq = new sql.Request();
-        const qResult = await qReq.query(`SELECT id, correctAnswer FROM CompetencyExamQuestions`);
+        const qResult = await qReq.query(`SELECT id, questionText, correctAnswer FROM CompetencyExamQuestions ORDER BY id ASC`);
         const answerKey = {};
+        const questionTextMap = {};
         qResult.recordset.forEach(row => {
             answerKey[row.id] = row.correctAnswer;
+            questionTextMap[row.id] = row.questionText;
         });
 
-        const doc = new PDFDocument({ margin: 30, size: "A4" });
+        const doc = new PDFDocument({ margin: 30, size: "A4", bufferPages: true });
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `inline; filename=Competency_Report_${employeeNo}_${cleanDate}.pdf`);
+        res.setHeader(
+            "Content-Disposition", 
+            `attachment; filename=Competency_Report_${fromDate || employeeNo}_${toDate || examDate}.pdf`
+        );
         doc.pipe(res);
 
-        // --- TITLE HEADER ---
-        doc.font("Helvetica-Bold").fontSize(13).text("SAKTHI AUTO COMPONENT LIMITED", { align: "center" });
-        doc.fontSize(10).fillColor("#444444").text("LEVEL 3 COMPETENCY QUALIFICATION EVALUATION REPORT - VTL & HTL", { align: "center" });
-        doc.moveDown(0.8);
+        records.forEach((data, recIdx) => {
+            if (recIdx > 0) doc.addPage();
 
-        // --- EMPLOYEE DETAILS PANEL ---
-        const boxTop = doc.y;
-        doc.rect(30, boxTop, 535, 60).strokeColor("#B0B0B0").lineWidth(1).stroke();
-        
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000");
-        doc.text(`Emp No:`, 40, boxTop + 8);
-        doc.font("Helvetica").text(data.employeeNo, 90, boxTop + 8);
+            const answers = JSON.parse(data.answers || '{}');
+            const cleanDate = data.examDate ? String(data.examDate).split('T')[0] : '';
 
-        doc.font("Helvetica-Bold").text(`Name:`, 210, boxTop + 8);
-        doc.font("Helvetica").text(data.employeeName || 'N/A', 245, boxTop + 8);
+            // --- TITLE HEADER ---
+            doc.font("Helvetica-Bold").fontSize(13).text("SAKTHI AUTO COMPONENT LIMITED", { align: "center" });
+            doc.fontSize(10).fillColor("#444444").text("LEVEL 3 COMPETENCY QUALIFICATION EVALUATION REPORT - VTL & HTL", { align: "center" });
+            doc.moveDown(0.8);
 
-        doc.font("Helvetica-Bold").text(`Line:`, 410, boxTop + 8);
-        doc.font("Helvetica").text(data.line, 440, boxTop + 8);
+            // --- EMPLOYEE DETAILS PANEL ---
+            const boxTop = doc.y;
+            doc.rect(30, boxTop, 535, 60).strokeColor("#B0B0B0").lineWidth(1).stroke();
+            
+            doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#000000");
+            doc.text(`Emp No:`, 40, boxTop + 8);
+            doc.font("Helvetica").text(data.employeeNo, 90, boxTop + 8);
 
-        doc.font("Helvetica-Bold").text(`DOJ:`, 40, boxTop + 24);
-        doc.font("Helvetica").text(data.doj ? new Date(data.doj).toISOString().split('T')[0] : 'N/A', 90, boxTop + 24);
+            doc.font("Helvetica-Bold").text(`Name:`, 210, boxTop + 8);
+            doc.font("Helvetica").text(data.employeeName || 'N/A', 245, boxTop + 8);
 
-        doc.font("Helvetica-Bold").text(`Date:`, 210, boxTop + 24);
-        doc.font("Helvetica").text(cleanDate, 245, boxTop + 24);
+            doc.font("Helvetica-Bold").text(`Line:`, 410, boxTop + 8);
+            doc.font("Helvetica").text(data.line || 'N/A', 440, boxTop + 8);
 
-        doc.font("Helvetica-Bold").text(`Qualification:`, 410, boxTop + 24);
-        doc.font("Helvetica").text(data.qualification || 'N/A', 475, boxTop + 24);
+            doc.font("Helvetica-Bold").text(`DOJ:`, 40, boxTop + 24);
+            doc.font("Helvetica").text(data.doj ? new Date(data.doj).toISOString().split('T')[0] : 'N/A', 90, boxTop + 24);
 
-        doc.font("Helvetica-Bold").text(`Evaluated By:`, 40, boxTop + 40);
-        doc.font("Helvetica").text(data.evaluatedBy || 'N/A', 110, boxTop + 40);
+            doc.font("Helvetica-Bold").text(`Date:`, 210, boxTop + 24);
+            doc.font("Helvetica").text(cleanDate, 245, boxTop + 24);
 
-        doc.font("Helvetica-Bold").text(`Status:`, 210, boxTop + 40);
-        const isVerified = (data.status === 'Verified');
-        doc.font("Helvetica-Bold").fillColor(isVerified ? "#008000" : "#D97706").text(
-            isVerified ? `Verified (${data.verifiedBy || 'Shift Incharge'})` : 'Pending Verification', 
-            250, 
-            boxTop + 40
-        );
+            doc.font("Helvetica-Bold").text(`Qualification:`, 410, boxTop + 24);
+            doc.font("Helvetica").text(data.qualification || 'N/A', 475, boxTop + 24);
 
-        doc.font("Helvetica-Bold").fillColor("#000000").text(`Score:`, 410, boxTop + 40);
-        doc.font("Helvetica-Bold").fillColor(data.score >= 70 ? "#008000" : "#D32F2F").text(`${data.score} / 100`, 445, boxTop + 40);
+            doc.font("Helvetica-Bold").text(`Evaluated By:`, 40, boxTop + 40);
+            doc.font("Helvetica").text(data.evaluatedBy || 'N/A', 110, boxTop + 40);
 
-        doc.moveDown(3.2);
+            doc.font("Helvetica-Bold").text(`Status:`, 210, boxTop + 40);
+            const isVerified = (data.status === 'Verified');
+            doc.font("Helvetica-Bold").fillColor(isVerified ? "#008000" : "#D97706").text(
+                isVerified ? `Verified (${data.verifiedBy || 'Shift Incharge'})` : 'Pending Verification', 
+                250, 
+                boxTop + 40
+            );
 
-        // --- TABLE LAYOUT CONFIGURATION ---
-        const startX = 30;
-        const colWidths = [50, 140, 160, 185]; 
-        const rowHeight = 20;
-        let currentY = doc.y;
+            doc.font("Helvetica-Bold").fillColor("#000000").text(`Score:`, 410, boxTop + 40);
+            doc.font("Helvetica-Bold").fillColor(data.score >= 70 ? "#008000" : "#D32F2F").text(`${data.score} / 100`, 445, boxTop + 40);
 
-        doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9);
-        doc.rect(startX, currentY, 535, rowHeight).fill("#E2E8F0").stroke();
-        
-        doc.fillColor("#000000");
-        doc.text("Q. No", startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
-        doc.text("Selected Answer", startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
-        doc.text("Status", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
-        doc.text("Correct Answer (Key)", startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
+            doc.moveDown(3.2);
 
-        currentY += rowHeight;
+            // --- TABLE LAYOUT ---
+            const startX = 30;
+            const colWidths = [50, 140, 160, 185]; 
+            const rowHeight = 20;
+            let currentY = doc.y;
 
-        // --- TABLE DATA ROWS ---
-        doc.font("Helvetica").fontSize(9);
-        const questionIds = Object.keys(answerKey);
-        for (let idx = 0; idx < questionIds.length; idx++) {
-            const qId = questionIds[idx];
-            if (currentY > 750) { 
-                doc.addPage();
-                currentY = 40;
-            }
-
-            const selectedOpt = answers[qId] || "Unanswered";
-            const correctOpt = answerKey[qId];
-            const isCorrect = selectedOpt === correctOpt;
-
-            const rowBg = idx % 2 === 0 ? "#F8FAFC" : "#FFFFFF";
-            doc.rect(startX, currentY, 535, rowHeight).fill(rowBg).strokeColor("#CBD5E1").lineWidth(0.5).stroke();
-
-            doc.fillColor("#000000").font("Helvetica-Bold");
-            doc.text(`Q${idx + 1}`, startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
-
-            doc.font("Helvetica");
-            doc.text(`Option ${selectedOpt}`, startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
-
-            if (isCorrect) {
-                doc.fillColor("#16A34A").font("Helvetica-Bold");
-                doc.text("✓ Correct", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
-
-                doc.fillColor("#334155").font("Helvetica");
-                doc.text(`Option ${correctOpt}`, startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
-            } else {
-                doc.fillColor("#DC2626").font("Helvetica-Bold");
-                doc.text("X Incorrect", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
-
-                doc.save();
-                const badgeX = startX + colWidths[0] + colWidths[1] + colWidths[2] + 45;
-                const badgeY = currentY + 3;
-                doc.roundedRect(badgeX, badgeY, 95, 14, 3).fill("#FEF08A").stroke();
-                doc.fillColor("#854D0E").font("Helvetica-Bold");
-                doc.text(`Option ${correctOpt}`, badgeX, badgeY + 3, { width: 95, align: "center" });
-                doc.restore();
-            }
+            doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9);
+            doc.rect(startX, currentY, 535, rowHeight).fill("#E2E8F0").stroke();
+            
+            doc.fillColor("#000000");
+            doc.text("Q. No", startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
+            doc.text("Selected Answer", startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
+            doc.text("Status", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
+            doc.text("Correct Answer (Key)", startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
 
             currentY += rowHeight;
-        }
+
+            // --- TABLE ROWS ---
+            doc.font("Helvetica").fontSize(9);
+            const questionIds = Object.keys(answerKey);
+            for (let idx = 0; idx < questionIds.length; idx++) {
+                const qId = questionIds[idx];
+                if (currentY > 750) { 
+                    doc.addPage();
+                    currentY = 40;
+                }
+
+                const selectedOpt = answers[qId] || "Unanswered";
+                const correctOpt = answerKey[qId];
+                const isCorrect = selectedOpt === correctOpt;
+
+                const rowBg = idx % 2 === 0 ? "#F8FAFC" : "#FFFFFF";
+                doc.rect(startX, currentY, 535, rowHeight).fill(rowBg).strokeColor("#CBD5E1").lineWidth(0.5).stroke();
+
+                doc.fillColor("#000000").font("Helvetica-Bold");
+                doc.text(`Q${idx + 1}`, startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
+
+                doc.font("Helvetica");
+                doc.text(`Option ${selectedOpt}`, startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
+
+                if (isCorrect) {
+                    doc.fillColor("#16A34A").font("Helvetica-Bold");
+                    doc.text("✓ Correct", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
+
+                    doc.fillColor("#334155").font("Helvetica");
+                    doc.text(`Option ${correctOpt}`, startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
+                } else {
+                    doc.fillColor("#DC2626").font("Helvetica-Bold");
+                    doc.text("X Incorrect", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
+
+                    doc.save();
+                    const badgeX = startX + colWidths[0] + colWidths[1] + colWidths[2] + 45;
+                    const badgeY = currentY + 3;
+                    doc.roundedRect(badgeX, badgeY, 95, 14, 3).fill("#FEF08A").stroke();
+                    doc.fillColor("#854D0E").font("Helvetica-Bold");
+                    doc.text(`Option ${correctOpt}`, badgeX, badgeY + 3, { width: 95, align: "center" });
+                    doc.restore();
+                }
+
+                currentY += rowHeight;
+            }
+        });
 
         doc.end();
     } catch (err) {

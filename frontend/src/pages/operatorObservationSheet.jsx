@@ -170,6 +170,9 @@ export default function OperatorObservationSheet() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
 
+  // NEW: State for HOF Users
+  const [hofUsers, setHofUsers] = useState([]);
+
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
     setTimeout(() => {
@@ -218,14 +221,12 @@ export default function OperatorObservationSheet() {
     });
   };
 
-  // --- Approve Button Logic ---
-  const handleApprove = () => {
+const handleApproveReview = () => {
     setFooterInfo((prev) => ({
       ...prev,
-      reviewedBy: loggedInName,
-      approvedBy: loggedInName
+      reviewedBy: loggedInName
     }));
-    triggerToast("Form approved with your signature.", "success");
+    triggerToast("Reviewed By signed successfully.", "success");
   };
 
   // Helper to map DB flat records to nested UI state
@@ -305,6 +306,32 @@ export default function OperatorObservationSheet() {
 
     return () => clearTimeout(delayDebounceFn);
   }, [headerInfo.employeeCode, headerInfo.testDate, shopId]);
+
+// NEW: Fetch HOF users on mount
+  useEffect(() => {
+    const fetchHofUsers = async () => {
+      try {
+        const token = localStorage.getItem('token'); // Get the token
+        
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/hof`, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          } // Add the headers here
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setHofUsers(data);
+        } else {
+          console.error("Failed to fetch HOF users. Status:", res.status);
+        }
+      } catch (err) {
+        console.error("Error fetching HOF users:", err);
+      }
+    };
+    fetchHofUsers();
+  }, []);
 
   // --- Download PDF Logic ---
   const handleDownloadPDF = async () => {
@@ -650,14 +677,6 @@ export default function OperatorObservationSheet() {
         {/* Footer Remarks / Feedback / Signatures */}
         <div className="mt-6 border-2 border-gray-800 bg-white relative">
           
-          {/* Approve Button floating at the top right of the footer block */}
-          <button 
-            type="button" 
-            onClick={handleApprove}
-            className="absolute -top-3 -right-3 bg-[#16a34a] hover:bg-green-700 text-white shadow-md border-2 border-white rounded-full px-4 py-1 text-xs font-bold uppercase transition-transform hover:scale-105"
-          >
-            Approve Form
-          </button>
 
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800 p-3 text-sm font-semibold">
             <div className="flex items-center gap-2">
@@ -669,25 +688,59 @@ export default function OperatorObservationSheet() {
                 onChange={(e) => handleFooterChange('reviewDate', e.target.value)}
               />
             </div>
+            {/* UPDATED: Reviewed By with Approve Button */}
             <div className="flex items-center gap-2 px-2">
               <label className="text-gray-700">Reviewed By:</label>
-              <input
-                type="text"
-                placeholder="Sign / Name"
-                className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase"
-                value={footerInfo.reviewedBy}
-                readOnly
-              />
+              {footerInfo.reviewedBy ? (
+                <input
+                  type="text"
+                  className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase font-bold bg-transparent"
+                  value={footerInfo.reviewedBy}
+                  readOnly
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleApproveReview}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs font-bold shadow-sm transition-colors"
+                >
+                  Approve
+                </button>
+              )}
             </div>
+            {/* UPDATED: Approved By Dropdown with Pending Status Check */}
             <div className="flex items-center gap-2 px-2">
               <label className="text-gray-700">Approved By:</label>
-              <input
-                type="text"
-                placeholder="Sign / Name"
-                className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase"
-                value={footerInfo.approvedBy}
-                readOnly
-              />
+              {footerInfo.approvedBy && footerInfo.approvedBy.includes('(Verified)') ? (
+                <input
+                  type="text"
+                  className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase font-bold bg-transparent"
+                  value={footerInfo.approvedBy.replace(' (Verified)', '')}
+                  readOnly
+                />
+              ) : (
+                <div className="flex-1 flex items-center gap-2">
+                  <select
+                    className="w-full border-b border-gray-400 outline-none px-2 py-0.5 text-orange-700 font-bold bg-transparent cursor-pointer"
+                    value={footerInfo.approvedBy}
+                    onChange={(e) => handleFooterChange('approvedBy', e.target.value)}
+                  >
+                    <option value="">Select HOF...</option>
+                    {hofUsers.map((user, idx) => (
+                      <option key={idx} value={user.username}>
+                        {user.username} ({user.employeeId})
+                      </option>
+                    ))}
+                  </select>
+                  
+                  {/* Show Pending Badge if an HOF is selected but not yet verified */}
+                  {footerInfo.approvedBy && isSavedRecord && (
+                    <span className="bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded font-bold whitespace-nowrap shadow-sm">
+                      Pending
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

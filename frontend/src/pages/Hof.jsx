@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { BookOpen } from "lucide-react"; 
+import { BookOpen, UserCheck } from "lucide-react"; 
 import Header from "../components/Header";
 import EditPartMapping from "../components/EditPartMapping";
 import JobSetupMasterConfigurator from "../components/jobSetupMasterConfigurator.jsx";
@@ -41,6 +41,8 @@ const Hof = () => {
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentHOF = currentUser.username || currentUser.employeeId || "hof";
 
+  const [pendingObservationReports, setPendingObservationReports] = useState([]); // NEW STATE
+
   const formatDate = (dateStr) => {
     if (!dateStr) return "";
     return new Date(dateStr).toLocaleDateString("en-GB");
@@ -69,7 +71,7 @@ const Hof = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/significant-event-pending/hof/${encodeURIComponent(currentHOF)}`,
+        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-pending/hof/${encodeURIComponent(currentHOF)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -85,7 +87,7 @@ const Hof = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/8d-report/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
+        `${process.env.REACT_APP_API_URL || ""}/api/8d-report/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -104,7 +106,7 @@ const Hof = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/job-setup-verification/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
+        `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -116,6 +118,26 @@ const Hof = () => {
     } catch (err) {
       toast.error("Failed to load Pending Job Setup Verifications.");
       setPendingJobSetupReports([]);
+    }
+  };
+
+
+  const fetchPendingObservationReports = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${process.env.REACT_APP_API_URL || ""}/api/operator-observation-sheet/pending/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPendingObservationReports(Array.isArray(data) ? data : []);
+      } else {
+        setPendingObservationReports([]);
+      }
+    } catch (err) {
+      toast.error("Failed to load Pending Observation Reports.");
+      setPendingObservationReports([]);
     }
   };
 
@@ -170,6 +192,9 @@ const Hof = () => {
     } else if (activeFormType === "daily-production") {
       fetchPendingReports();
     }
+    else if (activeFormType === "operator-observation") {
+      fetchPendingObservationReports();
+    }
   }, [shopId, activeFormType]);
 
   const handleOpenReviewModal = async (report) => {
@@ -212,7 +237,13 @@ const Hof = () => {
         params.append("date", isoDate);
         params.append("shopId", String(report.machineShop || shopId || 3));
         reportPath = `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/report?${params.toString()}`;
-      } else {
+      } else if (activeFormType === "operator-observation") {
+        params.append("machineShop", String(report.machineShop || shopId || 3));
+        params.append("employeeCode", report.employeeCode);
+        params.append("testDate", isoDate);
+        reportPath = `${process.env.REACT_APP_API_URL || ""}/api/operator-observation-sheet/report?${params.toString()}`;
+      }
+       else {
         params.append("lineCode", report.lineCode);
         params.append("date", isoDate);
         params.append("shopId", String(report.machineShop || shopId || 3));
@@ -277,7 +308,14 @@ const Hof = () => {
           signature: currentHOF,
           username: currentHOF,
         };
-      } else {
+      } else if (activeFormType === "operator-observation") {
+        signEndpoint = `${process.env.REACT_APP_API_URL || ""}/api/operator-observation-sheet/sign-hof`;
+        payload = {
+          employeeCode: selectedReport.employeeCode,
+          date: isoDate,
+          signature: currentHOF,
+        };
+      }  else {
         signEndpoint = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/sign-hof`;
         payload = {
           lineCode: selectedReport.lineCode,
@@ -309,6 +347,8 @@ const Hof = () => {
           fetchPendingEightDReports();
         } else if (activeFormType === "job-setup") {
           fetchPendingJobSetupReports();
+        } else if (activeFormType === "operator-observation") {
+          fetchPendingObservationReports();
         } else {
           fetchPendingReports();
         }
@@ -437,6 +477,24 @@ const Hof = () => {
             >
               <Settings2 className="w-4 h-4" />
               Set Job Verification Set Up
+            </button>
+
+            {/* Add inside Form Selection Tabs (<div className="flex gap-4 mb-6 flex-wrap">) */}
+            <button
+              onClick={() => setActiveFormType("operator-observation")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                activeFormType === "operator-observation"
+                  ? "bg-orange-500 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              <UserCheck className="w-4 h-4" />
+              Operator Observations
+              {pendingObservationReports.length > 0 && (
+                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
+                  {pendingObservationReports.length}
+                </span>
+              )}
             </button>
 
             {/* ✅ QF MANAGER BUTTON */}
@@ -728,6 +786,56 @@ const Hof = () => {
 
           {/* TAB CONTENT: Set Job Verification Set Up */}
           {activeFormType === "job-setup-master" && <JobSetupMasterConfigurator shopId={shopId} />}
+
+          {activeFormType === "operator-observation" && (
+            <div>
+              {pendingObservationReports.length === 0 ? (
+                <p className="text-gray-500 italic py-6">
+                  No Operator Observation records pending your review.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse border border-gray-300">
+                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 border border-gray-300">Date</th>
+                        <th className="p-3 border border-gray-300">Employee Code</th>
+                        <th className="p-3 border border-gray-300">Employee Name</th>
+                        <th className="p-3 border border-gray-300">Shop ID</th>
+                        <th className="p-3 border border-gray-300 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pendingObservationReports.map((report, idx) => (
+                        <tr key={`obs-${idx}`} className="hover:bg-orange-50/40 transition-colors">
+                          <td className="p-3 border border-gray-300 font-bold">
+                            {formatDate(report.reportDate)}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-mono text-orange-700">
+                            {report.employeeCode}
+                          </td>
+                          <td className="p-3 border border-gray-300 font-semibold">
+                            {report.employeeName}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-gray-600">
+                            {report.machineShop}
+                          </td>
+                          <td className="p-3 border border-gray-300 text-center">
+                            <button
+                              onClick={() => handleOpenReviewModal(report)}
+                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
+                            >
+                              Review & Sign
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Existing Part Mapping Component */}
@@ -851,6 +959,8 @@ const Hof = () => {
                   ? "8D Problem Solving Report (HOF)"
                   : activeFormType === "job-setup"
                   ? "Job Setup Verification (HOF-PRODN)"
+                  : activeFormType === "operator-observation"
+                  ? "Operator Observation Sheet"
                   : "Daily Production Report (HOF)"
               }
             </h3>

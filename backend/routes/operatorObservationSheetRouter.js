@@ -4,7 +4,10 @@ const router = express.Router();
 const {
     saveOperatorObservationSheet,
     getOperatorObservationSheet,
-    generateOperatorObservationPDF
+    generateOperatorObservationPDF,
+    getPendingObservationsForHof, // NEW: Fetch pending approvals for HOF
+    signOperatorObservationHof,   // NEW: HOF signature submission
+    getHofUsers                   // NEW: Fetch HOF users for dropdown
 } = require('../controllers/operatorObservationSheetController.js');
 
 // ============================================================
@@ -29,6 +32,30 @@ router.get(
 router.get(
     '/operator-observation-sheet/report',
     generateOperatorObservationPDF
+);
+
+// ============================================================
+// GET PENDING OBSERVATIONS FOR HOF DASHBOARD
+// ============================================================
+router.get(
+    '/operator-observation-sheet/pending/hof/:hofUsername',
+    getPendingObservationsForHof
+);
+
+// ============================================================
+// SIGN OPERATOR OBSERVATION (HOF)
+// ============================================================
+router.post(
+    '/operator-observation-sheet/sign-hof',
+    signOperatorObservationHof
+);
+
+// ============================================================
+// GET HOF USERS (For Approved By Dropdown)
+// ============================================================
+router.get(
+    '/users/hof',
+    getHofUsers
 );
 
 module.exports = router;

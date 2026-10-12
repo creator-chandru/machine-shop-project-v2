@@ -4,29 +4,6 @@ import { useLineSet } from "../context/LineSetContext.jsx";
 import { FileDown } from "lucide-react";
 import Header from '../components/Header';
 
-const questions = [
-  { id: 1, text: "1. What is offset wear?", options: ["A) To compensate tool wear", "B) The machine distance from component zero to machine zero", "C) Both"] },
-  { id: 2, text: "2. What is offset geometry?", options: ["A) To compensate tool wear", "B) The machine distance from component zero to machine zero", "C) Both"] },
-  { id: 3, text: "3. What is over adjustment?", options: ["A) Giving frequent offset", "B) Adjusting the tool", "C) Adjusting the tool block"] },
-  { id: 4, text: "4. Define types of feed?", options: ["A) mm per min", "B) mm per rev", "C) both mm per min and mm per rev"] },
-  { id: 5, text: "5. What are the gauges used in your machine?", options: ["A) Bore dial gauge, plug gauge, snap gauge, width gauge,", "B) Slip gauge, height Vernier", "C) Surface tester"] },
-  { id: 6, text: "6. What is least count?", options: ["A) Least possible value that can be measured by an equipment", "B) The last value that can be measured by an equipment", "C) Range of the equipment"] },
-  { id: 7, text: "7. What is calibration?", options: ["A) Evaluating the status of a gauge in a standard room against the standard", "B) Finding out the status of a gauge in shop floor", "C) Checking the range of the gauge"] },
-  { id: 8, text: "8. What is MARU A?", options: ["A) It denotes safety part and safety parameter", "B) It denotes tolerance", "C) It denotes dimension"] },
-  { id: 9, text: "9. Define cutting speed formula?", options: ["A) VC = πdn / 1000", "B) D = VC * 1000 / πd", "C) None of the above"] },
-  { id: 10, text: "10. Safety procedure to be followed in VTL & HTL machines.", options: ["A) As per work instruction for VTL & HTL", "B) As per work instruction for VMC & HMC", "C) Both"] },
-  { id: 11, text: "11. Insert is made up of the following materials?", options: ["A) Carbide, Ceramic, Cbn, Cermet", "B) Carbide, Ceramic", "C) Cbn, Cermet"] },
-  { id: 12, text: "12. Types of tool holders?", options: ["A) Boring bar, Facing bar, Grooving holder, Reverse boring bar", "B) Boring bar", "C) Facing bar"] },
-  { id: 13, text: "13. Define turning basic principle?", options: ["A) Component rotate tool static", "B) Component static tool rotate", "C) Component and tool both rotate"] },
-  { id: 14, text: "14. Define types of speed?", options: ["A) Constant speed and constant surface speed", "B) Constant speed", "C) constant surface speed"] },
-  { id: 15, text: "15. Types of chuck we use?", options: ["A) Three Jaw Chuck, Four Jaw Chuck", "B) Pull Down Chuck, Face Clamp Chuck", "C) All the above"] },
-  { id: 16, text: "16. Constant speed is used in", options: ["A) In constant diameter", "B) Variable diameter", "C) In both situation"] },
-  { id: 17, text: "17. Constant surface speed is used in", options: ["A) Variable diameter", "B) Constant diameter", "C) In both situation"] },
-  { id: 18, text: "18. Process flow diagram shows", options: ["A) The flow in which the line is running", "B) The flow of operation in a single machine", "C) All the above"] },
-  { id: 19, text: "19. POKOYOKE is used to prevent", options: ["A) Misloading of component", "B) For easy loading of component", "C) For easy handling of component"] },
-  { id: 20, text: "20. KAIZEN means", options: ["A) Continual improvement", "B) Small Improvement", "C) No Improvement"] }
-];
-
 const getTodayISODate = () => {
   const today = new Date();
   const year = today.getFullYear();
@@ -51,6 +28,9 @@ export default function CompetencyExamVtlHtl() {
   const navigate = useNavigate();
   const { lineSet, setLineSet } = useLineSet();
 
+  const [questions, setQuestions] = useState([]);
+  const [loadingQuestions, setLoadingQuestions] = useState(true);
+
   const [headerInfo, setHeaderInfo] = useState({
     employeeNo: "",
     employeeName: "",
@@ -72,6 +52,26 @@ export default function CompetencyExamVtlHtl() {
     setToast({ message, type });
     setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
+
+  // Fetch Questions Dynamically
+  useEffect(() => {
+    const fetchQuestions = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/competency-exam/questions`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error("Failed to fetch questions");
+        const data = await res.json();
+        setQuestions(data);
+      } catch (err) {
+        triggerToast("Failed to load exam questions.", "error");
+      } finally {
+        setLoadingQuestions(false);
+      }
+    };
+    fetchQuestions();
+  }, []);
 
   useEffect(() => {
     if (lineSet && lineSet.lineCode) {
@@ -208,7 +208,7 @@ export default function CompetencyExamVtlHtl() {
     }
 
     if (Object.keys(answers).length < questions.length) {
-      triggerToast("Please answer all 20 questions before submitting.", "error");
+      triggerToast("Please answer all questions before submitting.", "error");
       return;
     }
 
@@ -272,7 +272,7 @@ export default function CompetencyExamVtlHtl() {
               <span>|</span>
               <span>Time: 1 Hour</span>
               <span>|</span>
-              <span>Each Question: 5 Marks</span>
+              <span>Total Questions: {questions.length}</span>
             </div>
           </div>
           <button
@@ -349,34 +349,40 @@ export default function CompetencyExamVtlHtl() {
 
         {/* Questions Block */}
         <div className="space-y-4">
-          {questions.map((q) => (
-            <div key={q.id} className="p-4 border border-gray-300 rounded-lg bg-white shadow-sm">
-              <p className="font-bold text-gray-800 text-sm mb-3">{q.text}</p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {q.options.map((opt, idx) => {
-                  const optionKey = String.fromCharCode(65 + idx);
-                  return (
-                    <label
-                      key={idx}
-                      className={`flex items-center gap-2 p-2 border rounded cursor-pointer text-xs font-semibold ${
-                        answers[q.id] === optionKey ? 'border-orange-500 bg-orange-50' : 'border-gray-200'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`question-${q.id}`}
-                        value={optionKey}
-                        checked={answers[q.id] === optionKey}
-                        onChange={() => handleOptionChange(q.id, optionKey)}
-                        className="text-orange-500 focus:ring-orange-400"
-                      />
-                      <span>{opt}</span>
-                    </label>
-                  );
-                })}
+          {loadingQuestions ? (
+            <p className="text-gray-500 italic py-6 text-center">Loading exam questions...</p>
+          ) : questions.length === 0 ? (
+            <p className="text-gray-500 italic py-6 text-center">No questions configured yet by HOD.</p>
+          ) : (
+            questions.map((q, index) => (
+              <div key={q.id} className="p-4 border border-gray-300 rounded-lg bg-white shadow-sm">
+                <p className="font-bold text-gray-800 text-sm mb-3">{index + 1}. {q.text}</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {q.options.map((opt, idx) => {
+                    const optionKey = String.fromCharCode(65 + idx);
+                    return (
+                      <label
+                        key={idx}
+                        className={`flex items-center gap-2 p-2 border rounded cursor-pointer text-xs font-semibold ${
+                          answers[q.id] === optionKey ? 'border-orange-500 bg-orange-50' : 'border-gray-200'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name={`question-${q.id}`}
+                          value={optionKey}
+                          checked={answers[q.id] === optionKey}
+                          onChange={() => handleOptionChange(q.id, optionKey)}
+                          className="text-orange-500 focus:ring-orange-400"
+                        />
+                        <span>{opt}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
         {/* Bottom Footer Section */}
@@ -394,7 +400,7 @@ export default function CompetencyExamVtlHtl() {
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold uppercase tracking-wide text-sm shadow"
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold uppercase tracking-wide text-sm shadow cursor-pointer"
           >
             {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & CONTINUE"}
           </button>

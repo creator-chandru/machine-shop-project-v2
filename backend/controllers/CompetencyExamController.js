@@ -1,12 +1,6 @@
 const sql = require('../db');
 const PDFDocument = require("pdfkit");
 
-// Master Answer Key for Scoring (5 Marks per correct answer)
-const answerKey = {
-    1: 'A', 2: 'B', 3: 'A', 4: 'C', 5: 'A', 6: 'A', 7: 'A', 8: 'A', 9: 'A', 10: 'A',
-    11: 'A', 12: 'A', 13: 'A', 14: 'A', 15: 'C', 16: 'A', 17: 'A', 18: 'C', 19: 'A', 20: 'A'
-};
-
 // ============================================================
 // 1. GET ALL LINE CODES FOR DROPDOWN
 // ============================================================
@@ -32,7 +26,77 @@ const getAllLines = async (req, res) => {
 };
 
 // ============================================================
-// 2. SAVE OR UPDATE EXAM RESPONSE
+// 2. GET DYNAMIC COMPETENCY QUESTIONS
+// ============================================================
+const getCompetencyQuestions = async (req, res) => {
+    try {
+        const request = new sql.Request();
+        const result = await request.query(`
+            SELECT id, questionText, optionsJson, correctAnswer 
+            FROM CompetencyExamQuestions 
+            ORDER BY id ASC
+        `);
+
+        const questions = result.recordset.map(row => ({
+            id: row.id,
+            text: row.questionText,
+            options: JSON.parse(row.optionsJson || '[]'),
+            correctAnswer: row.correctAnswer
+        }));
+
+        return res.status(200).json(questions);
+    } catch (err) {
+        console.error("Fetch questions error:", err);
+        return res.status(500).json({ error: 'Failed to fetch competency questions' });
+    }
+};
+
+// ============================================================
+// 3. ADD DYNAMIC COMPETENCY QUESTION (HOD)
+// ============================================================
+const addCompetencyQuestion = async (req, res) => {
+    const { questionText, options, correctAnswer } = req.body;
+    if (!questionText || !options || !correctAnswer) {
+        return res.status(400).json({ error: 'Missing question fields' });
+    }
+
+    try {
+        const request = new sql.Request();
+        request.input('questionText', sql.NVarChar(sql.MAX), questionText)
+            .input('optionsJson', sql.NVarChar(sql.MAX), JSON.stringify(options))
+            .input('correctAnswer', sql.VarChar(10), correctAnswer);
+
+        await request.query(`
+            INSERT INTO CompetencyExamQuestions (questionText, optionsJson, correctAnswer)
+            VALUES (@questionText, @optionsJson, @correctAnswer)
+        `);
+
+        return res.status(200).json({ message: 'Question added successfully' });
+    } catch (err) {
+        console.error("Add question error:", err);
+        return res.status(500).json({ error: 'Failed to add question' });
+    }
+};
+
+// ============================================================
+// 4. DELETE COMPETENCY QUESTION (HOD)
+// ============================================================
+const deleteCompetencyQuestion = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const request = new sql.Request();
+        request.input('id', sql.Int, id);
+        await request.query(`DELETE FROM CompetencyExamQuestions WHERE id = @id`);
+
+        return res.status(200).json({ message: 'Question deleted successfully' });
+    } catch (err) {
+        console.error("Delete question error:", err);
+        return res.status(500).json({ error: 'Failed to delete question' });
+    }
+};
+
+// ============================================================
+// 5. SAVE OR UPDATE EXAM RESPONSE (Dynamic Score Calculation)
 // ============================================================
 const saveCompetencyExam = async (req, res) => {
     const { header, answers } = req.body;
@@ -43,17 +107,28 @@ const saveCompetencyExam = async (req, res) => {
     }
 
     try {
+        // Fetch active questions & answer key dynamically from DB
+        const request = new sql.Request();
+        const qResult = await request.query(`SELECT id, correctAnswer FROM CompetencyExamQuestions`);
+        const answerKey = {};
+        qResult.recordset.forEach(row => {
+            answerKey[row.id] = row.correctAnswer;
+        });
+
+        const totalQuestions = qResult.recordset.length;
+        const marksPerQ = totalQuestions > 0 ? Math.round(100 / totalQuestions) : 5;
+
         let calculatedScore = 0;
         Object.keys(answers || {}).forEach((qId) => {
             if (answers[qId] === answerKey[qId]) {
-                calculatedScore += 5;
+                calculatedScore += marksPerQ;
             }
         });
 
         const cleanDate = String(header.examDate).split('T')[0];
 
-        const request = new sql.Request();
-        request.input('employeeNo', sql.NVarChar(50), header.employeeNo)
+        const saveReq = new sql.Request();
+        saveReq.input('employeeNo', sql.NVarChar(50), header.employeeNo)
             .input('employeeName', sql.NVarChar(100), header.employeeName || '')
             .input('line', sql.NVarChar(50), lineValue)
             .input('doj', sql.Date, header.doj || null)
@@ -69,10 +144,10 @@ const saveCompetencyExam = async (req, res) => {
               AND line = @line 
               AND CONVERT(date, examDate) = CONVERT(date, @examDate)
         `;
-        const existing = await request.query(checkQuery);
+        const existing = await saveReq.query(checkQuery);
 
         if (existing.recordset.length > 0) {
-            await request.query(`
+            await saveReq.query(`
                 UPDATE CompetencyQualificationExam 
                 SET employeeName = @employeeName, 
                     doj = @doj, 
@@ -85,7 +160,7 @@ const saveCompetencyExam = async (req, res) => {
                   AND CONVERT(date, examDate) = CONVERT(date, @examDate)
             `);
         } else {
-            await request.query(`
+            await saveReq.query(`
                 INSERT INTO CompetencyQualificationExam 
                 (employeeNo, employeeName, line, doj, examDate, qualification, answers, score, evaluatedBy)
                 VALUES 
@@ -101,7 +176,7 @@ const saveCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 3. FETCH SAVED EXAM DATA
+// 6. FETCH SAVED EXAM DATA
 // ============================================================
 const getCompetencyExam = async (req, res) => {
     const employeeNo = req.query.employeeNo;
@@ -150,7 +225,7 @@ const getCompetencyExam = async (req, res) => {
 };
 
 // ============================================================
-// 4. GENERATE STRUCTURED TABLE PDF REPORT
+// 7. GENERATE STRUCTURED TABLE PDF REPORT
 // ============================================================
 const generateCompetencyReport = async (req, res) => {
     try {
@@ -182,6 +257,14 @@ const generateCompetencyReport = async (req, res) => {
 
         const data = result.recordset[0];
         const answers = JSON.parse(data.answers || '{}');
+
+        // Fetch dynamic answer key
+        const qReq = new sql.Request();
+        const qResult = await qReq.query(`SELECT id, correctAnswer FROM CompetencyExamQuestions`);
+        const answerKey = {};
+        qResult.recordset.forEach(row => {
+            answerKey[row.id] = row.correctAnswer;
+        });
 
         const doc = new PDFDocument({ margin: 30, size: "A4" });
         res.setHeader("Content-Type", "application/pdf");
@@ -230,7 +313,6 @@ const generateCompetencyReport = async (req, res) => {
         const rowHeight = 20;
         let currentY = doc.y;
 
-        // Draw Table Header Row
         doc.fillColor("#000000").font("Helvetica-Bold").fontSize(9);
         doc.rect(startX, currentY, 535, rowHeight).fill("#E2E8F0").stroke();
         
@@ -244,44 +326,41 @@ const generateCompetencyReport = async (req, res) => {
 
         // --- TABLE DATA ROWS ---
         doc.font("Helvetica").fontSize(9);
-        for (let i = 1; i <= 20; i++) {
+        const questionIds = Object.keys(answerKey);
+        for (let idx = 0; idx < questionIds.length; idx++) {
+            const qId = questionIds[idx];
             if (currentY > 750) { 
                 doc.addPage();
                 currentY = 40;
             }
 
-            const selectedOpt = answers[i] || "Unanswered";
-            const correctOpt = answerKey[i];
+            const selectedOpt = answers[qId] || "Unanswered";
+            const correctOpt = answerKey[qId];
             const isCorrect = selectedOpt === correctOpt;
 
-            // Alternating row background for clean structure
-            const rowBg = i % 2 === 0 ? "#F8FAFC" : "#FFFFFF";
+            const rowBg = idx % 2 === 0 ? "#F8FAFC" : "#FFFFFF";
             doc.rect(startX, currentY, 535, rowHeight).fill(rowBg).strokeColor("#CBD5E1").lineWidth(0.5).stroke();
 
-            // Text columns
             doc.fillColor("#000000").font("Helvetica-Bold");
-            doc.text(`Q${i}`, startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
+            doc.text(`Q${idx + 1}`, startX + 10, currentY + 6, { width: colWidths[0], align: "left" });
 
             doc.font("Helvetica");
             doc.text(`Option ${selectedOpt}`, startX + colWidths[0], currentY + 6, { width: colWidths[1], align: "center" });
 
             if (isCorrect) {
-                // Correct: Green status text
                 doc.fillColor("#16A34A").font("Helvetica-Bold");
                 doc.text("✓ Correct", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
 
                 doc.fillColor("#334155").font("Helvetica");
                 doc.text(`Option ${correctOpt}`, startX + colWidths[0] + colWidths[1] + colWidths[2], currentY + 6, { width: colWidths[3], align: "center" });
             } else {
-                // Incorrect: Red status text
                 doc.fillColor("#DC2626").font("Helvetica-Bold");
                 doc.text("X Incorrect", startX + colWidths[0] + colWidths[1], currentY + 6, { width: colWidths[2], align: "center" });
 
-                // Correct Answer highlighted with Yellow background box indicator
                 doc.save();
                 const badgeX = startX + colWidths[0] + colWidths[1] + colWidths[2] + 45;
                 const badgeY = currentY + 3;
-                doc.roundedRect(badgeX, badgeY, 95, 14, 3).fill("#FEF08A").stroke(); // Yellow / Amber highlight box
+                doc.roundedRect(badgeX, badgeY, 95, 14, 3).fill("#FEF08A").stroke();
                 doc.fillColor("#854D0E").font("Helvetica-Bold");
                 doc.text(`Option ${correctOpt}`, badgeX, badgeY + 3, { width: 95, align: "center" });
                 doc.restore();
@@ -301,6 +380,9 @@ const generateCompetencyReport = async (req, res) => {
 
 module.exports = {
     getAllLines,
+    getCompetencyQuestions,
+    addCompetencyQuestion,
+    deleteCompetencyQuestion,
     saveCompetencyExam,
     getCompetencyExam,
     generateCompetencyReport

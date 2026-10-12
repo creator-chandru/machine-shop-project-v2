@@ -23,6 +23,13 @@ const Hod = () => {
   const [qfSettings, setQfSettings] = useState([]);
   const [savingId, setSavingId] = useState(null);
 
+  // ✅ Competency Exam Manager States
+  const [isCompetencyManagerOpen, setIsCompetencyManagerOpen] = useState(false);
+  const [examQuestions, setExamQuestions] = useState([]);
+  const [newQuestionText, setNewQuestionText] = useState("");
+  const [newOptions, setNewOptions] = useState(["", "", ""]);
+  const [newCorrectAnswer, setNewCorrectAnswer] = useState("A");
+
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentHOD = currentUser.username || currentUser.employeeId || "HOD";
 
@@ -81,6 +88,78 @@ const Hod = () => {
       toast.error("Failed to save QF value.");
     }
     setSavingId(null);
+  };
+
+  // ✅ Fetch Competency Exam Questions
+  const fetchCompetencyQuestions = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/competency-exam/questions`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setExamQuestions(data);
+      }
+    } catch (err) {
+      toast.error("Failed to load competency exam questions.");
+    }
+  };
+
+  const handleAddCompetencyQuestion = async (e) => {
+    e.preventDefault();
+    if (!newQuestionText.trim() || newOptions.some(opt => !opt.trim())) {
+      toast.error("Please fill in the question and all options.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/competency-exam/questions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          questionText: newQuestionText,
+          options: newOptions,
+          correctAnswer: newCorrectAnswer
+        })
+      });
+
+      if (res.ok) {
+        toast.success("Question added successfully!");
+        setNewQuestionText("");
+        setNewOptions(["", "", ""]);
+        setNewCorrectAnswer("A");
+        fetchCompetencyQuestions();
+      } else {
+        toast.error("Failed to add question.");
+      }
+    } catch (err) {
+      toast.error("Failed to add question.");
+    }
+  };
+
+  const handleDeleteCompetencyQuestion = async (id) => {
+    if (!window.confirm("Are you sure you want to remove this question?")) return;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/competency-exam/questions/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        toast.success("Question removed successfully!");
+        fetchCompetencyQuestions();
+      } else {
+        toast.error("Failed to remove question.");
+      }
+    } catch (err) {
+      toast.error("Failed to remove question.");
+    }
   };
 
   useEffect(() => {
@@ -210,6 +289,18 @@ const Hod = () => {
               Set Job Verification Set Up
             </button>
 
+            {/* ✅ COMPETENCY EXAM QUESTION MANAGER BUTTON */}
+            <button
+              onClick={() => {
+                fetchCompetencyQuestions();
+                setIsCompetencyManagerOpen(true);
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer bg-gray-100 text-gray-700 hover:bg-gray-200"
+            >
+              <BookOpen className="w-4 h-4" />
+              Manage Competency Exam
+            </button>
+
             {/* ✅ QF MANAGER BUTTON */}
             <button
               onClick={() => {
@@ -303,6 +394,110 @@ const Hod = () => {
         onClose={() => setIsAddPartSetOpen(false)}
         defaultShopId={shopId || "3"}
       />
+
+      {/* ✅ COMPETENCY EXAM QUESTION MANAGER MODAL */}
+      {isCompetencyManagerOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#383838] border border-[#4a4a4a] w-full max-w-4xl rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-gradient-to-r from-indigo-600 to-[#ff9100] px-6 py-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-black/20 p-2.5 rounded-lg shadow-inner">
+                  <BookOpen size={22} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-white uppercase tracking-widest leading-tight">
+                    Manage Competency Exam Questions
+                  </h2>
+                </div>
+              </div>
+              <button onClick={() => setIsCompetencyManagerOpen(false)} className="text-white/70 hover:text-white bg-black/20 p-1.5 rounded-lg transition-colors cursor-pointer">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto bg-[#2d2d2d] flex-1 space-y-6">
+              {/* Add New Question Form */}
+              <form onSubmit={handleAddCompetencyQuestion} className="bg-[#222] p-5 rounded-xl border border-[#4a4a4a] space-y-4">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Add New Question</h3>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1">Question Text</label>
+                  <input
+                    type="text"
+                    value={newQuestionText}
+                    onChange={(e) => setNewQuestionText(e.target.value)}
+                    placeholder="Enter question..."
+                    className="w-full bg-[#1a1a1a] border border-[#4a4a4a] p-3 rounded-xl text-gray-200 text-sm focus:outline-none focus:border-[#ff9100]"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {newOptions.map((opt, idx) => (
+                    <div key={idx}>
+                      <label className="block text-xs font-bold text-gray-400 mb-1">Option {String.fromCharCode(65 + idx)}</label>
+                      <input
+                        type="text"
+                        value={opt}
+                        onChange={(e) => {
+                          const updated = [...newOptions];
+                          updated[idx] = e.target.value;
+                          setNewOptions(updated);
+                        }}
+                        placeholder={`Option ${String.fromCharCode(65 + idx)} text`}
+                        className="w-full bg-[#1a1a1a] border border-[#4a4a4a] p-2.5 rounded-xl text-gray-200 text-xs focus:outline-none focus:border-[#ff9100]"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between items-center pt-2">
+                  <div className="w-1/3">
+                    <label className="block text-xs font-bold text-gray-400 mb-1">Correct Answer Key</label>
+                    <select
+                      value={newCorrectAnswer}
+                      onChange={(e) => setNewCorrectAnswer(e.target.value)}
+                      className="w-full bg-[#1a1a1a] border border-[#4a4a4a] p-2.5 rounded-xl text-gray-200 text-xs focus:outline-none focus:border-[#ff9100]"
+                    >
+                      <option value="A">Option A</option>
+                      <option value="B">Option B</option>
+                      <option value="C">Option C</option>
+                    </select>
+                  </div>
+                  <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider px-6 py-3 rounded-xl transition-all shadow-md cursor-pointer mt-5">
+                    Add Question
+                  </button>
+                </div>
+              </form>
+
+              {/* Existing Questions List */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Existing Questions ({examQuestions.length})</h3>
+                {examQuestions.length === 0 ? (
+                  <p className="text-center text-gray-500 py-6 font-medium">No questions added yet.</p>
+                ) : (
+                  examQuestions.map((q, idx) => (
+                    <div key={q.id} className="bg-[#222] p-4 rounded-xl border border-[#4a4a4a] flex justify-between items-start gap-4">
+                      <div>
+                        <p className="font-bold text-white text-sm">Q{idx + 1}. {q.text}</p>
+                        <div className="text-xs text-gray-400 mt-1 flex flex-wrap gap-3">
+                          {q.options.map((opt, oIdx) => (
+                            <span key={oIdx} className={String.fromCharCode(65 + oIdx) === q.correctAnswer ? "text-green-400 font-bold" : ""}>
+                              {String.fromCharCode(65 + oIdx)}: {opt}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteCompetencyQuestion(q.id)}
+                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ✅ IN-COMPONENT QF MANAGER MODAL */}
       {isQfManagerOpen && (

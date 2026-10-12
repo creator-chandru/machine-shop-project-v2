@@ -46,6 +46,16 @@ const saveCompetencyEvaluationForm = async (req, res) => {
     });
   }
 
+  // Server-side limit check: marks can never exceed 100% (Written: 100, Practical: 40)
+  const wMark = overallMark?.writtenExamMark;
+  const pMark = overallMark?.practicalExamMark;
+  if (wMark !== null && wMark !== undefined && wMark !== '' && (Number(wMark) < 0 || Number(wMark) > 100)) {
+    return res.status(400).json({ error: 'Written exam mark must be between 0 and 100.' });
+  }
+  if (pMark !== null && pMark !== undefined && pMark !== '' && (Number(pMark) < 0 || Number(pMark) > 40)) {
+    return res.status(400).json({ error: 'Practical exam mark must be between 0 and 40.' });
+  }
+
   let transaction;
 
   try {
@@ -408,6 +418,44 @@ const generateReport = async (req, res) => {
 
     const startX = 25;
     const pageWidth = doc.page.width - 50; // ~545pt
+    const logoPath = path.join(__dirname, 'logo.jpg');
+
+    // ---- Vector mark helpers (Helvetica has no tick / cross glyphs) ----
+    const drawCheckMark = (centerX, centerY, size = 10, color = '#16a34a') => {
+      doc.save()
+        .lineWidth(1.5)
+        .strokeColor(color)
+        .moveTo(centerX - size * 0.45, centerY)
+        .lineTo(centerX - size * 0.1, centerY + size * 0.4)
+        .lineTo(centerX + size * 0.45, centerY - size * 0.35)
+        .stroke()
+        .restore();
+    };
+
+    const drawCrossMark = (centerX, centerY, size = 9, color = '#dc2626') => {
+      const half = size / 2;
+      doc.save()
+        .lineWidth(1.5)
+        .strokeColor(color)
+        .moveTo(centerX - half, centerY - half)
+        .lineTo(centerX + half, centerY + half)
+        .moveTo(centerX + half, centerY - half)
+        .lineTo(centerX - half, centerY + half)
+        .stroke()
+        .restore();
+    };
+
+    // Green vector tick + "APPROVED BY: NAME", centered in a box
+    const drawApprovedText = (x, y, w, name, fontSize) => {
+      const label = `APPROVED BY: ${String(name).toUpperCase()}`;
+      doc.font('Helvetica-Bold').fontSize(fontSize);
+      const tw = doc.widthOfString(label);
+      const iconW = 12;
+      const startTextX = x + (w - (tw + iconW)) / 2 + iconW;
+      drawCheckMark(startTextX - 7, y + fontSize / 2, 7);
+      doc.fillColor('#16a34a').text(label, startTextX, y, { lineBreak: false });
+      doc.fillColor('black');
+    };
 
     groups.forEach((groupRecords, gIdx) => {
       const first = groupRecords[0];
@@ -427,10 +475,19 @@ const generateReport = async (req, res) => {
       // Header Box
       doc.lineWidth(1).strokeColor('black').rect(startX, currY, pageWidth, 50).stroke();
 
-      // Company Name Column (width: 140)
-      doc.font('Helvetica-Bold').fontSize(8).fillColor('black');
-      doc.text('SAKTHI AUTO COMPONENT\nLIMITED', startX + 5, currY + 16, { width: 130, align: 'center' });
-      doc.lineCap('butt').moveTo(startX + 140, currY).lineTo(startX + 140, currY + 50).stroke();
+      // Company Logo Column (width: 140, height: 50)
+      const logoBoxWidth = 140;
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, startX + 5, currY + 5, {
+          fit: [logoBoxWidth - 10, 40],
+          align: 'center',
+          valign: 'center'
+        });
+      } else {
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('black');
+        doc.text('SAKTHI AUTO COMPONENT\nLIMITED', startX + 5, currY + 16, { width: logoBoxWidth - 10, align: 'center' });
+      }
+      doc.lineCap('butt').moveTo(startX + logoBoxWidth, currY).lineTo(startX + logoBoxWidth, currY + 50).stroke();
 
       // Title & Subtitle Column (width: 290)
       doc.font('Helvetica-Bold').fontSize(11).text('COMPETENCY EVALUATION FORM', startX + 140, currY + 12, { width: 290, align: 'center' });
@@ -511,29 +568,35 @@ const generateReport = async (req, res) => {
       const rowHeight = 26;
 
       groupRecords.forEach((q) => {
+        const isFail = q.rating === 'FAIL';
         const isOk = q.rating === 'OK' || q.mark === 2;
         const isPartial = q.rating === 'PARTIAL' || q.mark === 1;
-        const isNotOk = q.rating === 'NOT OK' || q.rating === 'FAIL' || q.mark === 0;
+        const isNotOk = q.rating === 'NOT OK' || (q.mark === 0 && !isFail);
 
         // Border SNo
         doc.rect(startX, currY, colSNo, rowHeight).stroke();
-        doc.font('Helvetica-Bold').text(String(q.qNo), startX, currY + 9, { width: colSNo, align: 'center' });
+        doc.font('Helvetica-Bold').fontSize(6.5).text(String(q.qNo), startX, currY + 9, { width: colSNo, align: 'center' });
 
         // Border Question
         doc.rect(startX + colSNo, currY, colQ, rowHeight).stroke();
-        doc.font('Helvetica').text(q.questionText || '', startX + colSNo + 6, currY + 6, { width: colQ - 12 });
+        doc.font('Helvetica').fontSize(6.5).text(q.questionText || '', startX + colSNo + 6, currY + 6, { width: colQ - 12 });
+
+        const markCenterY = currY + rowHeight / 2;
 
         // Col OK (2)
         doc.rect(marksX, currY, colMarks, rowHeight).stroke();
-        if (isOk) doc.font('Helvetica-Bold').fontSize(10).fillColor('#16a34a').text('✓', marksX, currY + 7, { width: colMarks, align: 'center' }).fillColor('black').fontSize(6.5);
+        if (isOk) drawCheckMark(marksX + colMarks / 2, markCenterY, 10, '#16a34a');
 
         // Col PARTIAL (1)
         doc.rect(marksX + colMarks, currY, colMarks, rowHeight).stroke();
-        if (isPartial) doc.font('Helvetica-Bold').fontSize(10).fillColor('#eab308').text('✓', marksX + colMarks, currY + 7, { width: colMarks, align: 'center' }).fillColor('black').fontSize(6.5);
+        if (isPartial) drawCheckMark(marksX + colMarks * 1.5, markCenterY, 10, '#eab308');
 
         // Col NOT OK (0)
         doc.rect(marksX + colMarks * 2, currY, colMarks, rowHeight).stroke();
-        if (isNotOk) doc.font('Helvetica-Bold').fontSize(10).fillColor('#dc2626').text('✓', marksX + colMarks * 2, currY + 7, { width: colMarks, align: 'center' }).fillColor('black').fontSize(6.5);
+        if (isNotOk) drawCheckMark(marksX + colMarks * 2.5, markCenterY, 10, '#dc2626');
+        if (isFail) drawCrossMark(marksX + colMarks * 2.5, markCenterY, 9, '#dc2626');
+
+        doc.fillColor('black');
 
         currY += rowHeight;
       });
@@ -544,8 +607,8 @@ const generateReport = async (req, res) => {
 
       doc.font('Helvetica-Bold').fontSize(6.5).fillColor('black');
       doc.text('Note:- 1) NOT OK & PARTIAL SHOULD BE TAKEN TO RETRAINING', startX + 6, currY + 8);
-      doc.text('           2) PRODUCTION TARGET ACHIEVED SHOULD BE 85%', startX + 6, currY + 18);
-      doc.text('           3) QUALITY LEVEL 90% ABOVE SHOULD BE PASSED TO LEVEL-3', startX + 6, currY + 28);
+      doc.text('       2) PRODUCTION TARGET ACHIEVED SHOULD BE 85%', startX + 6, currY + 18);
+      doc.text('       3) QUALITY LEVEL 90% ABOVE SHOULD BE PASSED TO LEVEL-3', startX + 6, currY + 28);
 
       // Single Signature: INCHARGE SIGN (EVALUATED BY)
       const sigBoxW = 160;
@@ -555,7 +618,7 @@ const generateReport = async (req, res) => {
 
       const inchargeApproved = first.inchargeSign && !String(first.inchargeSign).toLowerCase().includes('pending');
       if (inchargeApproved) {
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7.5).text(`✓ APPROVED BY: ${String(first.inchargeSign).toUpperCase()}`, sigBoxX, currY + 28, { width: sigBoxW, align: 'center' }).fillColor('black');
+        drawApprovedText(sigBoxX, currY + 28, sigBoxW, first.inchargeSign, 7.5);
       } else {
         doc.fillColor('red').font('Helvetica').fontSize(7.5).text('Pending Shift Incharge', sigBoxX, currY + 28, { width: sigBoxW, align: 'center' }).fillColor('black');
       }
@@ -701,7 +764,7 @@ const generateReport = async (req, res) => {
       doc.rect(startX, page2Y, sigColW, 55).stroke();
       doc.font('Helvetica-Bold').fontSize(8).text('INCHARGE SIGN (EVALUATED BY)', startX, page2Y + 8, { width: sigColW, align: 'center' });
       if (inchargeApproved) {
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`✓ APPROVED BY: ${String(first.inchargeSign).toUpperCase()}`, startX, page2Y + 30, { width: sigColW, align: 'center' }).fillColor('black');
+        drawApprovedText(startX, page2Y + 30, sigColW, first.inchargeSign, 8);
       } else {
         doc.fillColor('red').font('Helvetica').fontSize(8).text('Pending Shift Incharge', startX, page2Y + 30, { width: sigColW, align: 'center' }).fillColor('black');
       }
@@ -711,7 +774,7 @@ const generateReport = async (req, res) => {
       doc.font('Helvetica-Bold').fontSize(8).text('HOD SIGN', startX + sigColW, page2Y + 8, { width: sigColW, align: 'center' });
       const hodApproved = first.hodSign && !String(first.hodSign).toLowerCase().includes('pending');
       if (hodApproved) {
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`✓ APPROVED BY: ${String(first.hodSign).toUpperCase()}`, startX + sigColW, page2Y + 30, { width: sigColW, align: 'center' }).fillColor('black');
+        drawApprovedText(startX + sigColW, page2Y + 30, sigColW, first.hodSign, 8);
       } else {
         const assignedTxt = first.evaluatedBy ? `(Assigned: ${first.evaluatedBy.toUpperCase()})` : '';
         doc.fillColor('red').font('Helvetica').fontSize(8).text(`Pending ${assignedTxt}`, startX + sigColW, page2Y + 30, { width: sigColW, align: 'center' }).fillColor('black');

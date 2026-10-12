@@ -196,6 +196,26 @@ export default function CompetencyEvaluationForm() {
     });
   };
 
+  // Marks entry: whole numbers only, never above the maximum (100%)
+  const handleMarkChange = (setter, max, label) => (e) => {
+    const raw = e.target.value;
+    if (raw === "") {
+      setter("");
+      return;
+    }
+    const num = Number(raw);
+    if (isNaN(num) || num < 0) return;
+    if (num > max) {
+      triggerToast(`${label} cannot exceed ${max} (100%).`, "error");
+      return;
+    }
+    setter(String(Math.floor(num)));
+  };
+
+  const blockInvalidMarkKeys = (e) => {
+    if (["e", "E", "+", "-", "."].includes(e.key)) e.preventDefault();
+  };
+
   // Percentages calculated from manually entered marks
   const writtenPercentage =
     writtenExamMark !== "" && !isNaN(writtenExamMark)
@@ -294,6 +314,15 @@ export default function CompetencyEvaluationForm() {
   const handleSave = async () => {
     if (!headerInfo.name.trim() || !headerInfo.employeeNo.trim()) {
       triggerToast("Please fill Employee Name and Employee No before submitting.", "error");
+      return;
+    }
+
+    if (writtenExamMark !== "" && (Number(writtenExamMark) < 0 || Number(writtenExamMark) > 100)) {
+      triggerToast("Written exam mark must be between 0 and 100.", "error");
+      return;
+    }
+    if (practicalExamMark !== "" && (Number(practicalExamMark) < 0 || Number(practicalExamMark) > 40)) {
+      triggerToast("Practical exam mark must be between 0 and 40.", "error");
       return;
     }
 
@@ -932,7 +961,8 @@ export default function CompetencyEvaluationForm() {
                         placeholder="e.g. 85 (out of 100)"
                         className="w-full h-full text-center p-2 outline-none font-bold bg-transparent disabled:bg-gray-50"
                         value={writtenExamMark}
-                        onChange={(e) => setWrittenExamMark(e.target.value)}
+                        onChange={handleMarkChange(setWrittenExamMark, 100, "Written exam mark")}
+                        onKeyDown={blockInvalidMarkKeys}
                       />
                     </td>
                     <td className="p-2 text-center font-extrabold text-gray-800 bg-gray-50">
@@ -953,7 +983,8 @@ export default function CompetencyEvaluationForm() {
                         placeholder="e.g. 36 (out of 40)"
                         className="w-full h-full text-center p-2 outline-none font-bold bg-transparent disabled:bg-gray-50"
                         value={practicalExamMark}
-                        onChange={(e) => setPracticalExamMark(e.target.value)}
+                        onChange={handleMarkChange(setPracticalExamMark, 40, "Practical exam mark")}
+                        onKeyDown={blockInvalidMarkKeys}
                       />
                     </td>
                     <td className="p-2 text-center font-extrabold text-gray-800 bg-gray-50">

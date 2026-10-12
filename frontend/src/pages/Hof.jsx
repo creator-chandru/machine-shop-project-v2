@@ -69,7 +69,7 @@ const Hof = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-pending/hof/${encodeURIComponent(currentHOF)}`,
+        `${process.env.REACT_APP_API_URL}/api/significant-event-pending/hof/${encodeURIComponent(currentHOF)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -85,7 +85,7 @@ const Hof = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/8d-report/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
+        `${process.env.REACT_APP_API_URL}/api/8d-report/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
@@ -104,7 +104,7 @@ const Hof = () => {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
+        `${process.env.REACT_APP_API_URL}/api/job-setup-verification/hof/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {

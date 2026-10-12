@@ -1071,45 +1071,7 @@ export default function Level1MaintenanceChecksheet() {
             />
           </div>
 
-          {/* =====================================================
-              PRODUCT ENGINEER DROPDOWN - NEW
-          ===================================================== */}
 
-          <div>
-            <label className="font-bold text-gray-700 block mb-1 text-sm">
-              Product Engineer
-              <span className="text-red-500 ml-1">
-                *
-              </span>
-            </label>
-
-            <select
-              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
-              value={headerInfo.productEngineer}
-              onChange={(e) =>
-                handleHeaderChange(
-                  "productEngineer",
-                  e.target.value
-                )
-              }
-              disabled={loadingPE || Boolean(signatures.PE?.startsWith("Approved ("))}
-            >
-              <option value="">
-                {loadingPE
-                  ? "Loading Product Engineers..."
-                  : "Select Product Engineer"}
-              </option>
-
-              {productEngineers.map((pe) => (
-                <option
-                  key={pe.id}
-                  value={pe.username}
-                >
-                  {pe.username}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
         {/* =====================================================
@@ -1196,37 +1158,53 @@ export default function Level1MaintenanceChecksheet() {
               )}
 
               {/* SHIFT INCHARGE SIGNATURE */}
-
               <tr>
                 <td
                   colSpan={4}
                   className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700"
                 >
-                  Shift Incharge Signature
-                  (Submit to Product Engineer)
+                  Shift Incharge Signature (Submit to Product Engineer)
                 </td>
-
                 <td className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
                   {signatures["Shift Incharge"] ? (
                     <span className="text-xs font-bold text-green-600">
-                      Approved By:{" "}
-                      {
-                        signatures[
-                          "Shift Incharge"
-                        ]
-                      }
+                      Approved By: {signatures["Shift Incharge"]}
                     </span>
                   ) : (
                     <button
                       type="button"
-                      onClick={
-                        handleApproveShiftIncharge
-                      }
+                      onClick={handleApproveShiftIncharge}
                       className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded shadow cursor-pointer uppercase tracking-wider"
                     >
                       Approve
                     </button>
                   )}
+                </td>
+
+              </tr>
+              {/* PRODUCT ENGINEER - SEPARATE ROW */}
+              <tr>
+                <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                  Product Engineer <span className="text-red-500">*</span>
+                </td>
+                <td className="border border-gray-800 p-2 bg-gray-50/30">
+                  <select
+                    className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                    value={headerInfo.productEngineer}
+                    onChange={(e) =>
+                      handleHeaderChange("productEngineer", e.target.value)
+                    }
+                    disabled={loadingPE || Boolean(signatures.PE?.startsWith("Approved ("))}
+                  >
+                    <option value="">
+                      {loadingPE ? "Loading Product Engineers..." : "Select Product Engineer"}
+                    </option>
+                    {productEngineers.map((pe) => (
+                      <option key={pe.id} value={pe.username}>
+                        {pe.username}
+                      </option>
+                    ))}
+                  </select>
                 </td>
               </tr>
             </tbody>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
-import { FileDown } from 'lucide-react'; // Removed Search icon
+import { FileDown } from 'lucide-react';
 
 const initialFormData = {
   formCode: "QF / 07 / MPD - 15",
@@ -150,7 +150,7 @@ export default function OperatorObservationSheet() {
   const [headerInfo, setHeaderInfo] = useState({
     employeeName: "",
     employeeCode: "",
-    department: "Production",
+    department: "",
     testDate: getTodayISODate(),
     marksPercentage: "",
     method: "Practical & Demo"
@@ -170,7 +170,7 @@ export default function OperatorObservationSheet() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
 
-  // NEW: State for HOF Users
+  // State for HOF Users
   const [hofUsers, setHofUsers] = useState([]);
 
   const triggerToast = (message, type = 'error') => {
@@ -197,12 +197,80 @@ export default function OperatorObservationSheet() {
     setFooterInfo((prev) => ({ ...prev, [field]: val }));
   };
 
-  const handleCellChange = (secIdx, itemIdx, colKey, val) => {
-    setSections((prev) => {
-      const next = JSON.parse(JSON.stringify(prev));
-      next[secIdx].items[itemIdx][colKey] = val;
-      return next;
+  // Helper to calculate totals once all questions are answered
+  // UPDATED: Now adds the points (defaultPoints) instead of just 1 to the column totals
+  const recalculateTotals = (updatedSections) => {
+    let allQuestionsAnswered = true;
+    let totalObtainedMarks = 0;
+    let totalPossibleMarks = 0;
+
+    const computedSections = updatedSections.map((sec) => {
+      let secAnsweredCount = 0;
+      let secMarks = 0;
+      const colTotals = { followed: 0, partiallyFollowed: 0, notFollowed: 0, notAware: 0 };
+
+      sec.items.forEach((item) => {
+        const hasSelection = RATING_COLUMNS.some((col) => item[col.key] && item[col.key] !== "");
+        if (hasSelection) {
+          secAnsweredCount += 1;
+        }
+
+        RATING_COLUMNS.forEach((col) => {
+          if (item[col.key] === "✓") {
+            // Adds points instead of 1 (Followed: 5, Partially Followed: 3, Not Followed: 1, Not Aware: 0)
+            colTotals[col.key] += col.defaultPoints;
+            secMarks += col.defaultPoints;
+          }
+        });
+      });
+
+      const isSecComplete = secAnsweredCount === sec.items.length;
+      if (!isSecComplete) {
+        allQuestionsAnswered = false;
+      }
+
+      totalPossibleMarks += sec.items.length * 5;
+      totalObtainedMarks += secMarks;
+
+      return {
+        ...sec,
+        sectionMarks: isSecComplete ? String(secMarks) : "",
+        columnTotals: {
+          followed: isSecComplete ? String(colTotals.followed) : "",
+          partiallyFollowed: isSecComplete ? String(colTotals.partiallyFollowed) : "",
+          notFollowed: isSecComplete ? String(colTotals.notFollowed) : "",
+          notAware: isSecComplete ? String(colTotals.notAware) : ""
+        }
+      };
     });
+
+    if (allQuestionsAnswered && totalPossibleMarks > 0) {
+      const percentage = ((totalObtainedMarks / totalPossibleMarks) * 100).toFixed(1);
+      setHeaderInfo((prev) => ({ ...prev, marksPercentage: percentage }));
+    }
+
+    return computedSections;
+  };
+
+  // Cell Change: Radio behavior (clears other columns in the same row)
+  const handleCellChange = (secIdx, itemIdx, colKey, val) => {
+    const nextSections = JSON.parse(JSON.stringify(sections));
+    const targetItem = nextSections[secIdx].items[itemIdx];
+
+    // If selecting a new value (✓ or X), clear all other columns in this row first
+    if (val !== "") {
+      RATING_COLUMNS.forEach((col) => {
+        if (col.key !== colKey) {
+          targetItem[col.key] = "";
+        }
+      });
+    }
+
+    targetItem[colKey] = val;
+
+    // Automatically recalculate marks and column totals
+    const updated = recalculateTotals(nextSections);
+    setSections(updated);
   };
 
   const handleSectionMarksChange = (secIdx, val) => {
@@ -221,7 +289,7 @@ export default function OperatorObservationSheet() {
     });
   };
 
-const handleApproveReview = () => {
+  const handleApproveReview = () => {
     setFooterInfo((prev) => ({
       ...prev,
       reviewedBy: loggedInName
@@ -248,24 +316,23 @@ const handleApproveReview = () => {
       operatorFeedback: first.operatorFeedback || ""
     });
 
-    setSections(prev => {
-      const newSections = JSON.parse(JSON.stringify(DEFAULT_SECTIONS));
-      records.forEach(r => {
-        const sec = newSections.find(s => s.id === r.sectionId);
-        if (sec) {
-          const item = sec.items.find(i => i.slNo === r.slNo);
-          if (item && r.rating) {
-            item[r.rating] = "✓";
-          }
+    const newSections = JSON.parse(JSON.stringify(DEFAULT_SECTIONS));
+    records.forEach(r => {
+      const sec = newSections.find(s => s.id === r.sectionId);
+      if (sec) {
+        const item = sec.items.find(i => i.slNo === r.slNo);
+        if (item && r.rating) {
+          item[r.rating] = "✓";
         }
-      });
-      return newSections;
+      }
     });
+
+    const recalculated = recalculateTotals(newSections);
+    setSections(recalculated);
   };
 
-  // --- NEW: AUTO-FETCH Existing Data Logic ---
+  // AUTO-FETCH Existing Data Logic
   useEffect(() => {
-    // Only attempt to fetch if both fields have values
     if (!headerInfo.employeeCode || !headerInfo.testDate) return;
 
     const fetchRecordData = async () => {
@@ -290,7 +357,6 @@ const handleApproveReview = () => {
           } else {
             setIsSavedRecord(false);
             setSections(JSON.parse(JSON.stringify(DEFAULT_SECTIONS)));
-            // Clear specific footer data but leave what the user is currently typing
             setFooterInfo(prev => ({ ...prev, reviewedBy: "", approvedBy: "", operatorFeedback: "" }));
           }
         }
@@ -299,7 +365,6 @@ const handleApproveReview = () => {
       }
     };
 
-    // Debounce the fetch by 600ms so it doesn't query the DB on every single keystroke instantly
     const delayDebounceFn = setTimeout(() => {
       fetchRecordData();
     }, 600);
@@ -307,17 +372,16 @@ const handleApproveReview = () => {
     return () => clearTimeout(delayDebounceFn);
   }, [headerInfo.employeeCode, headerInfo.testDate, shopId]);
 
-// NEW: Fetch HOF users on mount
+  // Fetch HOF users on mount
   useEffect(() => {
     const fetchHofUsers = async () => {
       try {
-        const token = localStorage.getItem('token'); // Get the token
-        
+        const token = localStorage.getItem('token');
         const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/hof`, {
           headers: { 
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
-          } // Add the headers here
+          }
         });
         
         if (res.ok) {
@@ -333,7 +397,7 @@ const handleApproveReview = () => {
     fetchHofUsers();
   }, []);
 
-  // --- Download PDF Logic ---
+  // Download PDF Logic
   const handleDownloadPDF = async () => {
     if (!headerInfo.employeeCode || !headerInfo.testDate) {
       triggerToast("Please enter Employee Code and Test Date to download PDF.", "error");
@@ -380,7 +444,6 @@ const handleApproveReview = () => {
     setIsSaving(true);
     setSaveSuccess(false);
 
-    // Map checkboxes to rating and score for the backend
     const payloadSections = sections.map(sec => {
       const newItems = sec.items.map(item => {
         let rating = '';
@@ -640,7 +703,7 @@ const handleApproveReview = () => {
                       </tr>
                     ))}
 
-                    {/* Manual User Entry for Marks and Column Totals */}
+                    {/* User Entry / Auto Computed Marks and Column Totals */}
                     <tr className="bg-gray-50 font-bold text-xs text-gray-800">
                       <td className="border border-gray-800 px-2 py-1.5 text-center font-bold">
                         Marks :
@@ -677,7 +740,6 @@ const handleApproveReview = () => {
         {/* Footer Remarks / Feedback / Signatures */}
         <div className="mt-6 border-2 border-gray-800 bg-white relative">
           
-
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800 p-3 text-sm font-semibold">
             <div className="flex items-center gap-2">
               <label className="text-gray-700">Date:</label>
@@ -688,7 +750,7 @@ const handleApproveReview = () => {
                 onChange={(e) => handleFooterChange('reviewDate', e.target.value)}
               />
             </div>
-            {/* UPDATED: Reviewed By with Approve Button */}
+            {/* Reviewed By with Approve Button */}
             <div className="flex items-center gap-2 px-2">
               <label className="text-gray-700">Reviewed By:</label>
               {footerInfo.reviewedBy ? (
@@ -708,7 +770,7 @@ const handleApproveReview = () => {
                 </button>
               )}
             </div>
-            {/* UPDATED: Approved By Dropdown with Pending Status Check */}
+            {/* Approved By Dropdown with Pending Status Check */}
             <div className="flex items-center gap-2 px-2">
               <label className="text-gray-700">Approved By:</label>
               {footerInfo.approvedBy && footerInfo.approvedBy.includes('(Verified)') ? (

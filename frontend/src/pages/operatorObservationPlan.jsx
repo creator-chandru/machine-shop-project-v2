@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, FileDown, X } from "lucide-react";
+import { ArrowLeft, FileDown, X, ChevronDown } from "lucide-react";
 import Header from "../components/Header";
 
 const GAP_MONTHS = 6;
@@ -106,6 +106,12 @@ export default function OperatorObservationPlan() {
 
   const [toast, setToast] = useState({ message: "", type: "" });
   const toastTimer = useRef(null);
+  const [employeeOptions, setEmployeeOptions] = useState([]);
+
+  // Emp No Dropdown State
+  const [openDropdownRow, setOpenDropdownRow] = useState(null);
+  const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0 });
+  const dropdownRef = useRef(null);
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -113,9 +119,86 @@ export default function OperatorObservationPlan() {
     toastTimer.current = setTimeout(() => setToast({ message: "", type: "" }), 4000);
   };
 
+  const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
+
   useEffect(() => () => toastTimer.current && clearTimeout(toastTimer.current), []);
 
-  const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpenDropdownRow(null);
+      }
+    };
+    if (openDropdownRow !== null) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [openDropdownRow]);
+
+  // Close dropdown on scroll or resize
+  useEffect(() => {
+    const handleScrollOrResize = () => {
+      if (openDropdownRow !== null) {
+        setOpenDropdownRow(null);
+      }
+    };
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [openDropdownRow]);
+
+  // Load dropdown options (max 10)
+  useEffect(() => {
+    const loadEmployeeOptions = async () => {
+      try {
+        const params = new URLSearchParams({
+          machineShop: String(shopId || 3),
+        });
+
+        const res = await fetch(
+          `${API}/api/operator-observation-plan/employee-options?${params}`,
+          { headers: authHeaders() }
+        );
+
+        if (!res.ok) {
+          throw new Error("Failed to load employee-number options");
+        }
+
+        const data = await res.json();
+        setEmployeeOptions(
+          Array.isArray(data.employeeNumbers) ? data.employeeNumbers : []
+        );
+      } catch (err) {
+        console.error("Employee-number dropdown error:", err);
+      }
+    };
+
+    loadEmployeeOptions();
+  }, [shopId]);
+
+  // Toggle Dropdown Menu
+  const toggleDropdown = (rIdx, buttonEl) => {
+    if (openDropdownRow === rIdx) {
+      setOpenDropdownRow(null);
+    } else {
+      const rect = buttonEl.getBoundingClientRect();
+      const dropdownHeight = Math.min(220, Math.max(60, employeeOptions.length * 36 + 32));
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUpwards = spaceBelow < dropdownHeight && rect.top > dropdownHeight;
+
+      setDropdownCoords({
+        top: openUpwards ? rect.top - dropdownHeight - 2 : rect.bottom + 2,
+        left: Math.max(10, rect.right - 180),
+      });
+      setOpenDropdownRow(rIdx);
+    }
+  };
 
   // ==========================================================
   // EMP NO LOOKUP -> load last 3 saved plans (locked) + next 3 generated
@@ -146,7 +229,7 @@ export default function OperatorObservationPlan() {
 
       setRows((prev) =>
         prev.map((r, i) => {
-          if (i !== rIdx || r.empNo.trim() !== empNo) return r; // stale response
+          if (i !== rIdx) return r;
 
           if (data.found && data.plans.length > 0) {
             const saved = data.plans.slice(-LOADED_COUNT).map((p) => ({
@@ -158,6 +241,7 @@ export default function OperatorObservationPlan() {
             const last = saved[saved.length - 1];
             return {
               ...r,
+              empNo,
               empName: data.empName || "",
               doj: data.doj || "",
               lookedUpEmpNo: empNo,
@@ -169,6 +253,7 @@ export default function OperatorObservationPlan() {
           // New employee: keep typed name/DOJ unless they came from a previous lookup
           return {
             ...r,
+            empNo,
             empName: r.isExisting ? "" : r.empName,
             doj: r.isExisting ? "" : r.doj,
             lookedUpEmpNo: empNo,
@@ -197,6 +282,12 @@ export default function OperatorObservationPlan() {
         return { ...r, [field]: val };
       })
     );
+  };
+
+  const handleSelectEmployeeOption = (rIdx, selectedEmpNo) => {
+    setOpenDropdownRow(null);
+    handleRowField(rIdx, "empNo", selectedEmpNo);
+    lookupEmployee(rIdx, selectedEmpNo);
   };
 
   const handlePlanChange = (rIdx, pIdx, val) => {
@@ -246,6 +337,36 @@ export default function OperatorObservationPlan() {
         return { ...r, plans };
       })
     );
+  };
+
+  const handleRemoveEmployeeOption = async (empNo) => {
+    try {
+      const params = new URLSearchParams({
+        machineShop: String(shopId || 3),
+        empNo,
+      });
+
+      const res = await fetch(
+        `${API}/api/operator-observation-plan/employee-options?${params}`,
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to remove employee number");
+      }
+
+      setEmployeeOptions((prev) =>
+        prev.filter((option) => option.empNo !== empNo)
+      );
+
+      triggerToast("Employee number removed from dropdown.", "success");
+    } catch (err) {
+      console.error("Remove employee-number option error:", err);
+      triggerToast("Failed to remove employee number.", "error");
+    }
   };
 
   const handleAddRow = () => {
@@ -467,6 +588,59 @@ export default function OperatorObservationPlan() {
 
       <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "" })} />
 
+      {/* Dropdown Popup for Saved Emp Nos */}
+      {openDropdownRow !== null && (
+        <div
+          ref={dropdownRef}
+          style={{
+            position: "fixed",
+            top: `${dropdownCoords.top}px`,
+            left: `${dropdownCoords.left}px`,
+            width: "180px",
+            zIndex: 9999,
+          }}
+          className="bg-white border border-gray-300 rounded-lg shadow-2xl py-1 text-left text-xs"
+        >
+          <div className="px-3 py-1 font-bold text-[10px] text-gray-500 uppercase tracking-wider border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-lg">
+            <span>Saved Emp Nos</span>
+            <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-semibold">
+              {employeeOptions.length}/10
+            </span>
+          </div>
+
+          {employeeOptions.length === 0 ? (
+            <div className="px-3 py-3 text-gray-400 italic text-center">
+              No saved employees
+            </div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto divide-y divide-gray-50">
+              {employeeOptions.map((option) => (
+                <div
+                  key={option.id || option.empNo}
+                  className="flex items-center justify-between px-3 py-1.5 hover:bg-orange-50 group cursor-pointer transition-colors"
+                  onClick={() => handleSelectEmployeeOption(openDropdownRow, option.empNo)}
+                >
+                  <span className="font-semibold text-gray-800 group-hover:text-orange-600 truncate">
+                    {option.empNo}
+                  </span>
+                  <button
+                    type="button"
+                    title="Remove from saved"
+                    className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded ml-2 transition-colors cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveEmployeeOption(option.empNo);
+                    }}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* PDF modal (by Emp No) */}
       {showPdfModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -489,10 +663,10 @@ export default function OperatorObservationPlan() {
               <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">Emp No</label>
               <input
                 type="text"
-                className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
                 value={pdfEmpNo}
                 onChange={(e) => setPdfEmpNo(e.target.value)}
                 placeholder="Enter Emp No"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
               />
             </div>
 
@@ -644,20 +818,38 @@ export default function OperatorObservationPlan() {
                         placeholder="Enter name"
                       />
                     </td>
+
+                    {/* Emp No with input & dropdown toggle */}
                     <td className="border border-gray-800 p-0">
-                      <input
-                        type="text"
-                        disabled={isReadOnly}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
-                        value={r.empNo}
-                        onChange={(e) => handleRowField(rIdx, "empNo", e.target.value)}
-                        onBlur={(e) => lookupEmployee(rIdx, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") lookupEmployee(rIdx, e.target.value);
-                        }}
-                        placeholder="Emp No"
-                      />
+                      <div className="flex items-center h-full">
+                        <input
+                          type="text"
+                          disabled={isReadOnly}
+                          className="w-full h-full min-w-0 text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
+                          value={r.empNo}
+                          onChange={(e) => handleRowField(rIdx, "empNo", e.target.value)}
+                          onBlur={(e) => lookupEmployee(rIdx, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              lookupEmployee(rIdx, e.target.value);
+                            }
+                          }}
+                          placeholder="Emp No"
+                        />
+
+                        {!isReadOnly && (
+                          <button
+                            type="button"
+                            title="Saved employee numbers"
+                            onClick={(e) => toggleDropdown(rIdx, e.currentTarget)}
+                            className="w-5 shrink-0 h-full flex items-center justify-center border-l border-gray-200 bg-white text-gray-500 hover:text-orange-600 hover:bg-gray-100 transition-colors cursor-pointer"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
+
                     <td className={`border border-gray-800 p-0 ${r.isExisting ? "bg-gray-50" : ""}`}>
                       <input
                         type="date"

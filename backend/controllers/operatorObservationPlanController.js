@@ -84,11 +84,6 @@ const getEmployeePlans = async (req, res) => {
 
 // ============================================================
 // 2. SAVE OPERATOR OBSERVATION PLAN
-// ------------------------------------------------------------
-// Rules enforced here (not just in the UI):
-//  - a plan slot is inserted once; its date/time is never changed afterwards
-//  - ACTUAL can be set only while it is still blank; once COMPLETED /
-//    NOT COMPLETED is saved it is never changed again
 // ============================================================
 const saveOperatorObservationPlan = async (req, res) => {
   const { machineShop, rows, signature } = req.body;
@@ -176,12 +171,87 @@ const saveOperatorObservationPlan = async (req, res) => {
               WHERE id = @id AND actualStatus IS NULL
             `);
         }
-        // else: already locked -> ignored
       }
     }
 
     await transaction.commit();
-    return res.status(201).json({ message: 'Operator Observation Plan saved successfully' });
+
+    // Remember employee numbers for the dropdown.
+    for (const row of rows) {
+      const empNo = String(row.empNo || '').trim();
+      if (!empNo) continue;
+
+      try {
+        const request = new sql.Request();
+        request.input('machineShop', sql.Int, shop);
+        request.input('empNo', sql.NVarChar(50), empNo);
+
+        await request.query(`
+          IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='OperatorObservationEmployeeOptions' AND xtype='U')
+          BEGIN
+            CREATE TABLE OperatorObservationEmployeeOptions (
+              id INT IDENTITY(1,1) PRIMARY KEY,
+              machineShop INT NOT NULL,
+              empNo NVARCHAR(50) NOT NULL,
+              createdAt DATETIME DEFAULT GETDATE()
+            );
+          END
+
+          IF EXISTS (
+            SELECT 1
+            FROM OperatorObservationEmployeeOptions
+            WHERE machineShop = @machineShop
+              AND empNo = @empNo
+          )
+          BEGIN
+            UPDATE OperatorObservationEmployeeOptions
+            SET createdAt = GETDATE()
+            WHERE machineShop = @machineShop
+              AND empNo = @empNo;
+          END
+          ELSE
+          BEGIN
+            INSERT INTO OperatorObservationEmployeeOptions (
+              machineShop,
+              empNo
+            )
+            VALUES (
+              @machineShop,
+              @empNo
+            );
+          END
+        `);
+      } catch (optionError) {
+        console.error('Failed to update employee-number dropdown:', optionError);
+      }
+    }
+
+    // Keep only the 10 most recently used employee numbers per shop
+    try {
+      const cleanup = new sql.Request();
+      cleanup.input('machineShop', sql.Int, shop);
+
+      await cleanup.query(`
+        ;WITH RankedOptions AS (
+          SELECT
+            id,
+            ROW_NUMBER() OVER (
+              PARTITION BY machineShop
+              ORDER BY createdAt DESC, id DESC
+            ) AS rn
+          FROM OperatorObservationEmployeeOptions
+          WHERE machineShop = @machineShop
+        )
+        DELETE FROM RankedOptions
+        WHERE rn > 10;
+      `);
+    } catch (cleanupError) {
+      console.error('Failed to trim employee-number dropdown:', cleanupError);
+    }
+
+    return res.status(201).json({
+      message: 'Operator Observation Plan saved successfully'
+    });
   } catch (err) {
     console.error('Error saving Operator Observation Plan:', err);
     if (transaction) {
@@ -242,7 +312,6 @@ const generateReport = async (req, res) => {
     const pageBottom = doc.page.height - 20;
     const topMargin = 20;
 
-    // ---- Page header + employee info; returns next Y ----
     const drawPageHeader = () => {
       const headerH = 34;
       doc.lineWidth(0.8).strokeColor('black');
@@ -266,7 +335,6 @@ const generateReport = async (req, res) => {
       doc.font("Helvetica").fontSize(7)
         .text(`EMP NO: ${first.empNo}`, startX + totalWidth - 160, topMargin + 18, { width: 160, align: "center" });
 
-      // Employee info row
       const infoY = topMargin + headerH + 6;
       const infoH = 20;
       const infoW = totalWidth / 3;
@@ -285,7 +353,6 @@ const generateReport = async (req, res) => {
       return infoY + infoH + 8;
     };
 
-    // ---- Table ----
     const headers = ["Plan No", "Plan (Date & Time)", "Actual"];
     const fractions = [0.12, 0.44, 0.44];
     const colWidths = fractions.map((f) => f * totalWidth);
@@ -332,7 +399,6 @@ const generateReport = async (req, res) => {
       y += rowH;
     });
 
-    // ---- Signature ----
     const sig = [...records].reverse().find((r) => r.shiftInchargeSignature)?.shiftInchargeSignature || '';
     const sigY = y + 14;
     const sigW = 220;
@@ -358,8 +424,95 @@ const generateReport = async (req, res) => {
   }
 };
 
+// ============================================================
+// 4. GET SAVED EMPLOYEE-NUMBER OPTIONS (MAXIMUM 10)
+// ============================================================
+const getEmployeeNumberOptions = async (req, res) => {
+  const machineShop = parseInt(req.query.machineShop, 10) || 3;
+
+  try {
+    const request = new sql.Request();
+    request.input('machineShop', sql.Int, machineShop);
+
+    await request.query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='OperatorObservationEmployeeOptions' AND xtype='U')
+      BEGIN
+        CREATE TABLE OperatorObservationEmployeeOptions (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          machineShop INT NOT NULL,
+          empNo NVARCHAR(50) NOT NULL,
+          createdAt DATETIME DEFAULT GETDATE()
+        );
+      END
+    `);
+
+    const result = await request.query(`
+      SELECT TOP 10 id, empNo
+      FROM OperatorObservationEmployeeOptions
+      WHERE machineShop = @machineShop
+      ORDER BY createdAt DESC, id DESC
+    `);
+
+    return res.status(200).json({
+      employeeNumbers: result.recordset
+    });
+  } catch (err) {
+    console.error('Error fetching employee-number options:', err);
+    return res.status(500).json({
+      error: 'Failed to fetch employee-number options'
+    });
+  }
+};
+
+// ============================================================
+// 5. REMOVE AN EMPLOYEE-NUMBER OPTION
+// ============================================================
+const removeEmployeeNumberOption = async (req, res) => {
+  const machineShop = parseInt(req.query.machineShop, 10) || 3;
+  const empNo = String(req.query.empNo || '').trim();
+
+  if (!empNo) {
+    return res.status(400).json({
+      error: 'empNo is required'
+    });
+  }
+
+  try {
+    const request = new sql.Request();
+    request.input('machineShop', sql.Int, machineShop);
+    request.input('empNo', sql.NVarChar(50), empNo);
+
+    await request.query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='OperatorObservationEmployeeOptions' AND xtype='U')
+      BEGIN
+        CREATE TABLE OperatorObservationEmployeeOptions (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          machineShop INT NOT NULL,
+          empNo NVARCHAR(50) NOT NULL,
+          createdAt DATETIME DEFAULT GETDATE()
+        );
+      END
+
+      DELETE FROM OperatorObservationEmployeeOptions
+      WHERE machineShop = @machineShop
+        AND empNo = @empNo
+    `);
+
+    return res.status(200).json({
+      message: 'Employee-number option removed successfully'
+    });
+  } catch (err) {
+    console.error('Error removing employee-number option:', err);
+    return res.status(500).json({
+      error: 'Failed to remove employee-number option'
+    });
+  }
+};
+
 module.exports = {
   getEmployeePlans,
   saveOperatorObservationPlan,
-  generateReport
+  generateReport,
+  getEmployeeNumberOptions,
+  removeEmployeeNumberOption
 };

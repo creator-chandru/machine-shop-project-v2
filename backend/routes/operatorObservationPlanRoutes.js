@@ -4,16 +4,18 @@ const router = express.Router();
 const {
   getEmployeePlans,
   saveOperatorObservationPlan,
-  generateReport
+  generateReport,
+  getEmployeeNumberOptions,
+  removeEmployeeNumberOption
 } = require('../controllers/operatorObservationPlanController.js');
 
-// 1. Load an employee's saved plans (by machineShop + empNo)
+// Existing routes
 router.get('/operator-observation-plan/employee', getEmployeePlans);
-
-// 2. Save / Update Operator Observation Plan
 router.post('/operator-observation-plan', saveOperatorObservationPlan);
-
-// 3. PDF report for a specific empNo
 router.get('/operator-observation-plan/report', generateReport);
+
+// Employee options dropdown routes
+router.get('/operator-observation-plan/employee-options', getEmployeeNumberOptions);
+router.delete('/operator-observation-plan/employee-options', removeEmployeeNumberOption);
 
 module.exports = router;

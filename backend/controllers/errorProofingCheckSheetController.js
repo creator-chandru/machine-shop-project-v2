@@ -223,6 +223,32 @@ const generateErrorProofingReport = async (req, res) => {
         const pad = 3;
         const fontSize = 7.5;
 
+        // Helper to draw clean vector checkmark (✓) centered at (centerX, centerY)
+        const drawCheckMark = (centerX, centerY, size = 10) => {
+            doc.save()
+               .lineWidth(1.5)
+               .strokeColor('#16a34a')
+               .moveTo(centerX - size * 0.45, centerY)
+               .lineTo(centerX - size * 0.1, centerY + size * 0.4)
+               .lineTo(centerX + size * 0.45, centerY - size * 0.35)
+               .stroke()
+               .restore();
+        };
+
+        // Helper to draw clean vector cross mark (X) centered at (centerX, centerY)
+        const drawCrossMark = (centerX, centerY, size = 9) => {
+            const half = size / 2;
+            doc.save()
+               .lineWidth(1.5)
+               .strokeColor('#dc2626')
+               .moveTo(centerX - half, centerY - half)
+               .lineTo(centerX + half, centerY + half)
+               .moveTo(centerX + half, centerY - half)
+               .lineTo(centerX - half, centerY + half)
+               .stroke()
+               .restore();
+        };
+
         const formatSigText = (sig) => {
             if (!sig) return "";
             const trimmed = String(sig).trim();
@@ -248,7 +274,8 @@ const generateErrorProofingReport = async (req, res) => {
                 ];
                 let rowH = 14;
                 rowCells.forEach((c, i) => {
-                    const textH = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 4;
+                    let safeText = String(c).replace(/[✓✔]/g, 'OK').replace(/[✗✖]/g, 'X');
+                    const textH = doc.heightOfString(safeText, { width: colWidths[i] - pad * 2 }) + 4;
                     if (textH > rowH) rowH = textH;
                 });
                 rowsTotalH += rowH;
@@ -320,17 +347,33 @@ const generateErrorProofingReport = async (req, res) => {
 
                 let rowH = 14;
                 rowCells.forEach((c, i) => {
-                    const textH = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 4;
+                    let safeText = String(c).replace(/[✓✔]/g, 'OK').replace(/[✗✖]/g, 'X');
+                    const textH = doc.heightOfString(safeText, { width: colWidths[i] - pad * 2 }) + 4;
                     if (textH > rowH) rowH = textH;
                 });
 
                 let rowX = startX;
                 rowCells.forEach((c, i) => {
                     doc.rect(rowX, currY, colWidths[i], rowH).stroke();
-                    doc.fillColor('black').text(String(c), rowX + pad, currY + 3, {
-                        width: colWidths[i] - pad * 2,
-                        align: i === 3 ? "left" : "center"
-                    });
+                    
+                    let textToPrint = String(c).trim();
+                    const centerX = rowX + (colWidths[i] / 2);
+                    const centerY = currY + (rowH / 2);
+
+                    // --- VECTOR DRAWING LOGIC ---
+                    if (textToPrint === '✓' || textToPrint === '✔') {
+                        drawCheckMark(centerX, centerY, 10);
+                    } else if (textToPrint === '✗' || textToPrint === '✖' || (i === 4 && textToPrint === 'X')) {
+                        drawCrossMark(centerX, centerY, 9);
+                    } else {
+                        // Strip remaining unicode checks/crosses so they don't print as single quotes in normal text
+                        textToPrint = textToPrint.replace(/[✓✔]/g, 'OK').replace(/[✗✖]/g, 'X');
+                        doc.fillColor('black').text(textToPrint, rowX + pad, currY + 3, {
+                            width: colWidths[i] - pad * 2,
+                            align: i === 3 ? "left" : "center"
+                        });
+                    }
+                    
                     rowX += colWidths[i];
                 });
 

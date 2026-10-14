@@ -394,9 +394,9 @@ const generatePreOperationReport = async (req, res) => {
     const totalWidth = doc.page.width - 40; 
 
     const labels = {
-      1: { name: "System pressure", unit: "KGF/CM2", method: "PRESSURE GAUGE" },
-      2: { name: "Clamping pressure", unit: "KGF/CM2", method: "PRESSURE GAUGE" },
-      3: { name: "Orientation pressure", unit: "KGF/CM2", method: "PRESSURE GAUGE" },
+      1: { name: "System pressure", unit: "kg/cm²", method: "PRESSURE GAUGE" },
+      2: { name: "Clamping pressure", unit: "kg/cm²", method: "PRESSURE GAUGE" },
+      3: { name: "Orientation pressure", unit: "kg/cm²", method: "PRESSURE GAUGE" },
       4: { name: "PROGRAM NO", unit: "-", method: "VISUAL" },
       5: { name: "Hydraulic oil level", unit: "-", method: "LEVEL INDICATOR" },
       6: { name: "Coolant oil level", unit: "-", method: "LEVEL INDICATOR" },

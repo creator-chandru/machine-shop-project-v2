@@ -21,9 +21,9 @@ const initialFormData = {
   },
 
   parameters: [
-    { slNo: 1, label: "System pressure", unit: "KGF/CM2", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
-    { slNo: 2, label: "Clamping pressure", unit: "KGF/CM2", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
-    { slNo: 3, label: "Orientation pressure", unit: "KGF/CM2", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 1, label: "System pressure", unit: "kg/cm²", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 2, label: "Clamping pressure", unit: "kg/cm²", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
+    { slNo: 3, label: "Orientation pressure", unit: "kg/cm²", specification: "", specEditable: true, checkMethod: "PRESSURE GAUGE", hasSubRows: false },
     { slNo: 4, label: "PROGRAM NO", unit: "", specification: "", specEditable: true, checkMethod: "VISUAL", hasSubRows: false },
     { slNo: 5, label: "Hydraulic oil level", unit: "", note: "[Above the minimum level]", specification: "", specEditable: false, checkMethod: "LEVEL INDICATOR", hasSubRows: true, subRows: ["BEFORE", "AFTER"] },
     { slNo: 6, label: "Coolant oil level", unit: "", note: "[Above the minimum level]", specification: "", specEditable: false, checkMethod: "LEVEL INDICATOR", hasSubRows: true, subRows: ["BEFORE", "AFTER"] },
@@ -504,10 +504,14 @@ export default function PreOperationChecklist() {
       setSaveSuccess(true);
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      const nextPath = isOperatorRoute 
-        ? `/operator/${shopId}/error-proofing-checksheet` 
-        : `/shift-incharge/${shopId}/error-proofing-checksheet`;
-      navigate(nextPath);
+      // Reset the machine details to allow next entry on the same page
+      setValues({});
+      setSignatures({});
+      setSpecifications({});
+      setHeaderInfo(prev => ({ ...prev, machineNo: "" }));
+      setLineSet(prev => ({ ...prev, machineNo: "" }));
+      setIsSavedRecord(false);
+      setSaveSuccess(false);
 
     } catch (err) {
       console.error('Save error:', err);
@@ -711,8 +715,9 @@ export default function PreOperationChecklist() {
             <thead className="bg-gray-100 text-gray-800 font-bold">
               <tr>
                 <th className="border border-gray-800 p-2 w-16">Sl No</th>
-                <th className="border border-gray-800 p-2 text-left px-3">Parameters</th>
-                <th className="border border-gray-800 p-2 text-left px-3">Specification</th>
+                {/* Fixed the width of the Parameters field right here (w-96) */}
+                <th className="border border-gray-800 p-2 text-left px-3 w-56">Parameters</th>
+                <th className="border border-gray-800 p-2 text-left px-3 w-56">Specification</th>
                 <th className="border border-gray-800 p-2 w-28">Unit</th>
                 <th className="border border-gray-800 p-2 w-36">Check Method</th>
                 <th className="border border-gray-800 p-2 w-24">Condition</th>
@@ -883,7 +888,7 @@ export default function PreOperationChecklist() {
             disabled={isSaving || saveSuccess} 
             className="bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer uppercase tracking-wider text-sm"
           >
-            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & CONTINUE"}
+            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "SAVE & ADD NEXT MACHINE"}
           </button>
         </div>
       </div>

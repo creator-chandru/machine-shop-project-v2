@@ -77,7 +77,6 @@ export default function DailyProductionReport() {
   const [searchParams] = useSearchParams();
   const { lineSet, setLineSet } = useLineSet();
 
-  // Role extraction
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
   const currentUserRole = (currentUser?.role || "").toLowerCase();
@@ -110,7 +109,6 @@ export default function DailyProductionReport() {
   const [hofUsers, setHofUsers] = useState([]);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
 
-  // PDF Date Range Modal States
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfFromDate, setPdfFromDate] = useState("");
   const [pdfToDate, setPdfToDate] = useState("");
@@ -126,7 +124,6 @@ export default function DailyProductionReport() {
     }, 4000);
   };
 
-  // 1. Header Information
   const [header, setHeader] = useState({
     date: getTodayISODate(),
     shift: "I",
@@ -140,12 +137,10 @@ export default function DailyProductionReport() {
     assignedHof: "",
   });
 
-  // 2. Production Rows
   const [rows, setRows] = useState(
     Array.from({ length: INITIAL_ROWS }, () => createEmptyRow())
   );
 
-  // 3. Signatures
   const [signatures, setSignatures] = useState({
     shiftSupervisorProduction: "",
     shiftSupervisorQuality: "",
@@ -156,7 +151,6 @@ export default function DailyProductionReport() {
   const currentPartNameNo =
     header.partName && header.partNo ? `${header.partName} / ${header.partNo}` : "";
 
-  // Reset form state to completely clean template
   const resetToEmptyForm = (lineCode, date, shift) => {
     setIsSavedRecord(false);
     setRows([createEmptyRow(currentPartNameNo)]);
@@ -177,7 +171,6 @@ export default function DailyProductionReport() {
     fetchPartTraceability(lineCode, date, shift);
   };
 
-  // Load record data helper
   const loadRecordData = (record) => {
     if (!record) return;
     setIsSavedRecord(true);
@@ -214,14 +207,12 @@ export default function DailyProductionReport() {
     }
   };
 
-  // Fetch QC, PE, and HOF lists for dropdowns
   useEffect(() => {
     const fetchApprovers = async () => {
       try {
         const token = localStorage.getItem("token");
         const headers = { Authorization: `Bearer ${token}` };
 
-        // QC List
         const qcRes = await fetch(
           `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/incharges`,
           { headers }
@@ -233,7 +224,6 @@ export default function DailyProductionReport() {
           setQcUsers([{ name: "qc", username: "qc" }, { name: "qc1", username: "qc1" }]);
         }
 
-        // PE List
         const peRes = await fetch(
           `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/pe-incharges`,
           { headers }
@@ -245,7 +235,6 @@ export default function DailyProductionReport() {
           setPeUsers([{ name: "pe", username: "pe" }]);
         }
 
-        // HOF List
         const hofRes = await fetch(
           `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/hof-incharges`,
           { headers }
@@ -265,7 +254,6 @@ export default function DailyProductionReport() {
     fetchApprovers();
   }, []);
 
-  // Fetch Part Traceability
   const fetchPartTraceability = async (lineCode, date, shift) => {
     if (!lineCode || !date || !shift) return;
 
@@ -292,9 +280,6 @@ export default function DailyProductionReport() {
     }
   };
 
-  // ==========================================================
-  // COMBO CHECK: date + lineCode + machineNo + shift
-  // ==========================================================
   const checkExistingRecord = async (lineCode, date, shift, machineNo) => {
     if (!lineCode || !date || !shift) {
       resetToEmptyForm(lineCode, date, shift);
@@ -333,7 +318,6 @@ export default function DailyProductionReport() {
     }
   };
 
-  // Navigation State checking
   useEffect(() => {
     if (location.state?.record) {
       loadRecordData(location.state.record);
@@ -349,7 +333,6 @@ export default function DailyProductionReport() {
     }
   }, [location.state, searchParams]);
 
-  // Sync with LineSetContext
   useEffect(() => {
     if (lineSet) {
       const newLineCode = lineSet.lineCode || header.lineCode;
@@ -380,7 +363,6 @@ export default function DailyProductionReport() {
     }
   }, [lineSet]);
 
-  // Master details
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -437,8 +419,7 @@ export default function DailyProductionReport() {
       checkExistingRecord(nextHeader.lineCode, nextHeader.date, nextHeader.shift, firstMachineNo);
     }
   };
-
-  const handleRowChange = (rowIdx, field, subField, val) => {
+const handleRowChange = (rowIdx, field, subField, val) => {
     if (isReadOnlyApprover || rows[rowIdx].isSavedRow) return;
 
     setRows((prev) => {
@@ -460,10 +441,6 @@ export default function DailyProductionReport() {
       }
       return next;
     });
-
-    if (field === "machineNo" && rowIdx === 0) {
-      checkExistingRecord(header.lineCode, header.date, header.shift, val);
-    }
   };
 
   const handleAddRow = () => {
@@ -480,7 +457,6 @@ export default function DailyProductionReport() {
     });
   };
 
-  // Shift Incharge Approves "Shift Supervisor (Production)"
   const handleApproveSupervisorProduction = () => {
     const selectedMc = rows.find((r) => r.machineNo)?.machineNo || "";
     if (!header.lineCode || !header.date || !header.shift || !selectedMc) {
@@ -499,7 +475,6 @@ export default function DailyProductionReport() {
     triggerToast("Production supervisor approved successfully.", "success");
   };
 
-  // QC Approves "Shift Supervisor (Quality)"
   const handleApproveQc = () => {
     if (!isQC) {
       triggerToast("Only QC can verify this record.", "error");
@@ -516,7 +491,6 @@ export default function DailyProductionReport() {
     triggerToast("QC Verification Approved!", "success");
   };
 
-  // PE Approves "Production Engineer"
   const handleApprovePe = () => {
     if (!isPE) {
       triggerToast("Only Production Engineer can approve this record.", "error");
@@ -533,7 +507,6 @@ export default function DailyProductionReport() {
     triggerToast("Production Engineer Approved!", "success");
   };
 
-  // HOF Approves "HOF - Production"
   const handleApproveHof = () => {
     if (!isHOF) {
       triggerToast("Only HOF can approve this record.", "error");
@@ -550,7 +523,6 @@ export default function DailyProductionReport() {
     triggerToast("HOF Production Approved!", "success");
   };
 
-  // Download PDF Report by Date Range
   const handleDownloadPdfRange = async () => {
     if (!pdfFromDate || !pdfToDate) {
       triggerToast("Please select both From Date and To Date.", "error");
@@ -602,7 +574,6 @@ export default function DailyProductionReport() {
   };
 
   const handleSave = async () => {
-    // 1. Header validations
     if (!header.lineCode) {
       triggerToast("Please select Line Code.", "error");
       return;
@@ -616,14 +587,12 @@ export default function DailyProductionReport() {
       return;
     }
 
-    // 2. Machine Number validation in rows
     const hasMachineSelected = rows.some((r) => r.machineNo && r.machineNo.trim() !== "");
     if (!hasMachineSelected) {
       triggerToast("Please select Machine No in at least one row.", "error");
       return;
     }
 
-    // 3. Signature & Allocation checks
     if (isShiftIncharge) {
       if (!signatures.shiftSupervisorProduction) {
         triggerToast("Please click 'Approve' under SHIFT SUPERVISOR (PRODUCTION) before submitting.", "error");
@@ -641,21 +610,6 @@ export default function DailyProductionReport() {
         triggerToast("Please select a HOF in 'HOF - PRODUCTION'.", "error");
         return;
       }
-    }
-
-    if (isQC && (!signatures.shiftSupervisorQuality || signatures.shiftSupervisorQuality === "Pending")) {
-      triggerToast("Please click 'Approve QC' before completing verification.", "error");
-      return;
-    }
-
-    if (isPE && (!signatures.productionEngineer || signatures.productionEngineer === "Pending")) {
-      triggerToast("Please click 'Approve PE' before completing verification.", "error");
-      return;
-    }
-
-    if (isHOF && (!signatures.hofProduction || signatures.hofProduction === "Pending")) {
-      triggerToast("Please click 'Approve HOF' before completing approval.", "error");
-      return;
     }
 
     const token = localStorage.getItem("token");
@@ -762,7 +716,6 @@ export default function DailyProductionReport() {
 
       <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "" })} />
 
-      {/* Date Range Modal for PDF Download */}
       {showPdfModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
@@ -831,15 +784,6 @@ export default function DailyProductionReport() {
               <>
                 <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
                 <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
-                <p className="text-gray-500 mt-2">
-                  {isShiftIncharge
-                    ? "Submitting for QC, PE & HOF Verification"
-                    : isQC
-                    ? "Completing QC Verification"
-                    : isPE
-                    ? "Completing PE Verification"
-                    : "Completing HOF Approval"}
-                </p>
               </>
             ) : (
               <>
@@ -852,7 +796,6 @@ export default function DailyProductionReport() {
       )}
 
       <div className="bg-white w-full max-w-[98rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-        {/* Card Header & PDF Preview */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -901,8 +844,8 @@ export default function DailyProductionReport() {
           </button>
         </div>
 
-        {/* SUB-HEADER */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 bg-orange-50 border border-orange-200 p-4 rounded-lg">
+        {/* SUB-HEADER (Editable Part Name & Part No) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 bg-orange-50 border border-orange-200 p-4 rounded-lg">
           <div>
             <label className="font-bold text-gray-700 block mb-1 text-sm">Line Code</label>
             <select
@@ -921,14 +864,38 @@ export default function DailyProductionReport() {
           </div>
 
           <div>
-            <label className="font-bold text-gray-700 block mb-1 text-sm">Part Traceability - Machining</label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Part Name</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
+              value={header.partName}
+              disabled={isReadOnlyApprover}
+              onChange={(e) => handleHeaderChange("partName", e.target.value)}
+              placeholder="Enter Part Name"
+            />
+          </div>
+
+          <div>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Part No</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
+              value={header.partNo}
+              disabled={isReadOnlyApprover}
+              onChange={(e) => handleHeaderChange("partNo", e.target.value)}
+              placeholder="Enter Part No"
+            />
+          </div>
+
+          <div>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Part Traceability</label>
             <input
               type="text"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
               value={header.partTraceabilityMachining}
               disabled={isReadOnlyApprover || isSavedRecord}
               onChange={(e) => handleHeaderChange("partTraceabilityMachining", e.target.value)}
-              placeholder="Auto-generated / Enter Traceability"
+              placeholder="Traceability"
             />
           </div>
 
@@ -958,7 +925,7 @@ export default function DailyProductionReport() {
           </div>
 
           <div>
-            <label className="font-bold text-gray-700 block mb-1 text-sm">Shift Incharge Name</label>
+            <label className="font-bold text-gray-700 block mb-1 text-sm">Shift Incharge</label>
             <input
               type="text"
               className="w-full border border-gray-300 p-2 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white disabled:bg-gray-100"
@@ -1007,39 +974,17 @@ export default function DailyProductionReport() {
             <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center min-w-[1400px]">
               <thead>
                 <tr className="bg-gray-100 text-gray-800 font-bold">
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[6%]">
-                    Machine<br />No.
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[7%]">
-                    Machine<br />Name
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[12%]">
-                    Part Name /<br />Part No
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[10%]">
-                    Operation<br />Description
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[8%]">
-                    Operator<br />Name
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[5%]">
-                    Produced
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[5%]">
-                    Accepted
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[6%]">
-                    Hold as<br />Non-conf.
-                  </th>
-                  <th colSpan={4} className="border border-gray-800 p-1 w-[20%] bg-gray-200">
-                    REASON FOR HOLD
-                  </th>
-                  <th rowSpan={2} className="border border-gray-800 p-1 w-[13%]">
-                    M/C Stop time & Reason<br />Details of significant event
-                  </th>
-                  <th colSpan={2} className="border border-gray-800 p-1 w-[8%] bg-gray-200">
-                    Time
-                  </th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[6%]">Machine<br />No.</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[7%]">Machine<br />Name</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[12%]">Part Name /<br />Part No</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[10%]">Operation<br />Description</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[8%]">Operator<br />Name</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[5%]">Produced</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[5%]">Accepted</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[6%]">Hold as<br />Non-conf.</th>
+                  <th colSpan={4} className="border border-gray-800 p-1 w-[20%] bg-gray-200">REASON FOR HOLD</th>
+                  <th rowSpan={2} className="border border-gray-800 p-1 w-[13%]">M/C Stop time & Reason</th>
+                  <th colSpan={2} className="border border-gray-800 p-1 w-[8%] bg-gray-200">Time</th>
                 </tr>
                 <tr className="bg-gray-50 text-gray-800 font-bold text-[11px]">
                   <th className="border border-gray-800 p-1 w-[7%]">Casting</th>
@@ -1055,17 +1000,14 @@ export default function DailyProductionReport() {
                   <tr key={`prod-row-${rIdx}`} className="h-10 hover:bg-gray-50">
                     <td className="border border-gray-800 p-0">
                       <select
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px] disabled:text-gray-700"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium cursor-pointer text-[11px]"
                         value={row.machineNo}
                         onChange={(e) => handleRowChange(rIdx, "machineNo", null, e.target.value)}
                         disabled={!header.lineCode || isReadOnlyApprover || row.isSavedRow}
                       >
                         <option value="">Select</option>
                         {machineOptions.map((machine, index) => (
-                          <option
-                            key={machine.id || `${machine.machineNo}-${index}`}
-                            value={machine.machineNo}
-                          >
+                          <option key={machine.id || `${machine.machineNo}-${index}`} value={machine.machineNo}>
                             {machine.machineNo}
                           </option>
                         ))}
@@ -1080,13 +1022,15 @@ export default function DailyProductionReport() {
                         placeholder="Auto-fill"
                       />
                     </td>
-                    <td className="border border-gray-800 p-0 bg-gray-50">
+                    {/* Editable Part Name / No cell per row[cite: 1, 2] */}
+                    <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        readOnly
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium text-[11px] text-gray-700"
+                        disabled={isReadOnlyApprover || row.isSavedRow}
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium text-[11px] text-gray-700 disabled:text-gray-700"
                         value={row.partNameNo}
-                        placeholder="Auto-filled"
+                        onChange={(e) => handleRowChange(rIdx, "partNameNo", null, e.target.value)}
+                        placeholder="Part Name / No"
                       />
                     </td>
                     <td className="border border-gray-800 p-0">
@@ -1175,7 +1119,7 @@ export default function DailyProductionReport() {
                         type="text"
                         disabled={isReadOnlyApprover || row.isSavedRow}
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
-                        placeholder="Reason / Details"
+                        placeholder="Details"
                         value={row.mcStopTimeReason}
                         onChange={(e) => handleRowChange(rIdx, "mcStopTimeReason", null, e.target.value)}
                       />
@@ -1184,7 +1128,7 @@ export default function DailyProductionReport() {
                       <input
                         type="time"
                         disabled={isReadOnlyApprover || row.isSavedRow}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px] disabled:text-gray-700"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px]"
                         value={row.time.from}
                         onChange={(e) => handleRowChange(rIdx, "time", "from", e.target.value)}
                       />
@@ -1193,7 +1137,7 @@ export default function DailyProductionReport() {
                       <input
                         type="time"
                         disabled={isReadOnlyApprover || row.isSavedRow}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px] disabled:text-gray-700"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px]"
                         value={row.time.to}
                         onChange={(e) => handleRowChange(rIdx, "time", "to", e.target.value)}
                       />
@@ -1218,206 +1162,133 @@ export default function DailyProductionReport() {
             </thead>
             <tbody>
               <tr className="h-16">
-                {/* 1. Shift Supervisor (Production) */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {isSupervisorProductionApproved ? (
-                    <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                      <span className="text-[10px] font-bold text-green-600 uppercase">
-                        Approved By ✓
-                      </span>
-                      <span className="text-xs font-black text-gray-900 uppercase">
-                        {signatures.shiftSupervisorProduction}
-                      </span>
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="text-[10px] font-bold text-green-600 uppercase">Approved By ✓</span>
+                      <span className="text-xs font-black text-gray-900 uppercase">{signatures.shiftSupervisorProduction}</span>
                     </div>
                   ) : isShiftIncharge ? (
                     <button
                       type="button"
                       onClick={handleApproveSupervisorProduction}
-                      className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow cursor-pointer uppercase"
                     >
                       Approve
                     </button>
                   ) : (
-                    <span className="text-gray-400 text-xs italic">
-                      Pending Shift Incharge
-                    </span>
+                    <span className="text-gray-400 text-xs italic">Pending Shift Incharge</span>
                   )}
                 </td>
 
-                {/* 2. Shift Supervisor (Quality) */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {isQcApproved ? (
-                    <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                      <span className="text-[10px] font-bold text-green-600 uppercase">
-                        Approved By ✓
-                      </span>
-                      <span className="text-xs font-black text-gray-900 uppercase">
-                        approved by {signatures.shiftSupervisorQuality}
-                      </span>
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="text-[10px] font-bold text-green-600 uppercase">Approved By ✓</span>
+                      <span className="text-xs font-black text-gray-900 uppercase">approved by {signatures.shiftSupervisorQuality}</span>
                     </div>
                   ) : isQC ? (
                     <div className="flex flex-col items-center justify-center gap-1">
                       <button
                         type="button"
                         onClick={handleApproveQc}
-                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow cursor-pointer uppercase"
                       >
                         Approve QC
                       </button>
-                      {header.assignedQc && (
-                        <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                          (Assigned: {header.assignedQc})
-                        </span>
-                      )}
+                      {header.assignedQc && <span className="text-[10px] text-gray-500 font-semibold uppercase">({header.assignedQc})</span>}
                     </div>
                   ) : isSavedRecord ? (
                     <div className="flex flex-col items-center justify-center">
-                      <span className="text-red-600 text-xs font-bold uppercase">
-                        pending
-                      </span>
-                      {header.assignedQc && (
-                        <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
-                          (Assigned: {header.assignedQc})
-                        </span>
-                      )}
+                      <span className="text-red-600 text-xs font-bold uppercase">pending</span>
+                      {header.assignedQc && <span className="text-[10px] font-bold text-gray-500 uppercase">({header.assignedQc})</span>}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center gap-1 w-full">
-                      <select
-                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center disabled:bg-gray-100"
-                        value={header.assignedQc || ""}
-                        onChange={(e) => handleHeaderChange("assignedQc", e.target.value)}
-                        disabled={isSavedRecord}
-                      >
-                        <option value="">-- Select QC --</option>
-                        {qcUsers.map((qc, qIdx) => {
-                          const uname = qc.username || qc.employeeId || qc.name;
-                          return (
-                            <option key={`${uname}-${qIdx}`} value={uname}>
-                              {uname.toUpperCase()}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
+                    <select
+                      className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 text-center"
+                      value={header.assignedQc || ""}
+                      onChange={(e) => handleHeaderChange("assignedQc", e.target.value)}
+                    >
+                      <option value="">-- Select QC --</option>
+                      {qcUsers.map((qc, qIdx) => {
+                        const uname = qc.username || qc.employeeId || qc.name;
+                        return <option key={`${uname}-${qIdx}`} value={uname}>{uname.toUpperCase()}</option>;
+                      })}
+                    </select>
                   )}
                 </td>
 
-                {/* 3. Production Engineer */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {isPeApproved ? (
-                    <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                      <span className="text-[10px] font-bold text-green-600 uppercase">
-                        Approved By ✓
-                      </span>
-                      <span className="text-xs font-black text-gray-900 uppercase">
-                        approved by {signatures.productionEngineer}
-                      </span>
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="text-[10px] font-bold text-green-600 uppercase">Approved By ✓</span>
+                      <span className="text-xs font-black text-gray-900 uppercase">approved by {signatures.productionEngineer}</span>
                     </div>
                   ) : isPE ? (
                     <div className="flex flex-col items-center justify-center gap-1">
                       <button
                         type="button"
                         onClick={handleApprovePe}
-                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow cursor-pointer uppercase"
                       >
                         Approve PE
                       </button>
-                      {header.assignedPe && (
-                        <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                          (Assigned: {header.assignedPe})
-                        </span>
-                      )}
+                      {header.assignedPe && <span className="text-[10px] text-gray-500 font-semibold uppercase">({header.assignedPe})</span>}
                     </div>
                   ) : isSavedRecord ? (
                     <div className="flex flex-col items-center justify-center">
-                      <span className="text-red-600 text-xs font-bold uppercase">
-                        pending
-                      </span>
-                      {header.assignedPe && (
-                        <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
-                          (Assigned: {header.assignedPe})
-                        </span>
-                      )}
+                      <span className="text-red-600 text-xs font-bold uppercase">pending</span>
+                      {header.assignedPe && <span className="text-[10px] font-bold text-gray-500 uppercase">({header.assignedPe})</span>}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center gap-1 w-full">
-                      <select
-                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center disabled:bg-gray-100"
-                        value={header.assignedPe || ""}
-                        onChange={(e) => handleHeaderChange("assignedPe", e.target.value)}
-                        disabled={isSavedRecord}
-                      >
-                        <option value="">-- Select PE --</option>
-                        {peUsers.map((pe, pIdx) => {
-                          const uname = pe.username || pe.employeeId || pe.name;
-                          return (
-                            <option key={`${uname}-${pIdx}`} value={uname}>
-                              {uname.toUpperCase()}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
+                    <select
+                      className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 text-center"
+                      value={header.assignedPe || ""}
+                      onChange={(e) => handleHeaderChange("assignedPe", e.target.value)}
+                    >
+                      <option value="">-- Select PE --</option>
+                      {peUsers.map((pe, pIdx) => {
+                        const uname = pe.username || pe.employeeId || pe.name;
+                        return <option key={`${uname}-${pIdx}`} value={uname}>{uname.toUpperCase()}</option>;
+                      })}
+                    </select>
                   )}
                 </td>
 
-                {/* 4. HOF - Production */}
                 <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                   {isHofApproved ? (
-                    <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                      <span className="text-[10px] font-bold text-green-600 uppercase">
-                        Approved By ✓
-                      </span>
-                      <span className="text-xs font-black text-gray-900 uppercase">
-                        approved by {signatures.hofProduction}
-                      </span>
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="text-[10px] font-bold text-green-600 uppercase">Approved By ✓</span>
+                      <span className="text-xs font-black text-gray-900 uppercase">approved by {signatures.hofProduction}</span>
                     </div>
                   ) : isHOF ? (
                     <div className="flex flex-col items-center justify-center gap-1">
                       <button
                         type="button"
                         onClick={handleApproveHof}
-                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow hover:scale-105 transition-all uppercase tracking-wider cursor-pointer"
+                        className="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold px-4 py-1.5 rounded shadow cursor-pointer uppercase"
                       >
                         Approve HOF
                       </button>
-                      {header.assignedHof && (
-                        <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                          (Assigned: {header.assignedHof})
-                        </span>
-                      )}
+                      {header.assignedHof && <span className="text-[10px] text-gray-500 font-semibold uppercase">({header.assignedHof})</span>}
                     </div>
                   ) : isSavedRecord ? (
                     <div className="flex flex-col items-center justify-center">
-                      <span className="text-red-600 text-xs font-bold uppercase">
-                        pending
-                      </span>
-                      {header.assignedHof && (
-                        <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
-                          (Assigned: {header.assignedHof})
-                        </span>
-                      )}
+                      <span className="text-red-600 text-xs font-bold uppercase">pending</span>
+                      {header.assignedHof && <span className="text-[10px] font-bold text-gray-500 uppercase">({header.assignedHof})</span>}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center gap-1 w-full">
-                      <select
-                        className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center disabled:bg-gray-100"
-                        value={header.assignedHof || ""}
-                        onChange={(e) => handleHeaderChange("assignedHof", e.target.value)}
-                        disabled={isSavedRecord}
-                      >
-                        <option value="">-- Select HOF --</option>
-                        {hofUsers.map((h, hIdx) => {
-                          const uname = h.username || h.employeeId || h.name;
-                          return (
-                            <option key={`${uname}-${hIdx}`} value={uname}>
-                              {uname.toUpperCase()}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
+                    <select
+                      className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 text-center"
+                      value={header.assignedHof || ""}
+                      onChange={(e) => handleHeaderChange("assignedHof", e.target.value)}
+                    >
+                      <option value="">-- Select HOF --</option>
+                      {hofUsers.map((h, hIdx) => {
+                        const uname = h.username || h.employeeId || h.name;
+                        return <option key={`${uname}-${hIdx}`} value={uname}>{uname.toUpperCase()}</option>;
+                      })}
+                    </select>
                   )}
                 </td>
               </tr>
@@ -1425,25 +1296,14 @@ export default function DailyProductionReport() {
           </table>
         </div>
 
-        {/* Submit Actions */}
         <div className="flex justify-end items-end mt-6 pt-4 border-t border-gray-300">
           <button
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer flex items-center gap-2 uppercase tracking-wider text-sm"
+            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold shadow-lg cursor-pointer flex items-center gap-2 uppercase tracking-wider text-sm"
           >
-            {isSaving
-              ? "SAVING..."
-              : saveSuccess
-              ? "SAVED ✓"
-              : isQC
-              ? "Submit QC Approval"
-              : isPE
-              ? "Submit PE Approval"
-              : isHOF
-              ? "Submit HOF Approval"
-              : "Submit for Verification"}
+            {isSaving ? "SAVING..." : saveSuccess ? "SAVED ✓" : "Submit for Verification"}
           </button>
         </div>
       </div>

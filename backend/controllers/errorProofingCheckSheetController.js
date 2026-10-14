@@ -194,6 +194,40 @@ const generateErrorProofingReport = async (req, res) => {
             return res.status(404).send("No records found for the selected date range.");
         }
 
+        // Fetch QF History for Error Proofing Checksheet
+        let qfHistory = [];
+        try {
+            const qfRes = await sql.query(`
+                SELECT id, formName, qfValue, date 
+                FROM ErrorProofingQFvalues 
+                ORDER BY date DESC, id DESC
+            `);
+            qfHistory = qfRes.recordset || [];
+        } catch (qfErr) {
+            console.error("Warning: Could not fetch ErrorProofingQFvalues:", qfErr.message);
+        }
+
+        const getEffectiveQfValue = (recordDateStr) => {
+            const fallback = "QF/07/MPD-09, Rev.No: 04 dt 31.01.2025";
+            if (!qfHistory || qfHistory.length === 0) return fallback;
+
+            if (recordDateStr) {
+                const targetDate = new Date(recordDateStr);
+                targetDate.setHours(0, 0, 0, 0);
+
+                for (let qf of qfHistory) {
+                    if (!qf.date) continue;
+                    const qfDate = new Date(qf.date);
+                    qfDate.setHours(0, 0, 0, 0);
+
+                    if (qfDate <= targetDate) {
+                        return qf.qfValue;
+                    }
+                }
+            }
+            return qfHistory[0]?.qfValue || fallback;
+        };
+
         // Group records by unique compound key: lineCode + checkDate
         const groupedMap = new Map();
         records.forEach((r) => {
@@ -289,6 +323,7 @@ const generateErrorProofingReport = async (req, res) => {
             const first = groupRecords[0];
             const [yy, mm, dd] = String(first.checkDate).split('-');
             const displayDate = `${dd}/${mm}/${yy}`;
+            const effectiveQf = getEffectiveQfValue(first.checkDate);
 
             // 1. Header Box
             const headerH = 40;
@@ -308,9 +343,11 @@ const generateErrorProofingReport = async (req, res) => {
 
             doc.rect(startX + logoWidth, blockStartY, midWidth, headerH).stroke();
             doc.font("Helvetica-Bold").fontSize(9).fillColor('black')
-               .text("ERROR PROOFING CHECK SHEET", startX + logoWidth, blockStartY + 8, { width: midWidth, align: "center" });
+               .text("ERROR PROOFING CHECK SHEET", startX + logoWidth, blockStartY + 5, { width: midWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(7).fillColor('#333333')
+               .text(effectiveQf, startX + logoWidth, blockStartY + 18, { width: midWidth, align: "center" });
             doc.font("Helvetica").fontSize(7.5).fillColor('black')
-               .text(`LINE: ${first.lineCode}`, startX + logoWidth, blockStartY + 24, { width: midWidth, align: "center" });
+               .text(`LINE: ${first.lineCode}`, startX + logoWidth, blockStartY + 29, { width: midWidth, align: "center" });
 
             const rightX = startX + totalWidth - rightWidth;
             doc.rect(rightX, blockStartY, rightWidth, headerH).stroke();

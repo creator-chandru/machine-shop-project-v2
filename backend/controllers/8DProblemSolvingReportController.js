@@ -69,8 +69,8 @@ const saveEightDReport = async (req, res) => {
     const customer = header?.customer || '';
     const partName = header?.partName || '';
     const partNo = header?.partNo || '';
-    const category = header?.category || 'Quality';
-    const problemFoundBy = header?.problemFoundBy || 'Production';
+    const category = header?.category || '';
+    const problemFoundBy = header?.problemFoundBy || '';
     const problemFoundByOther = header?.problemFoundByOther || '';
     const assignedQc = header?.assignedQc || '';
     const assignedPe = header?.assignedPe || '';
@@ -106,7 +106,7 @@ const saveEightDReport = async (req, res) => {
     request.input('assignedHof', sql.NVarChar(100), assignedHof);
 
     request.input('TeamMembers', sql.NVarChar(sql.MAX), JSON.stringify(teamMembers || []));
-    request.input('ProblemScope', sql.NVarChar(50), problemScope || 'New');
+    request.input('ProblemScope', sql.NVarChar(50), problemScope || '');
     request.input('QualityAlert', sql.Bit, emergencyActions?.qualityAlert ? 1 : 0);
     request.input('Segregation_Customer_Qty', sql.NVarChar(50), emergencyActions?.segregationCustomerQty || '');
     request.input('Segregation_Customer_NotOk', sql.NVarChar(50), emergencyActions?.segregationCustomerNotOk || '');
@@ -114,7 +114,7 @@ const saveEightDReport = async (req, res) => {
     request.input('Segregation_FG_NotOk', sql.NVarChar(50), emergencyActions?.segregationFGNotOk || '');
     request.input('Segregation_WIP_Qty', sql.NVarChar(50), emergencyActions?.segregationWIPQty || '');
     request.input('Segregation_WIP_NotOk', sql.NVarChar(50), emergencyActions?.segregationWIPNotOk || '');
-    request.input('IsCustomerVisitRequired', sql.NVarChar(10), emergencyActions?.customerVisitRequired || 'No');
+    request.input('IsCustomerVisitRequired', sql.NVarChar(10), emergencyActions?.customerVisitRequired || '');
     request.input('ProblemDescription', sql.NVarChar(sql.MAX), problemDescription || '');
     request.input('ProcessFlowSketch', sql.NVarChar(sql.MAX), JSON.stringify(processFlow || []));
 
@@ -129,7 +129,7 @@ const saveEightDReport = async (req, res) => {
     request.input('FiveWhyOccurrence', sql.NVarChar(sql.MAX), JSON.stringify(fiveWhy?.occurrence || {}));
     request.input('FiveWhyDetection', sql.NVarChar(sql.MAX), JSON.stringify(fiveWhy?.detection || {}));
     request.input('FiveWhySystem', sql.NVarChar(sql.MAX), JSON.stringify(fiveWhy?.system || {}));
-    request.input('PfmeaIncluded', sql.NVarChar(10), fiveWhy?.pfmeaIncluded || 'NO');
+    request.input('PfmeaIncluded', sql.NVarChar(10), fiveWhy?.pfmeaIncluded || '');
     request.input('PfmeaRpn', sql.NVarChar(50), fiveWhy?.pfmeaRpn || '');
 
     request.input('DevelopingSolution', sql.NVarChar(sql.MAX), solution?.developingSolution || '');
@@ -140,14 +140,13 @@ const saveEightDReport = async (req, res) => {
     request.input('CorrectiveActions', sql.NVarChar(sql.MAX), JSON.stringify(correctiveActions || []));
     request.input('VerificationQuestions', sql.NVarChar(sql.MAX), JSON.stringify(verification || {}));
     request.input('LessonsLearned', sql.NVarChar(sql.MAX), verification?.lessonsLearned || '');
-    request.input('IssueResolved', sql.NVarChar(10), verification?.issueResolved || 'Yes');
+    request.input('IssueResolved', sql.NVarChar(10), verification?.issueResolved || '');
     request.input('DateClosed', sql.Date, verification?.dateClosed ? verification.dateClosed : null);
     request.input('AssignedTo', sql.NVarChar(100), verification?.assignedTo || '');
     request.input('TrackingNo', sql.NVarChar(100), verification?.trackingNo || '');
     request.input('EffectivenessMonitoring', sql.NVarChar(sql.MAX), JSON.stringify(verification?.effectiveness || []));
     request.input('HorizontalDeployment', sql.NVarChar(sql.MAX), verification?.horizontalDeployment || '');
 
-    // Distinct signature mappings
     const shiftInchargeSig = signatures?.shiftSupervisorProduction || signatures?.shiftIncharge || '';
     const teamLeaderSig = signatures?.teamLeader || shiftInchargeSig;
     const qualityHeadSig = signatures?.shiftSupervisorQuality || signatures?.qualityHead || '';
@@ -291,71 +290,114 @@ const getEightDReports = async (req, res) => {
       }
     };
 
-    const formatted = result.recordset.map((r) => ({
-      id: r.Id,
-      header: {
-        machineShop: r.MachineShop,
-        date: r.ReportDate ? new Date(r.ReportDate).toISOString().split('T')[0] : '',
-        shift: r.Shift || '1ST',
-        customer: r.Customer || '',
-        partName: r.PartName || '',
-        partNo: r.PartNo || '',
-        category: r.Category || 'Quality',
-        problemFoundBy: r.ProblemFoundBy || 'Production',
-        problemFoundByOther: r.ProblemFoundByOther || '',
-        assignedQc: r.assignedQc || '',
-        assignedPe: r.assignedPe || '',
-        assignedHof: r.assignedHof || '',
-      },
-      teamMembers: r.TeamMembers ? JSON.parse(r.TeamMembers) : [],
-      problemScope: r.ProblemScope || 'New',
-      emergencyActions: {
-        qualityAlert: Boolean(r.QualityAlert),
-        segregationCustomerQty: r.Segregation_Customer_Qty || '',
-        segregationCustomerNotOk: r.Segregation_Customer_NotOk || '',
-        segregationFGQty: r.Segregation_FG_Qty || '',
-        segregationFGNotOk: r.Segregation_FG_NotOk || '',
-        segregationWIPQty: r.Segregation_WIP_Qty || '',
-        segregationWIPNotOk: r.Segregation_WIP_NotOk || '',
-        customerVisitRequired: r.IsCustomerVisitRequired || 'No',
-      },
-      problemDescription: r.ProblemDescription || '',
-      processFlow: r.ProcessFlowSketch ? JSON.parse(r.ProcessFlowSketch) : [],
-      interimActions: r.InterimActions ? JSON.parse(r.InterimActions) : [],
-      fishbone: {
-        man: parseFishbone(r.FishboneMan),
-        machine: parseFishbone(r.FishboneMachine),
-        method: parseFishbone(r.FishboneMethod),
-        material: parseFishbone(r.FishboneMaterial),
-        problem: r.FishboneProblem || '',
-      },
-      validationRows: r.ValidationRows ? JSON.parse(r.ValidationRows) : [],
-      fiveWhy: {
-        occurrence: r.FiveWhyOccurrence ? JSON.parse(r.FiveWhyOccurrence) : {},
-        detection: r.FiveWhyDetection ? JSON.parse(r.FiveWhyDetection) : {},
-        system: r.FiveWhySystem ? JSON.parse(r.FiveWhySystem) : {},
-        pfmeaIncluded: r.PfmeaIncluded || 'NO',
-        pfmeaRpn: r.PfmeaRpn || '',
-      },
-      solution: {
-        developingSolution: r.DevelopingSolution || '',
-        trialRun: r.TrialRunDetails || '',
-        trialRunDate: r.TrialRunDate ? new Date(r.TrialRunDate).toISOString().split('T')[0] : '',
-        trialRunSequence: r.TrialRunSequence || '',
-      },
-      correctiveActions: r.CorrectiveActions ? JSON.parse(r.CorrectiveActions) : [],
-      verification: r.VerificationQuestions ? JSON.parse(r.VerificationQuestions) : {},
-      signatures: {
-        shiftSupervisorProduction: r.Sign_ShiftIncharge || r.Sign_TeamLeader || '',
-        shiftSupervisorQuality: r.Sign_QualityHead || '',
-        productionEngineer: r.Sign_ProductionHead || '',
-        hofProduction: r.Sign_HOFProduction || '',
-        teamLeader: r.Sign_TeamLeader || r.Sign_ShiftIncharge || '',
-        productionHead: r.Sign_ProductionHead || '',
-        qualityHead: r.Sign_QualityHead || '',
-      },
-      status: r.Status || 'Draft',
-    }));
+    const formatted = result.recordset.map((r) => {
+      let parsedVerification = {};
+      try {
+        parsedVerification = r.VerificationQuestions ? JSON.parse(r.VerificationQuestions) : {};
+      } catch (e) {
+        parsedVerification = {};
+      }
+
+      let parsedEffectiveness = [];
+      try {
+        parsedEffectiveness = r.EffectivenessMonitoring
+          ? JSON.parse(r.EffectivenessMonitoring)
+          : parsedVerification.effectiveness || [];
+      } catch (e) {
+        parsedEffectiveness = [];
+      }
+
+      let parsedClosureSignOff = [];
+      try {
+        parsedClosureSignOff = parsedVerification.closureSignOff || [
+          { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+          { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+          { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+        ];
+      } catch (e) {
+        parsedClosureSignOff = [];
+      }
+
+      return {
+        id: r.Id,
+        header: {
+          machineShop: r.MachineShop,
+          date: r.ReportDate ? new Date(r.ReportDate).toISOString().split('T')[0] : '',
+          shift: r.Shift || '1ST',
+          customer: r.Customer || '',
+          partName: r.PartName || '',
+          partNo: r.PartNo || '',
+          category: r.Category || '',
+          problemFoundBy: r.ProblemFoundBy || '',
+          problemFoundByOther: r.ProblemFoundByOther || '',
+          assignedQc: r.assignedQc || '',
+          assignedPe: r.assignedPe || '',
+          assignedHof: r.assignedHof || '',
+        },
+        teamMembers: r.TeamMembers ? JSON.parse(r.TeamMembers) : ["", "", "", "", "", ""],
+        problemScope: r.ProblemScope || '',
+        emergencyActions: {
+          qualityAlert: Boolean(r.QualityAlert),
+          segregationCustomerQty: r.Segregation_Customer_Qty || '',
+          segregationCustomerNotOk: r.Segregation_Customer_NotOk || '',
+          segregationFGQty: r.Segregation_FG_Qty || '',
+          segregationFGNotOk: r.Segregation_FG_NotOk || '',
+          segregationWIPQty: r.Segregation_WIP_Qty || '',
+          segregationWIPNotOk: r.Segregation_WIP_NotOk || '',
+          customerVisitRequired: r.IsCustomerVisitRequired || '',
+        },
+        problemDescription: r.ProblemDescription || '',
+        processFlow: r.ProcessFlowSketch ? JSON.parse(r.ProcessFlowSketch) : [""],
+        interimActions: r.InterimActions ? JSON.parse(r.InterimActions) : [],
+        fishbone: {
+          man: parseFishbone(r.FishboneMan),
+          machine: parseFishbone(r.FishboneMachine),
+          method: parseFishbone(r.FishboneMethod),
+          material: parseFishbone(r.FishboneMaterial),
+          problem: r.FishboneProblem || '',
+        },
+        validationRows: r.ValidationRows ? JSON.parse(r.ValidationRows) : [],
+        fiveWhy: {
+          occurrence: r.FiveWhyOccurrence ? JSON.parse(r.FiveWhyOccurrence) : {},
+          detection: r.FiveWhyDetection ? JSON.parse(r.FiveWhyDetection) : {},
+          system: r.FiveWhySystem ? JSON.parse(r.FiveWhySystem) : {},
+          pfmeaIncluded: r.PfmeaIncluded || '',
+          pfmeaRpn: r.PfmeaRpn || '',
+        },
+        solution: {
+          developingSolution: r.DevelopingSolution || '',
+          trialRun: r.TrialRunDetails || '',
+          trialRunDate: r.TrialRunDate ? new Date(r.TrialRunDate).toISOString().split('T')[0] : '',
+          trialRunSequence: r.TrialRunSequence || '',
+        },
+        correctiveActions: r.CorrectiveActions ? JSON.parse(r.CorrectiveActions) : [],
+        verification: {
+          ...parsedVerification,
+          lessonsLearned: r.LessonsLearned || parsedVerification.lessonsLearned || '',
+          issueResolved: r.IssueResolved || parsedVerification.issueResolved || '',
+          dateClosed: r.DateClosed ? new Date(r.DateClosed).toISOString().split('T')[0] : (parsedVerification.dateClosed || ''),
+          assignedTo: r.AssignedTo || parsedVerification.assignedTo || '',
+          trackingNo: r.TrackingNo || parsedVerification.trackingNo || '',
+          effectiveness: parsedEffectiveness.length > 0 ? parsedEffectiveness : [
+            { month: "", rejQty: "", rejPct: "" },
+            { month: "", rejQty: "", rejPct: "" },
+            { month: "", rejQty: "", rejPct: "" }
+          ],
+          horizontalDeployment: r.HorizontalDeployment || parsedVerification.horizontalDeployment || '',
+          closureSignOff: parsedClosureSignOff
+        },
+        signatures: {
+          shiftSupervisorProduction: r.Sign_ShiftIncharge || r.Sign_TeamLeader || '',
+          shiftSupervisorQuality: r.Sign_QualityHead || '',
+          productionEngineer: r.Sign_ProductionHead || '',
+          hofProduction: r.Sign_HOFProduction || '',
+          teamLeader: r.Sign_TeamLeader || r.Sign_ShiftIncharge || '',
+          productionHead: r.Sign_ProductionHead || '',
+          qualityHead: r.Sign_QualityHead || '',
+        },
+        status: r.Status || 'Draft',
+      };
+    });
 
     res.status(200).json(formatted);
   } catch (err) {
@@ -408,7 +450,7 @@ const signEightDApproval = async (req, res) => {
 };
 
 // ============================================================
-// 6. GET QC PENDING 8D REPORTS
+// 5. GET QC PENDING 8D REPORTS
 // ============================================================
 const getQcEightDReports = async (req, res) => {
   try {
@@ -456,7 +498,7 @@ const getQcEightDReports = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET PE PENDING 8D REPORTS (Checks Sign_ProductionHead)
+// 6. GET PE PENDING 8D REPORTS
 // ============================================================
 const getPeEightDReports = async (req, res) => {
   try {
@@ -504,7 +546,7 @@ const getPeEightDReports = async (req, res) => {
 };
 
 // ============================================================
-// 8. GET HOF PENDING 8D REPORTS (Checks Sign_HOFProduction)
+// 7. GET HOF PENDING 8D REPORTS
 // ============================================================
 const getHofEightDReports = async (req, res) => {
   try {
@@ -552,7 +594,7 @@ const getHofEightDReports = async (req, res) => {
 };
 
 // ============================================================
-// 9. SIGN QC APPROVAL FOR 8D
+// 8. SIGN QC APPROVAL FOR 8D
 // ============================================================
 const signQcEightDApproval = async (req, res) => {
   try {
@@ -601,7 +643,7 @@ const signQcEightDApproval = async (req, res) => {
 };
 
 // ============================================================
-// 10. SIGN PE APPROVAL FOR 8D (Signs ONLY Sign_ProductionHead)
+// 9. SIGN PE APPROVAL FOR 8D
 // ============================================================
 const signPeEightDApproval = async (req, res) => {
   try {
@@ -650,7 +692,7 @@ const signPeEightDApproval = async (req, res) => {
 };
 
 // ============================================================
-// 11. SIGN HOF APPROVAL FOR 8D (Signs ONLY Sign_HOFProduction)
+// 10. SIGN HOF APPROVAL FOR 8D
 // ============================================================
 const signHofEightDApproval = async (req, res) => {
   try {
@@ -699,7 +741,7 @@ const signHofEightDApproval = async (req, res) => {
 };
 
 // ============================================================
-// 12. PDF GENERATOR - STRICT 2-PAGE LANDSCAPE FORMAT
+// 11. PDF GENERATOR - STRICT 2-PAGE LANDSCAPE FORMAT
 // ============================================================
 const generateEightDPdf = async (req, res) => {
   const { shopId, date, shift, partNo, customer } = req.query;
@@ -758,58 +800,151 @@ const generateEightDPdf = async (req, res) => {
     // ======================== PAGE 1 ============================
     // ============================================================
 
-    // 1. TOP HEADER (Height: 32)
+    // 1. TOP HEADER (Height: 28)
     doc.lineWidth(1).strokeColor('#1f2937');
-    doc.rect(startX, 15, 95, 32).stroke();
+    doc.rect(startX, 15, 95, 28).stroke();
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, startX + 7, 18, { width: 80, height: 25 });
+      doc.image(logoPath, startX + 7, 18, { width: 80, height: 22 });
     } else {
-      doc.font("Helvetica-Bold").fontSize(10).fillColor('#1f2937').text("SAKTHI\nAUTO", startX, 19, { width: 95, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(10).fillColor('#1f2937').text("SAKTHI\nAUTO", startX, 18, { width: 95, align: "center" });
     }
 
-    doc.rect(startX + 95, 15, fullWidth - 305, 32).stroke();
-    doc.font("Helvetica-Bold").fontSize(13).fillColor('#111827').text("8D Problem Solving Report (Machine Shop)", startX + 95, 24, { width: fullWidth - 305, align: "center" });
+    doc.rect(startX + 95, 15, fullWidth - 305, 28).stroke();
+    doc.font("Helvetica-Bold").fontSize(13).fillColor('#111827').text("8D Problem Solving Report (Machine Shop)", startX + 95, 22, { width: fullWidth - 305, align: "center" });
 
-    // Top Right Info Box with Revision Code
-    doc.rect(startX + fullWidth - 210, 15, 210, 32).stroke();
+    doc.rect(startX + fullWidth - 210, 15, 210, 28).stroke();
     doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#374151');
-    doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 19, { width: 200, align: 'center' });
-    doc.font("Helvetica").fontSize(7);
-    doc.text(`Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}   |   Shop: ${r.MachineShop || 3}`, startX + fullWidth - 205, 30, { width: 200, align: 'center' });
+    doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 18, { width: 200, align: 'center' });
+    doc.font("Helvetica").fontSize(6.8);
+    doc.text(`Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}   |   Shop: ${r.MachineShop || 3}`, startX + fullWidth - 205, 28, { width: 200, align: 'center' });
 
-    // 2. METADATA SUB-HEADER (Height: 36)
-    const metaY = 51;
-    doc.rect(startX, metaY, fullWidth, 36).stroke();
-    doc.font("Helvetica-Bold").fontSize(7.2).fillColor('#111827');
-    doc.text("Customer: ", startX + 8, metaY + 4, { continued: true }).font("Helvetica").text(r.Customer || '-');
-    doc.font("Helvetica-Bold").text("Part Name: ", startX + 8, metaY + 15, { continued: true }).font("Helvetica").text(r.PartName || '-', { width: 310, ellipsis: true });
-    doc.font("Helvetica-Bold").text("Part No: ", startX + 8, metaY + 26, { continued: true }).font("Helvetica").text(r.PartNo || '-', { width: 310, ellipsis: true });
+    // 2. METADATA SUB-HEADER & CATEGORY TABLE (Height: 38)
+    const metaY = 47;
+    doc.rect(startX, metaY, fullWidth, 38).stroke();
 
-    doc.font("Helvetica-Bold").text("Category: ", startX + 335, metaY + 4, { continued: true }).font("Helvetica").text(r.Category || 'Quality');
-    doc.font("Helvetica-Bold").text("Problem Found By: ", startX + 335, metaY + 15, { continued: true }).font("Helvetica").text(r.ProblemFoundBy || 'Production');
-    doc.font("Helvetica-Bold").text("Scope: ", startX + 335, metaY + 26, { continued: true }).font("Helvetica").text(`${r.ProblemScope || 'New'}   |   Quality Alert: ${r.QualityAlert ? 'YES' : 'NO'}`);
+    // Category Grid
+    const catList = ["Safety", "Quality", "Delivery", "People", "Cost", "Other"];
+    const catW = 45;
+    catList.forEach((c, idx) => {
+      const cx = startX + 6 + idx * catW;
+      const isSelected = (r.Category || '').toLowerCase() === c.toLowerCase();
+      doc.rect(cx, metaY + 4, catW, 14).fillAndStroke(isSelected ? '#ea580c' : '#f3f4f6', '#9ca3af');
+      doc.fillColor(isSelected ? '#ffffff' : '#1f2937').font("Helvetica-Bold").fontSize(6.5).text(c, cx, metaY + 8, { width: catW, align: 'center' });
+    });
 
+    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827');
+    doc.text("Customer: ", startX + 285, metaY + 5, { continued: true }).font("Helvetica").text(r.Customer || '-');
+    doc.font("Helvetica-Bold").text("Part Name: ", startX + 285, metaY + 16, { continued: true }).font("Helvetica").text(r.PartName || '-', { width: 260, ellipsis: true });
+    doc.font("Helvetica-Bold").text("Part No: ", startX + 285, metaY + 27, { continued: true }).font("Helvetica").text(r.PartNo || '-', { width: 260, ellipsis: true });
+
+    doc.font("Helvetica-Bold").text("Problem Found By: ", startX + 560, metaY + 5, { continued: true }).font("Helvetica").text(r.ProblemFoundBy || '-');
+    doc.font("Helvetica-Bold").text("Scope: ", startX + 560, metaY + 16, { continued: true }).font("Helvetica").text(`${r.ProblemScope || 'New'}   |   Quality Alert: ${r.QualityAlert ? 'YES' : 'NO'}`);
     const teamList = r.TeamMembers ? JSON.parse(r.TeamMembers).filter(Boolean).join(", ") : "-";
-    doc.font("Helvetica-Bold").text("Team Members: ", startX + 560, metaY + 4, { continued: true }).font("Helvetica").text(teamList || '-', { width: fullWidth - 568 });
-    doc.font("Helvetica-Bold").text("Customer Visit Required: ", startX + 560, metaY + 26, { continued: true }).font("Helvetica").text(r.IsCustomerVisitRequired || 'No');
+    doc.font("Helvetica-Bold").text("(1) Team: ", startX + 560, metaY + 27, { continued: true }).font("Helvetica").text(teamList || '-', { width: fullWidth - 565, ellipsis: true });
 
-    // 3. PROBLEM DESCRIPTION (Height: 28)
-    const descY = 91;
-    doc.rect(startX, descY, fullWidth, 28).stroke();
-    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(2a) Problem Description:", startX + 8, descY + 4);
-    doc.font("Helvetica").fontSize(7).fillColor('#374151').text(r.ProblemDescription || "None recorded", startX + 8, descY + 15, { width: fullWidth - 16 });
+    // 3. (2) EMERGENCY ACTIONS & (2b) PROCESS FLOW (Height: 64)
+    const sec2Y = 88;
+    const halfW = (fullWidth - 8) / 2;
 
-    // 4. CAUSE & EFFECT (FISHBONE 4M) DIAGRAM (Height: 220)
-    const fishY = 123;
-    const fishH = 220;
-    doc.rect(startX, fishY, fullWidth, fishH).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4) Root Cause Analysis - Ishikawa Cause & Effect (Fishbone 4M):", startX + 8, fishY + 6);
+    // Left Box: Emergency response & Segregation
+    doc.rect(startX, sec2Y, halfW, 64).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(2) Problem Scope & Emergency Response Action:", startX + 6, sec2Y + 4);
+    
+    // Mini segregation table
+    const segY = sec2Y + 16;
+    doc.rect(startX + 6, segY, halfW - 12, 12).fillAndStroke('#f3f4f6', '#9ca3af');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(6);
+    doc.text("Segregation Location", startX + 10, segY + 3, { width: 140 });
+    doc.text("Quantity", startX + 160, segY + 3, { width: 100, align: 'center' });
+    doc.text("Not OK Qty", startX + 270, segY + 3, { width: 100, align: 'center' });
 
-    const spineY = fishY + 110;
+    const drawSegRow = (ry, loc, qty, notOk) => {
+      doc.rect(startX + 6, ry, halfW - 12, 10).stroke();
+      doc.font("Helvetica").fontSize(6).fillColor('#111827');
+      doc.text(loc, startX + 10, ry + 2);
+      doc.text(String(qty || '0'), startX + 160, ry + 2, { width: 100, align: 'center' });
+      doc.text(String(notOk || '0'), startX + 270, ry + 2, { width: 100, align: 'center' });
+    };
+    drawSegRow(segY + 12, "Customer", r.Segregation_Customer_Qty, r.Segregation_Customer_NotOk);
+    drawSegRow(segY + 22, "FG (Finished Goods)", r.Segregation_FG_Qty, r.Segregation_FG_NotOk);
+    drawSegRow(segY + 32, "WIP / Line", r.Segregation_WIP_Qty, r.Segregation_WIP_NotOk);
+
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#374151').text(`Customer Visit Required: ${r.IsCustomerVisitRequired || 'No'}`, startX + 6, segY + 44);
+
+    // Right Box: (2b) Process Flow Sketch
+    doc.rect(startX + halfW + 8, sec2Y, halfW, 64).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(2b) Sketch / Process Flow Sequence:", startX + halfW + 14, sec2Y + 4);
+
+    let flowSteps = [];
+    try {
+      flowSteps = r.ProcessFlowSketch ? JSON.parse(r.ProcessFlowSketch) : [];
+    } catch (e) {
+      flowSteps = [];
+    }
+    const cleanFlow = flowSteps.filter(Boolean);
+
+    let fx = startX + halfW + 14;
+    let fy = sec2Y + 22;
+    cleanFlow.slice(0, 8).forEach((st, idx) => {
+      const stepTxt = String(st).substring(0, 16);
+      const boxW = Math.max(38, doc.widthOfString(stepTxt, { size: 5.5 }) + 10);
+
+      if (fx + boxW > startX + fullWidth - 10) {
+        fx = startX + halfW + 14;
+        fy += 18;
+      }
+
+      doc.rect(fx, fy, boxW, 14).fillAndStroke('#ffffff', '#1f2937');
+      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(stepTxt, fx + 2, fy + 4, { width: boxW - 4, align: 'center' });
+      fx += boxW;
+
+      if (idx < cleanFlow.length - 1 && idx < 7) {
+        doc.font("Helvetica-Bold").fontSize(7).fillColor('#ea580c').text("→", fx + 2, fy + 3);
+        fx += 12;
+      }
+    });
+
+    // 4. (2a) PROBLEM DESCRIPTION (Height: 26)
+    const descY = 155;
+    doc.rect(startX, descY, fullWidth, 26).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(2a) Problem Description:", startX + 6, descY + 3);
+    doc.font("Helvetica").fontSize(6.8).fillColor('#1f2937').text(r.ProblemDescription || "None recorded", startX + 6, descY + 12, { width: fullWidth - 12, height: 12, ellipsis: true });
+
+    // 5. (3) INTERIM CONTAINMENT ACTION TABLE (Height: 52)
+    const intY = 184;
+    doc.rect(startX, intY, fullWidth, 52).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(3) Interim Containment Action:", startX + 6, intY + 3);
+
+    const intHeadY = intY + 13;
+    doc.rect(startX, intHeadY, fullWidth, 12).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(6.5);
+    doc.text("Action Description", startX + 6, intHeadY + 2.5, { width: 440 });
+    doc.text("Who", startX + 460, intHeadY + 2.5, { width: 140 });
+    doc.text("Due Date", startX + 610, intHeadY + 2.5, { width: 90, align: 'center' });
+    doc.text("Break Point", startX + 710, intHeadY + 2.5, { width: 90, align: 'center' });
+
+    const interims = r.InterimActions ? JSON.parse(r.InterimActions) : [];
+    let curIntY = intHeadY + 12;
+    interims.slice(0, 2).forEach((ia) => {
+      doc.rect(startX, curIntY, fullWidth, 13).stroke();
+      doc.font("Helvetica").fontSize(6.5).fillColor('#1f2937');
+      doc.text(ia.action || '-', startX + 6, curIntY + 3, { width: 440, ellipsis: true });
+      doc.text(ia.who || '-', startX + 460, curIntY + 3, { width: 140, ellipsis: true });
+      doc.text(ia.dueDate ? String(ia.dueDate).split('T')[0] : '-', startX + 610, curIntY + 3, { width: 90, align: 'center' });
+      doc.text(ia.breakPoint ? String(ia.breakPoint).split('T')[0] : '-', startX + 710, curIntY + 3, { width: 90, align: 'center' });
+      curIntY += 13;
+    });
+
+    // 6. (4) FISHBONE CAUSE & EFFECT DIAGRAM (Height: 180)
+    const fishY = 239;
+    doc.rect(startX, fishY, fullWidth, 180).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4) Root Cause Analysis - Cause & Effect Diagram (Fishbone 4M):", startX + 6, fishY + 4);
+
+    const spineY = fishY + 90;
     const spineStartX = startX + 30;
     const spineEndX = startX + 630;
 
-    // Center Spine Line
+    // Spine
     doc.lineWidth(2.5).strokeColor('#1f2937').moveTo(spineStartX, spineY).lineTo(spineEndX, spineY).stroke();
     doc.moveTo(spineEndX, spineY).lineTo(spineEndX - 9, spineY - 5).lineTo(spineEndX - 9, spineY + 5).fill('#1f2937');
 
@@ -835,193 +970,330 @@ const generateEightDPdf = async (req, res) => {
         const lineStartX = boneX - branchWidth;
         doc.lineWidth(0.9).strokeColor('#4b5563').moveTo(lineStartX, boneY).lineTo(lineEndX, boneY).stroke();
         doc.moveTo(lineEndX, boneY).lineTo(lineEndX - 4, boneY - 2.5).lineTo(lineEndX - 4, boneY + 2.5).fill('#4b5563');
-        doc.fillColor('#1f2937').font("Helvetica-Bold").fontSize(6.2)
-          .text(text, lineStartX - 105, boneY - 3.5, { width: 100, align: 'right', lineBreak: false });
+        doc.fillColor('#1f2937').font("Helvetica-Bold").fontSize(6)
+          .text(text, lineStartX - 105, boneY - 3, { width: 100, align: 'right', lineBreak: false });
       } else {
         const lineStartX = boneX;
         const lineEndX = boneX + branchWidth;
         doc.lineWidth(0.9).strokeColor('#4b5563').moveTo(lineStartX, boneY).lineTo(lineEndX, boneY).stroke();
         doc.moveTo(lineEndX, boneY).lineTo(lineEndX + 4, boneY - 2.5).lineTo(lineEndX + 4, boneY + 2.5).fill('#4b5563');
-        doc.fillColor('#1f2937').font("Helvetica-Bold").fontSize(6.2)
-          .text(text, lineEndX + 6, boneY - 3.5, { width: 100, align: 'left', lineBreak: false });
+        doc.fillColor('#1f2937').font("Helvetica-Bold").fontSize(6)
+          .text(text, lineEndX + 6, boneY - 3, { width: 100, align: 'left', lineBreak: false });
       }
     };
 
-    // --- MAN (Top-Left) ---
-    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 150, fishY + 25).lineTo(startX + 230, spineY).stroke();
-    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("MAN", startX + 130, fishY + 12);
+    // MAN
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 150, fishY + 20).lineTo(startX + 230, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8.5).text("MAN", startX + 130, fishY + 10);
     parseFishboneSafe(r.FishboneMan).slice(0, 3).forEach((c, idx) => {
-      drawBoneSubBranch(startX + 170 + idx * 22, fishY + 45 + idx * 23, c.side || 'left', c.text);
+      drawBoneSubBranch(startX + 170 + idx * 22, fishY + 36 + idx * 19, c.side || 'left', c.text);
     });
 
-    // --- MACHINE (Top-Right) ---
-    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 390, fishY + 25).lineTo(startX + 470, spineY).stroke();
-    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("MACHINE", startX + 365, fishY + 12);
+    // MACHINE
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 390, fishY + 20).lineTo(startX + 470, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8.5).text("MACHINE", startX + 365, fishY + 10);
     parseFishboneSafe(r.FishboneMachine).slice(0, 3).forEach((c, idx) => {
-      drawBoneSubBranch(startX + 410 + idx * 22, fishY + 45 + idx * 23, c.side || 'left', c.text);
+      drawBoneSubBranch(startX + 410 + idx * 22, fishY + 36 + idx * 19, c.side || 'left', c.text);
     });
 
-    // --- METHOD (Bottom-Left) ---
-    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 150, fishY + 195).lineTo(startX + 230, spineY).stroke();
-    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("METHOD", startX + 122, fishY + 198);
+    // METHOD
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 150, fishY + 160).lineTo(startX + 230, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8.5).text("METHOD", startX + 122, fishY + 162);
     parseFishboneSafe(r.FishboneMethod).slice(0, 3).forEach((c, idx) => {
-      drawBoneSubBranch(startX + 170 + idx * 22, fishY + 175 - idx * 23, c.side || 'left', c.text);
+      drawBoneSubBranch(startX + 170 + idx * 22, fishY + 144 - idx * 19, c.side || 'left', c.text);
     });
 
-    // --- MATERIAL (Bottom-Right) ---
-    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 390, fishY + 195).lineTo(startX + 470, spineY).stroke();
-    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(9).text("MATERIAL", startX + 355, fishY + 198);
+    // MATERIAL
+    doc.lineWidth(1.8).strokeColor('#1f2937').moveTo(startX + 390, fishY + 160).lineTo(startX + 470, spineY).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8.5).text("MATERIAL", startX + 355, fishY + 162);
     parseFishboneSafe(r.FishboneMaterial).slice(0, 3).forEach((c, idx) => {
-      drawBoneSubBranch(startX + 410 + idx * 22, fishY + 175 - idx * 23, c.side || 'left', c.text);
+      drawBoneSubBranch(startX + 410 + idx * 22, fishY + 144 - idx * 19, c.side || 'left', c.text);
     });
 
     // Problem Circle Block
     doc.lineWidth(1.8).strokeColor('#1f2937').circle(startX + 710, spineY, 44).stroke();
-    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8).text("PROBLEM", startX + 665, spineY - 20, { width: 90, align: "center" });
-    doc.font("Helvetica").fontSize(6.8).text(r.FishboneProblem || "ABS DEFECT", startX + 665, spineY - 6, { width: 90, align: "center" });
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(8).text("PROBLEM", startX + 665, spineY - 18, { width: 90, align: "center" });
+    doc.font("Helvetica").fontSize(6.5).text(r.FishboneProblem || "PROBLEM STATEMENT", startX + 665, spineY - 4, { width: 90, align: "center" });
 
-    // 5. VALIDATION TABLE (Height: 205)
-    const valY = 347;
-    doc.rect(startX, valY, fullWidth, 205).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4a) Validation of Potential Causes:", startX + 8, valY + 5);
+    // 7. (4a) VALIDATION OF POTENTIAL CAUSES (Height: 142)
+    const valY = 422;
+    doc.rect(startX, valY, fullWidth, 142).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(4a) Validation of Potential Causes:", startX + 6, valY + 3);
 
-    doc.rect(startX, valY + 16, fullWidth, 16).fillAndStroke('#f3f4f6', '#1f2937');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(7);
-    doc.text("Test / Simulation", startX + 8, valY + 21, { width: 230 });
-    doc.text("Verification of Possible Causes", startX + 245, valY + 21, { width: 340 });
-    doc.text("Date", startX + 595, valY + 21, { width: 65, align: 'center' });
-    doc.text("Significant", startX + 670, valY + 21, { width: 65, align: 'center' });
-    doc.text("Remarks", startX + 745, valY + 21, { width: 45, align: 'center' });
+    doc.rect(startX, valY + 13, fullWidth, 13).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(6.5);
+    doc.text("Test / Simulation", startX + 6, valY + 16, { width: 230 });
+    doc.text("Verification of Possible Causes", startX + 245, valY + 16, { width: 340 });
+    doc.text("Date", startX + 595, valY + 16, { width: 65, align: 'center' });
+    doc.text("Significant", startX + 670, valY + 16, { width: 65, align: 'center' });
+    doc.text("Remarks", startX + 745, valY + 16, { width: 45, align: 'center' });
 
     const valRows = r.ValidationRows ? JSON.parse(r.ValidationRows) : [];
-    let vy = valY + 32;
-    valRows.slice(0, 7).forEach((v) => {
-      doc.rect(startX, vy, fullWidth, 24).stroke();
-      doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#1f2937');
-      doc.text(v.testSimulation || '-', startX + 8, vy + 7, { width: 230, ellipsis: true });
-      doc.font("Helvetica").fontSize(6.8);
-      doc.text(v.verification || '-', startX + 245, vy + 5, { width: 340, height: 16 });
-      doc.text(v.date ? String(v.date).split('T')[0] : '-', startX + 595, vy + 7, { width: 65, align: 'center' });
+    let vy = valY + 26;
+    valRows.slice(0, 5).forEach((v) => {
+      doc.rect(startX, vy, fullWidth, 20).stroke();
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#1f2937');
+      doc.text(v.testSimulation || '-', startX + 6, vy + 6, { width: 230, ellipsis: true });
+      doc.font("Helvetica").fontSize(6.5);
+      doc.text(v.verification || '-', startX + 245, vy + 4, { width: 340, height: 14 });
+      doc.text(v.date ? String(v.date).split('T')[0] : '-', startX + 595, vy + 6, { width: 65, align: 'center' });
       doc.font(v.significant === 'SIGNIFICANT' ? 'Helvetica-Bold' : 'Helvetica')
         .fillColor(v.significant === 'SIGNIFICANT' ? '#dc2626' : '#111827')
-        .text(v.significant || '-', startX + 670, vy + 7, { width: 65, align: 'center' });
-      doc.fillColor('#111827').font("Helvetica").text(v.remarks || '-', startX + 745, vy + 7, { width: 45, align: 'center' });
-      vy += 24;
+        .text(v.significant || '-', startX + 670, vy + 6, { width: 65, align: 'center' });
+      doc.fillColor('#111827').font("Helvetica").text(v.remarks || '-', startX + 745, vy + 6, { width: 45, align: 'center' });
+      vy += 20;
     });
+
+    // Page 1 Footer
+    doc.font("Helvetica").fontSize(6.5).fillColor('#6b7280')
+      .text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX, 568, { width: fullWidth, align: 'center' });
 
     // ============================================================
     // ======================== PAGE 2 ============================
     // ============================================================
     doc.addPage();
 
-    // Page 2 Header with Top Revision Metadata (Height: 28)
+    // Top Header (Height: 24)
     doc.lineWidth(1).strokeColor('#1f2937');
-    doc.rect(startX, 15, 95, 28).stroke();
+    doc.rect(startX, 15, 95, 24).stroke();
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, startX + 7, 18, { width: 80, height: 22 });
+      doc.image(logoPath, startX + 7, 17, { width: 80, height: 20 });
     } else {
-      doc.font("Helvetica-Bold").fontSize(9).fillColor('#1f2937').text("SAKTHI AUTO", startX, 22, { width: 95, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(9).fillColor('#1f2937').text("SAKTHI AUTO", startX, 20, { width: 95, align: "center" });
     }
 
-    doc.rect(startX + 95, 15, fullWidth - 305, 28).stroke();
-    doc.font("Helvetica-Bold").fontSize(11).fillColor('#111827').text("8D Problem Solving Report - Analysis & Corrective Actions", startX + 95, 24, { width: fullWidth - 305, align: "center" });
+    doc.rect(startX + 95, 15, fullWidth - 305, 24).stroke();
+    doc.font("Helvetica-Bold").fontSize(11).fillColor('#111827').text("8D Problem Solving Report - Analysis & Corrective Actions", startX + 95, 21, { width: fullWidth - 305, align: "center" });
 
-    // Top Right Info Box with Revision Code
-    doc.rect(startX + fullWidth - 210, 15, 210, 28).stroke();
-    doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#374151');
+    doc.rect(startX + fullWidth - 210, 15, 210, 24).stroke();
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#374151');
     doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 18, { width: 200, align: 'center' });
-    doc.font("Helvetica").fontSize(6.8);
-    doc.text(`Part: ${r.PartNo || '-'}   |   Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}`, startX + fullWidth - 205, 28, { width: 200, align: 'center' });
+    doc.font("Helvetica").fontSize(6.5);
+    doc.text(`Part: ${r.PartNo || '-'}   |   Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}`, startX + fullWidth - 205, 26, { width: 200, align: 'center' });
 
-    // 1. (4b) Root Cause Analysis (5-Why) (Height: 184)
-    const fiveRootY = 47;
-    doc.rect(startX, fiveRootY, fullWidth, 184).stroke();
-    doc.font("Helvetica-Bold").fontSize(8.5).fillColor('#111827').text("(4b) Root Cause Analysis (5-Why Analysis):", startX + 8, fiveRootY + 6);
+    // 1. (4b) 5-WHY ROOT CAUSE ANALYSIS (Height: 126)
+    const fiveRootY = 42;
+    doc.rect(startX, fiveRootY, fullWidth, 126).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(4b) Root Cause Analysis (5-Why Analysis):", startX + 6, fiveRootY + 4);
 
     const fiveOcc = r.FiveWhyOccurrence ? JSON.parse(r.FiveWhyOccurrence) : {};
     const fiveDet = r.FiveWhyDetection ? JSON.parse(r.FiveWhyDetection) : {};
     const fiveSys = r.FiveWhySystem ? JSON.parse(r.FiveWhySystem) : {};
 
-    // 5-Why Header
-    doc.rect(startX, fiveRootY + 18, fullWidth, 16).fillAndStroke('#f3f4f6', '#1f2937');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(7);
-    doc.text("Analysis Category", startX + 8, fiveRootY + 23, { width: 90 });
-    doc.text("Why-1", startX + 105, fiveRootY + 23, { width: 130 });
-    doc.text("Why-2", startX + 240, fiveRootY + 23, { width: 130 });
-    doc.text("Why-3", startX + 375, fiveRootY + 23, { width: 130 });
-    doc.text("Why-4", startX + 510, fiveRootY + 23, { width: 130 });
-    doc.text("Why-5", startX + 645, fiveRootY + 23, { width: 145 });
+    doc.rect(startX, fiveRootY + 14, fullWidth, 12).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(6.5);
+    doc.text("Analysis", startX + 6, fiveRootY + 17, { width: 80 });
+    doc.text("Why-1", startX + 90, fiveRootY + 17, { width: 140 });
+    doc.text("Why-2", startX + 235, fiveRootY + 17, { width: 140 });
+    doc.text("Why-3", startX + 380, fiveRootY + 17, { width: 140 });
+    doc.text("Why-4", startX + 525, fiveRootY + 17, { width: 140 });
+    doc.text("Why-5", startX + 670, fiveRootY + 17, { width: 135 });
 
     const render5WhyBlock = (yPos, title, obj) => {
-      // Why 1-5 Row (Height: 25)
-      doc.rect(startX, yPos, fullWidth, 25).stroke();
-      doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text(title, startX + 8, yPos + 8);
-      doc.font("Helvetica").fontSize(6.5).fillColor('#374151');
-      doc.text(obj.why1 || '-', startX + 105, yPos + 4, { width: 130, height: 18 });
-      doc.text(obj.why2 || '-', startX + 240, yPos + 4, { width: 130, height: 18 });
-      doc.text(obj.why3 || '-', startX + 375, yPos + 4, { width: 130, height: 18 });
-      doc.text(obj.why4 || '-', startX + 510, yPos + 4, { width: 130, height: 18 });
-      doc.text(obj.why5 || '-', startX + 645, yPos + 4, { width: 145, height: 18 });
+      doc.rect(startX, yPos, fullWidth, 18).stroke();
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text(title, startX + 6, yPos + 6);
+      doc.font("Helvetica").fontSize(6).fillColor('#374151');
+      doc.text(obj.why1 || '-', startX + 90, yPos + 3, { width: 140, height: 14 });
+      doc.text(obj.why2 || '-', startX + 235, yPos + 3, { width: 140, height: 14 });
+      doc.text(obj.why3 || '-', startX + 380, yPos + 3, { width: 140, height: 14 });
+      doc.text(obj.why4 || '-', startX + 525, yPos + 3, { width: 140, height: 14 });
+      doc.text(obj.why5 || '-', startX + 670, yPos + 3, { width: 135, height: 14 });
 
-      // Root Cause Highlight Row (Height: 18)
-      doc.rect(startX, yPos + 25, fullWidth, 18).fillAndStroke('#fff7ed', '#1f2937');
-      doc.font("Helvetica-Bold").fontSize(7).fillColor('#9a3412')
-        .text(`Definitive Root Cause (${title}): `, startX + 8, yPos + 30, { continued: true })
+      doc.rect(startX, yPos + 18, fullWidth, 12).fillAndStroke('#fff7ed', '#1f2937');
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#9a3412')
+        .text(`Root cause (${title}): `, startX + 6, yPos + 20.5, { continued: true })
         .font("Helvetica-Bold").fillColor('#111827').text(obj.rootCause || '-');
     };
 
-    render5WhyBlock(fiveRootY + 34, "Occurrence", fiveOcc);
-    render5WhyBlock(fiveRootY + 77, "Detection", fiveDet);
-    render5WhyBlock(fiveRootY + 120, "System", fiveSys);
+    render5WhyBlock(fiveRootY + 26, "Occurrence", fiveOcc);
+    render5WhyBlock(fiveRootY + 56, "Detection", fiveDet);
+    render5WhyBlock(fiveRootY + 86, "System", fiveSys);
 
     // PFMEA Row
-    doc.rect(startX, fiveRootY + 163, fullWidth, 21).stroke();
-    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(7.2)
-      .text(`PREDICT: Included in PFMEA?  ${r.PfmeaIncluded || 'NO'}       |       RPN #: ${r.PfmeaRpn || 'N/A'}       |       Trial Run Date: ${r.TrialRunDate ? new Date(r.TrialRunDate).toLocaleDateString('en-GB') : '-'}`, startX + 8, fiveRootY + 169);
+    doc.rect(startX, fiveRootY + 114, fullWidth, 12).stroke();
+    doc.fillColor('#111827').font("Helvetica-Bold").fontSize(6.5)
+      .text(`PREDICT: Included in PFMEA?  ${r.PfmeaIncluded || 'NO'}       |       RPN #: ${r.PfmeaRpn || 'N/A'}       |       Trial Run Date: ${r.TrialRunDate ? new Date(r.TrialRunDate).toLocaleDateString('en-GB') : '-'}`, startX + 6, fiveRootY + 117);
 
-    // 2. Developing Solution & Trial Run (Height: 65)
-    const solY = 236;
-    doc.rect(startX, solY, fullWidth, 65).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(5) Developing Solution & (5a) Trial Run:", startX + 8, solY + 5);
+    // 2. (5) DEVELOPING SOLUTION & (5a) TRIAL RUN (Height: 46)
+    const solY = 171;
+    doc.rect(startX, solY, fullWidth, 46).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(5) Developing Solution & (5a) Trial Run:", startX + 6, solY + 3);
 
     const halfSolW = (fullWidth - 8) / 2;
-    doc.rect(startX + 4, solY + 16, halfSolW, 43).stroke();
-    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("Solution Description:", startX + 8, solY + 20);
-    doc.font("Helvetica").fontSize(6.5).fillColor('#374151').text(r.DevelopingSolution || "None specified", startX + 8, solY + 30, { width: halfSolW - 14 });
+    doc.rect(startX + 4, solY + 14, halfSolW, 28).stroke();
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text("Developing Solution:", startX + 8, solY + 17);
+    doc.font("Helvetica").fontSize(6).fillColor('#374151').text(r.DevelopingSolution || "-", startX + 8, solY + 26, { width: halfSolW - 14 });
 
-    doc.rect(startX + halfSolW + 4, solY + 16, halfSolW, 43).stroke();
-    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("Trial Run / Confirmation Details:", startX + halfSolW + 8, solY + 20);
-    doc.font("Helvetica").fontSize(6.5).fillColor('#374151').text(r.TrialRunDetails || "None specified", startX + halfSolW + 8, solY + 30, { width: halfSolW - 14 });
+    doc.rect(startX + halfSolW + 4, solY + 14, halfSolW, 28).stroke();
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text(`Trial Run Details (Date: ${r.TrialRunDate ? new Date(r.TrialRunDate).toLocaleDateString('en-GB') : '-'}, Seq: ${r.TrialRunSequence || '-'}):`, startX + halfSolW + 8, solY + 17);
+    doc.font("Helvetica").fontSize(6).fillColor('#374151').text(r.TrialRunDetails || "-", startX + halfSolW + 8, solY + 26, { width: halfSolW - 14 });
 
-    // 3. Permanent Corrective Actions (Height: 110)
-    const pcaY = 306;
-    doc.rect(startX, pcaY, fullWidth, 110).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).fillColor('#111827').text("(6) Permanent Corrective Actions (PCA):", startX + 8, pcaY + 5);
+    // 3. (6) PERMANENT CORRECTIVE ACTIONS (Height: 96)
+    const pcaY = 220;
+    doc.rect(startX, pcaY, fullWidth, 96).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(6) Permanent Corrective Actions (PCA):", startX + 6, pcaY + 3);
 
-    doc.rect(startX, pcaY + 16, fullWidth, 16).fillAndStroke('#f3f4f6', '#1f2937');
-    doc.fillColor('black').font("Helvetica-Bold").fontSize(7);
-    doc.text("Type", startX + 8, pcaY + 21, { width: 70 });
-    doc.text("Action Plan Description", startX + 85, pcaY + 21, { width: 440 });
-    doc.text("Who", startX + 535, pcaY + 21, { width: 100 });
-    doc.text("Due Date", startX + 640, pcaY + 21, { width: 55, align: 'center' });
-    doc.text("Break Point", startX + 700, pcaY + 21, { width: 55, align: 'center' });
-    doc.text("Status", startX + 760, pcaY + 21, { width: 35, align: 'center' });
+    doc.rect(startX, pcaY + 13, fullWidth, 12).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(6.5);
+    doc.text("Type", startX + 6, pcaY + 16, { width: 70 });
+    doc.text("Action Plan Description", startX + 80, pcaY + 16, { width: 440 });
+    doc.text("Who", startX + 530, pcaY + 16, { width: 100 });
+    doc.text("Due Date", startX + 640, pcaY + 16, { width: 55, align: 'center' });
+    doc.text("Break Point", startX + 700, pcaY + 16, { width: 55, align: 'center' });
+    doc.text("Status", startX + 760, pcaY + 16, { width: 40, align: 'center' });
 
     const pcas = r.CorrectiveActions ? JSON.parse(r.CorrectiveActions) : [];
-    let pRowY = pcaY + 32;
-    pcas.slice(0, 3).forEach((p) => {
-      doc.rect(startX, pRowY, fullWidth, 24).stroke();
-      doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text(p.type || 'Action', startX + 8, pRowY + 7);
-      doc.font("Helvetica").fontSize(6.8).text(p.action || '-', startX + 85, pRowY + 4, { width: 440, height: 18 });
-      doc.text(p.who || '-', startX + 535, pRowY + 7);
-      doc.text(p.dueDate ? String(p.dueDate).split('T')[0] : '-', startX + 640, pRowY + 7, { width: 55, align: 'center' });
-      doc.text(p.breakPoint ? String(p.breakPoint).split('T')[0] : '-', startX + 700, pRowY + 7, { width: 55, align: 'center' });
-      doc.font("Helvetica-Bold").text(`L-${p.status || 1}`, startX + 760, pRowY + 7, { width: 35, align: 'center' });
-      pRowY += 24;
+    let pRowY = pcaY + 25;
+    pcas.slice(0, 5).forEach((p) => {
+      doc.rect(startX, pRowY, fullWidth, 14).stroke();
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text(p.type || 'Action', startX + 6, pRowY + 4);
+      doc.font("Helvetica").fontSize(6).text(p.action || '-', startX + 80, pRowY + 4, { width: 440, height: 10, ellipsis: true });
+      doc.text(p.who || '-', startX + 530, pRowY + 4);
+      doc.text(p.dueDate ? String(p.dueDate).split('T')[0] : '-', startX + 640, pRowY + 4, { width: 55, align: 'center' });
+      doc.text(p.breakPoint ? String(p.breakPoint).split('T')[0] : '-', startX + 700, pRowY + 4, { width: 55, align: 'center' });
+      doc.font("Helvetica-Bold").text(`L-${p.status || 1}`, startX + 760, pRowY + 4, { width: 40, align: 'center' });
+      pRowY += 14;
     });
 
-    // 4. Signatures (Height: 52)
-    const sigY = 421;
+    // 4. (7) VERIFICATION QUESTIONS & (7a) LESSONS LEARNED (Height: 74)
+    const verY = 319;
+    doc.rect(startX, verY, fullWidth, 74).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(7) Verification & Resolution Questions:", startX + 6, verY + 3);
+
+    // Questions checklist table (left)
+    const vq = r.VerificationQuestions ? JSON.parse(r.VerificationQuestions) : {};
+    const qList = [
+      { key: "q1", text: "Has the Drawing been updated?" },
+      { key: "q2", text: "Has the Work instruction, SOP/PFD been updated?" },
+      { key: "q3", text: "Has the Product Quality Standard been updated?" },
+      { key: "q4", text: "Have Prints, Check Sheets or other forms been updated?" },
+      { key: "q5", text: "Have the PFMEA and Control Plans been updated?" },
+      { key: "q6", text: "Results/changes communicated to affected Team Members?" },
+    ];
+
+    const qTableW = 420;
+    doc.rect(startX + 4, verY + 13, qTableW, 10).fillAndStroke('#f3f4f6', '#9ca3af');
+    doc.fillColor('black').font("Helvetica-Bold").fontSize(5.5);
+    doc.text("Question", startX + 6, verY + 15, { width: 330 });
+    doc.text("Y", startX + 345, verY + 15, { width: 20, align: 'center' });
+    doc.text("N", startX + 370, verY + 15, { width: 20, align: 'center' });
+    doc.text("N/A", startX + 395, verY + 15, { width: 25, align: 'center' });
+
+    let qRowY = verY + 23;
+    qList.forEach((q) => {
+      doc.rect(startX + 4, qRowY, qTableW, 8).stroke();
+      doc.font("Helvetica").fontSize(5.5).fillColor('#111827').text(q.text, startX + 6, qRowY + 2, { width: 330 });
+      const val = vq[q.key] || '';
+
+      // Clean vector tick function
+      const drawTick = (cx, cy) => {
+        doc.save();
+        doc.lineWidth(1.1).strokeColor('#16a34a'); // Green checkmark
+        doc.moveTo(cx - 2.8, cy + 0.2)
+           .lineTo(cx - 0.8, cy + 2.2)
+           .lineTo(cx + 3.0, cy - 2.2)
+           .stroke();
+        doc.restore();
+      };
+
+      const cellCenterY = qRowY + 4;
+      if (val === 'Y') drawTick(startX + 345 + 10, cellCenterY);
+      if (val === 'N') drawTick(startX + 370 + 10, cellCenterY);
+      if (val === 'N/A') drawTick(startX + 395 + 12.5, cellCenterY);
+
+      qRowY += 8;
+    });
+
+    // Right: Lessons Learned
+    const rightVerX = startX + qTableW + 12;
+    const rightVerW = fullWidth - qTableW - 16;
+    doc.rect(rightVerX, verY + 13, rightVerW, 58).stroke();
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text("(7a) Lessons Learned:", rightVerX + 4, verY + 16);
+    doc.font("Helvetica").fontSize(6).fillColor('#374151')
+      .text(r.LessonsLearned || vq.lessonsLearned || "None documented", rightVerX + 4, verY + 26, { width: rightVerW - 8, height: 40, ellipsis: true });
+
+    // 5. ISSUE RESOLVED SATISFACTORILY BAR (Height: 14)
+    const resBarY = 395;
+    doc.rect(startX, resBarY, fullWidth, 14).fillAndStroke('#f8fafc', '#1f2937');
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827')
+      .text(`Issue Resolved satisfactorily?  ${r.IssueResolved || vq.issueResolved || '-'}     |     Date Closed: ${r.DateClosed ? new Date(r.DateClosed).toLocaleDateString('en-GB') : (vq.dateClosed || '-')}     |     Assigned to: ${r.AssignedTo || vq.assignedTo || '-'}     |     Tracking #: ${r.TrackingNo || vq.trackingNo || '-'}`, startX + 6, resBarY + 3.5);
+
+    // 6. (7b) EFFECTIVENESS MONITORING & (7c) HORIZONTAL DEPLOYMENT (Height: 48)
+    const sec7bcY = 412;
+    const half7W = (fullWidth - 8) / 2;
+
+    // (7b) Effectiveness
+    doc.rect(startX, sec7bcY, half7W, 48).stroke();
+    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("(7b) Effectiveness Monitoring (up to 3 months):", startX + 6, sec7bcY + 3);
+
+    let effList = [];
+    try {
+      effList = r.EffectivenessMonitoring ? JSON.parse(r.EffectivenessMonitoring) : (vq.effectiveness || []);
+    } catch (e) {
+      effList = [];
+    }
+    const m1 = effList[0] || {};
+    const m2 = effList[1] || {};
+    const m3 = effList[2] || {};
+
+    const effTabY = sec7bcY + 13;
+    doc.rect(startX + 4, effTabY, half7W - 8, 8).fillAndStroke('#f3f4f6', '#9ca3af');
+    doc.font("Helvetica-Bold").fontSize(5.5).fillColor('black');
+    doc.text("Metric", startX + 6, effTabY + 2, { width: 80 });
+    doc.text(m1.month || "Month 1", startX + 90, effTabY + 2, { width: 90, align: 'center' });
+    doc.text(m2.month || "Month 2", startX + 185, effTabY + 2, { width: 90, align: 'center' });
+    doc.text(m3.month || "Month 3", startX + 280, effTabY + 2, { width: 90, align: 'center' });
+
+    const drawEffRow = (ey, label, v1, v2, v3) => {
+      doc.rect(startX + 4, ey, half7W - 8, 8).stroke();
+      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(label, startX + 6, ey + 2);
+      doc.font("Helvetica").fontSize(5.5);
+      doc.text(String(v1 || '-'), startX + 90, ey + 2, { width: 90, align: 'center' });
+      doc.text(String(v2 || '-'), startX + 185, ey + 2, { width: 90, align: 'center' });
+      doc.text(String(v3 || '-'), startX + 280, ey + 2, { width: 90, align: 'center' });
+    };
+    drawEffRow(effTabY + 8, "Rej Qty", m1.rejQty, m2.rejQty, m3.rejQty);
+    drawEffRow(effTabY + 16, "Rej %", m1.rejPct, m2.rejPct, m3.rejPct);
+
+    // (7c) Horizontal Deployment
+    doc.rect(startX + half7W + 8, sec7bcY, half7W, 48).stroke();
+    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("(7c) Horizontal Deployment:", startX + half7W + 14, sec7bcY + 3);
+    doc.font("Helvetica").fontSize(6).fillColor('#374151')
+      .text(r.HorizontalDeployment || vq.horizontalDeployment || "None documented", startX + half7W + 14, sec7bcY + 14, { width: half7W - 20, height: 30, ellipsis: true });
+
+    // 7. (8) CLOSURE SIGN-OFF SECTION (Height: 46)
+    const csoY = 462;
+    doc.rect(startX, csoY, fullWidth, 46).stroke();
+    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("(8) Closure Sign-off:", startX + 6, csoY + 3);
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#4b5563').text("APPROVALS", startX + fullWidth - 80, csoY + 3);
+
+    const csoHeadY = csoY + 12;
+    doc.rect(startX, csoHeadY, fullWidth, 9).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.font("Helvetica-Bold").fontSize(5.5).fillColor('black');
+    doc.text("Shift", startX + 6, csoHeadY + 2, { width: 70 });
+    doc.text("Team Members Involved", startX + 80, csoHeadY + 2, { width: 380 });
+    doc.text("Team Leader / Group Leader", startX + 470, csoHeadY + 2, { width: 160, align: 'center' });
+    doc.text("Production / Quality Head", startX + 640, csoHeadY + 2, { width: 160, align: 'center' });
+
+    let csoList = vq.closureSignOff || [
+      { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+    ];
+
+    let csoRowY = csoHeadY + 9;
+    csoList.slice(0, 3).forEach((cs) => {
+      doc.rect(startX, csoRowY, fullWidth, 8).stroke();
+      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(cs.shift || '-', startX + 6, csoRowY + 2);
+      doc.font("Helvetica").fontSize(5.5);
+      doc.text(cs.teamMembers || '-', startX + 80, csoRowY + 2, { width: 380, ellipsis: true });
+      doc.text(cs.teamLeader || '-', startX + 470, csoRowY + 2, { width: 160, align: 'center' });
+      doc.text(cs.prodQualityHead || '-', startX + 640, csoRowY + 2, { width: 160, align: 'center' });
+      csoRowY += 8;
+    });
+
+    // 8. SYSTEM DIGITAL VERIFICATION & APPROVAL (Height: 52)
+    const sigY = 510;
     const sigW = fullWidth / 4;
     const opSig = r.Sign_ShiftIncharge || r.Sign_TeamLeader;
     const qcSig = r.Sign_QualityHead;
@@ -1031,11 +1303,11 @@ const generateEightDPdf = async (req, res) => {
     const renderSigBox = (colIdx, title, sigVal) => {
       const bx = startX + sigW * colIdx;
       doc.rect(bx, sigY, sigW, 52).stroke();
-      doc.fillColor('#111827').font("Helvetica-Bold").fontSize(7).text(title, bx, sigY + 6, { width: sigW, align: 'center' });
+      doc.fillColor('#111827').font("Helvetica-Bold").fontSize(6.5).text(title, bx, sigY + 6, { width: sigW, align: 'center' });
       if (sigVal && !String(sigVal).includes('Pending')) {
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(8).text(`APPROVED (${String(sigVal).toUpperCase()})`, bx, sigY + 28, { width: sigW, align: 'center' });
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7.5).text(`APPROVED (${String(sigVal).toUpperCase()})`, bx, sigY + 26, { width: sigW, align: 'center' });
       } else {
-        doc.fillColor('#dc2626').font('Helvetica').fontSize(7.5).text("Pending", bx, sigY + 28, { width: sigW, align: 'center' });
+        doc.fillColor('#dc2626').font('Helvetica').fontSize(7).text("Pending", bx, sigY + 26, { width: sigW, align: 'center' });
       }
     };
 
@@ -1044,17 +1316,9 @@ const generateEightDPdf = async (req, res) => {
     renderSigBox(2, "PRODUCTION ENGINEER", peSig);
     renderSigBox(3, "HEAD OF PRODUCTION (HOF)", hofSig);
 
-    // 5. Verification Checklist & Lessons Learned (Height: 45)
-    const verY = 478;
-    doc.rect(startX, verY, fullWidth, 45).stroke();
-    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(7) Verification Checklist & Lessons Learned:", startX + 8, verY + 4);
-    
-    const vq = r.VerificationQuestions ? JSON.parse(r.VerificationQuestions) : {};
-    doc.font("Helvetica").fontSize(6.5).fillColor('#374151')
-      .text(`SOP Updated: ${vq.q2 || 'Y'}   |   Checksheet Updated: ${vq.q4 || 'Y'}   |   PFMEA Updated: ${vq.q5 || 'Y'}   |   Changes Communicated: ${vq.q6 || 'Y'}   |   Issue Resolved: ${r.IssueResolved || 'Yes'}`, startX + 8, verY + 16);
-    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827')
-      .text("Lessons Learned: ", startX + 8, verY + 28, { continued: true })
-      .font("Helvetica").fillColor('#374151').text(r.LessonsLearned || 'Continuous adherence to tool setting & qualification standards maintained.', { width: fullWidth - 20, ellipsis: true });
+    // Page 2 Footer
+    doc.font("Helvetica").fontSize(6.5).fillColor('#6b7280')
+      .text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX, 568, { width: fullWidth, align: 'center' });
 
     doc.end();
   } catch (err) {

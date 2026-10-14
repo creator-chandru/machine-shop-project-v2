@@ -8,7 +8,6 @@ const {
   generateEightDPdf,
   signEightDApproval,
   getPartSets,
-  // Approver dashboard & signing controllers
   getQcEightDReports,
   getPeEightDReports,
   getHofEightDReports,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileDown, Plus, Trash2, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, FileDown, Plus, Trash2 } from "lucide-react";
 import Header from "../components/Header";
 
 const formMeta = {
@@ -10,6 +10,8 @@ const formMeta = {
   title: "8D Problem Solving Report",
   company: "SAKTHI AUTO",
 };
+
+const SPECIAL_CHARS = ["Ø", "±", "°", "×", "≤", "≥", "⌀", "⊥", "∥", "√", "Ra", "~", "'", '"', "µm", "R", "C"];
 
 const getTodayISODate = () => {
   const today = new Date();
@@ -50,13 +52,19 @@ const StatusQuadrantIcon = ({ level = 1, onChange, editable = true }) => {
       title={`Level ${level}/4`}
     >
       <svg width="22" height="22" viewBox="0 0 24 24" className="transform -rotate-90">
-        <circle cx="12" cy="12" r="10" stroke="#1f2937" strokeWidth="1.5" fill="none" />
-        <line x1="12" y1="2" x2="12" y2="22" stroke="#1f2937" strokeWidth="1" />
-        <line x1="2" y1="12" x2="22" y2="12" stroke="#1f2937" strokeWidth="1" />
-        {level >= 1 && <path d="M12,12 L22,12 A10,10 0 0,0 12,2 Z" fill="#2563eb" />}
-        {level >= 2 && <path d="M12,12 L12,22 A10,10 0 0,0 22,12 Z" fill="#2563eb" />}
-        {level >= 3 && <path d="M12,12 L2,12 A10,10 0 0,0 12,22 Z" fill="#2563eb" />}
-        {level >= 4 && <path d="M12,12 L12,2 A10,10 0 0,0 2,12 Z" fill="#16a34a" />}
+        {level >= 4 ? (
+          // Level 4: Fully closed circle
+          <circle cx="12" cy="12" r="10" stroke="#1f2937" strokeWidth="1.5" fill="#16a34a" />
+        ) : (
+          <>
+            <circle cx="12" cy="12" r="10" stroke="#1f2937" strokeWidth="1.5" fill="none" />
+            <line x1="12" y1="2" x2="12" y2="22" stroke="#1f2937" strokeWidth="1" />
+            <line x1="2" y1="12" x2="22" y2="12" stroke="#1f2937" strokeWidth="1" />
+            {level >= 1 && <path d="M12,12 L22,12 A10,10 0 0,0 12,2 Z" fill="#2563eb" />}
+            {level >= 2 && <path d="M12,12 L12,22 A10,10 0 0,0 22,12 Z" fill="#2563eb" />}
+            {level >= 3 && <path d="M12,12 L2,12 A10,10 0 0,0 12,22 Z" fill="#2563eb" />}
+          </>
+        )}
       </svg>
     </div>
   );
@@ -105,6 +113,7 @@ export default function EightDProblemSolvingReport() {
   const [hofUsers, setHofUsers] = useState([]);
 
   const lookupSeqRef = useRef(0);
+  const problemDescRef = useRef(null);
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -118,8 +127,8 @@ export default function EightDProblemSolvingReport() {
     customer: "",
     partName: "",
     partNo: "",
-    category: "Quality",
-    problemFoundBy: "Production",
+    category: "",
+    problemFoundBy: "",
     problemFoundByOther: "",
     assignedQc: "",
     assignedPe: "",
@@ -130,7 +139,7 @@ export default function EightDProblemSolvingReport() {
   const [teamMembers, setTeamMembers] = useState(["", "", "", "", "", ""]);
 
   // 2. Problem Scope & Emergency Actions
-  const [problemScope, setProblemScope] = useState("New");
+  const [problemScope, setProblemScope] = useState("");
   const [emergencyActions, setEmergencyActions] = useState({
     qualityAlert: false,
     segregationCustomerQty: "",
@@ -139,80 +148,43 @@ export default function EightDProblemSolvingReport() {
     segregationFGNotOk: "",
     segregationWIPQty: "",
     segregationWIPNotOk: "",
-    customerVisitRequired: "No",
+    customerVisitRequired: "",
   });
 
   // 2a. Problem Description
   const [problemDescription, setProblemDescription] = useState("");
 
   // 2b. Process Flow
-  const [processFlow, setProcessFlow] = useState([
-    "OP10 RECEIVING INSPECTION",
-    "OP20 TURNING A&B",
-    "OP30 SBA MILLING & DRILLING",
-    "OP40 & OP50 TRA MILLING & DRILLING",
-    "OP60 CA MILLING & DRILLING",
-    "OP70 KPA SIDE MILLING & DRILLING",
-    "OP80 MACHINE TRACEABILITY",
-    "OP90 ONLINE INSPECTION",
-  ]);
+  const [processFlow, setProcessFlow] = useState([""]);
 
   // 3. Interim Containment Actions
   const [interimActions, setInterimActions] = useState([
-    { action: "", who: "", dueDate: getTodayISODate(), breakPoint: getTodayISODate() },
+    { action: "", who: "", dueDate: "", breakPoint: "" },
+    { action: "", who: "", dueDate: "", breakPoint: "" },
+    { action: "", who: "", dueDate: "", breakPoint: "" },
   ]);
 
   // 4. Fishbone Diagram
   const [fishbone, setFishbone] = useState({
-    man: [
-      { text: "WRONG PROGRAM CHANGED", side: "left" },
-      { text: "WRONG OFFSET GIVEN", side: "right" },
-      { text: "WRONG TOOL CHANGE", side: "left" }
-    ],
-    machine: [
-      { text: "Z AXIS VARIATION", side: "left" },
-      { text: "POOR COOLANT FLOW", side: "right" },
-      { text: "TOOL SHAKE", side: "left" }
-    ],
-    method: [
-      { text: "TOOL FACE OUT", side: "left" },
-      { text: "JIG/FIX LOOSE", side: "right" },
-      { text: "CUTTER MOUNTING LOOSEN", side: "left" }
-    ],
-    material: [
-      { text: "PART HARDNESS PROBLEM", side: "left" }
-    ],
-    problem: "ABS DISTANCE UNDER SIZE PROBLEM",
+    man: [{ text: "", side: "left" }],
+    machine: [{ text: "", side: "left" }],
+    method: [{ text: "", side: "left" }],
+    material: [{ text: "", side: "left" }],
+    problem: "",
   });
 
   // 4a. Validation Rows
   const [validationRows, setValidationRows] = useState([
-    { testSimulation: "WRONG PROGRAM CHANGED", verification: "EXISTING PROGRAM NO VERIFIED WITH SOP FOUND OK", date: getTodayISODate(), significant: "INSIGNIFICANT", remarks: "" },
-    { testSimulation: "TOOL FACE OUT", verification: "ABS MILLING CUTTER RUN OUT (0.1MM) FACE OUT NOTIFIED", date: getTodayISODate(), significant: "SIGNIFICANT", remarks: "" },
+    { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
+    { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
   ]);
 
   // 4b. 5-Why
   const [fiveWhy, setFiveWhy] = useState({
-    occurrence: {
-      why1: "TOOL FACE OUT (ABS MILLING CUTTER)",
-      why2: "INSERT SEATING AREA BURR STICKED",
-      why3: "WHILE INSERT CHANGE CUTTER POCKET NOT CLEANED PROPERLY",
-      why4: "INCHARGE AWARENESS LOW",
-      why5: "LACK OF AWARENESS",
-      rootCause: "INCHARGE AWARENESS LOW DUE TO LACK OF AWARENESS",
-    },
-    detection: {
-      why1: "THIS PARTICULAR NG PART NOT IDENTIFIED BY INCHARGE AFTER TOOL CHANGE",
-      why2: "TOOL CHANGE REPORT NOT FOLLOWED ON TIME",
-      why3: "INCHARGE AWARENESS LOW",
-      why4: "LACK OF AWARENESS",
-      why5: "",
-      rootCause: "TOOL CHANGE PROTOCOL NOT ADHERED TO RIGIDLY",
-    },
-    system: {
-      why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "",
-    },
-    pfmeaIncluded: "NO",
+    occurrence: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
+    detection: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
+    system: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
+    pfmeaIncluded: "",
     pfmeaRpn: "",
   });
 
@@ -220,45 +192,74 @@ export default function EightDProblemSolvingReport() {
   const [solution, setSolution] = useState({
     developingSolution: "",
     trialRun: "",
-    trialRunDate: getTodayISODate(),
+    trialRunDate: "",
     trialRunSequence: "",
   });
 
-  // 6. Corrective Actions
+  // 6. Corrective Actions (2 Occurrence, 2 Detection, 2 System)
   const [correctiveActions, setCorrectiveActions] = useState([
-    { type: "Occurrence", action: "EVERY MILLING INSERT CHANGED, INSERT FACE OUT CHECKED IN PRESETTER UNIT SYSTEM INTRODUCED", who: "LINE INCHARGES", dueDate: getTodayISODate(), breakPoint: getTodayISODate(), status: 4 },
-    { type: "Detection", action: "AFTER TOOL CHANGE PART QUALIFY MUST BE CHECKED AS PER PROCESS SHEET AND RECORD IN TOOL CHANGE RECORD", who: "LINE INCHARGES", dueDate: getTodayISODate(), breakPoint: getTodayISODate(), status: 4 },
+    { type: "Occurrence", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+    { type: "Occurrence", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+    { type: "Detection", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+    { type: "Detection", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+    { type: "System", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
     { type: "System", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
   ]);
 
-  // 7. Verification Questions
+  // 7. Verification, Effectiveness & Closure Sign-off
   const [verification, setVerification] = useState({
-    q1: "N/A",
-    q2: "Y",
-    q3: "Y",
-    q4: "Y",
-    q5: "Y",
-    q6: "Y",
+    q1: "",
+    q2: "",
+    q3: "",
+    q4: "",
+    q5: "",
+    q6: "",
     lessonsLearned: "",
-    issueResolved: "Yes",
-    dateClosed: getTodayISODate(),
+    issueResolved: "",
+    dateClosed: "",
     assignedTo: "",
     trackingNo: "",
     effectiveness: [
-      { month: "Jun-26", rejQty: "0", rejPct: "0%" },
-      { month: "Jul-26", rejQty: "0", rejPct: "0%" },
-      { month: "Aug-26", rejQty: "0", rejPct: "0%" },
+      { month: "", rejQty: "", rejPct: "" },
+      { month: "", rejQty: "", rejPct: "" },
+      { month: "", rejQty: "", rejPct: "" },
     ],
     horizontalDeployment: "",
+    closureSignOff: [
+      { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+    ],
   });
 
-  // 8. Signatures
+  // 8. System Digital Approvals
   const [signatures, setSignatures] = useState({
     shiftSupervisorProduction: "",
     shiftSupervisorQuality: "",
     productionEngineer: "",
     hofProduction: "",
   });
+
+  // Special symbol insertion into Problem Description
+  const insertSymbol = (e, char) => {
+    e.preventDefault();
+    if (isFormLocked) return;
+    const textarea = problemDescRef.current;
+    if (!textarea) {
+      setProblemDescription((prev) => (prev || "") + char);
+      return;
+    }
+    const start = textarea.selectionStart ?? problemDescription.length;
+    const end = textarea.selectionEnd ?? problemDescription.length;
+    const currentVal = problemDescription || "";
+    const newVal = currentVal.substring(0, start) + char + currentVal.substring(end);
+    setProblemDescription(newVal);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + char.length, start + char.length);
+    }, 0);
+  };
 
   // Fetch Part Sets from M3PartSets and Approver lists
   useEffect(() => {
@@ -300,10 +301,10 @@ export default function EightDProblemSolvingReport() {
     fetchMasterData();
   }, []);
 
-  // Full reset back to a clean/fresh form when changing key combo fields
+  // Full reset back to a clean/fresh form
   const resetFormToBlank = (keepDate, keepShift, keepPartName, keepPartNo) => {
     setIsSavedRecord(false);
-    setProblemScope("New");
+    setProblemScope("");
     setEmergencyActions({
       qualityAlert: false,
       segregationCustomerQty: "",
@@ -312,64 +313,57 @@ export default function EightDProblemSolvingReport() {
       segregationFGNotOk: "",
       segregationWIPQty: "",
       segregationWIPNotOk: "",
-      customerVisitRequired: "No",
+      customerVisitRequired: "",
     });
     setProblemDescription("");
     setTeamMembers(["", "", "", "", "", ""]);
-    setProcessFlow([
-      "OP10 RECEIVING INSPECTION",
-      "OP20 TURNING A&B",
-      "OP30 SBA MILLING & DRILLING",
-      "OP40 & OP50 TRA MILLING & DRILLING",
-      "OP60 CA MILLING & DRILLING",
-      "OP70 KPA SIDE MILLING & DRILLING",
-      "OP80 MACHINE TRACEABILITY",
-      "OP90 ONLINE INSPECTION",
+    setProcessFlow([""]);
+    setInterimActions([
+      { action: "", who: "", dueDate: "", breakPoint: "" },
+      { action: "", who: "", dueDate: "", breakPoint: "" },
+      { action: "", who: "", dueDate: "", breakPoint: "" },
     ]);
-    setInterimActions([{ action: "", who: "", dueDate: getTodayISODate(), breakPoint: getTodayISODate() }]);
     setFishbone({
-      man: [
-        { text: "", side: "left" },
-        { text: "", side: "right" }
-      ],
-      machine: [
-        { text: "", side: "left" },
-        { text: "", side: "right" }
-      ],
-      method: [
-        { text: "", side: "left" },
-        { text: "", side: "right" }
-      ],
-      material: [
-        { text: "", side: "left" }
-      ],
+      man: [{ text: "", side: "left" }],
+      machine: [{ text: "", side: "left" }],
+      method: [{ text: "", side: "left" }],
+      material: [{ text: "", side: "left" }],
       problem: "",
     });
     setValidationRows([
-      { testSimulation: "", verification: "", date: getTodayISODate(), significant: "INSIGNIFICANT", remarks: "" }
+      { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
+      { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
     ]);
     setFiveWhy({
       occurrence: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
       detection: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
       system: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
-      pfmeaIncluded: "NO",
+      pfmeaIncluded: "",
       pfmeaRpn: "",
     });
-    setSolution({ developingSolution: "", trialRun: "", trialRunDate: getTodayISODate(), trialRunSequence: "" });
+    setSolution({ developingSolution: "", trialRun: "", trialRunDate: "", trialRunSequence: "" });
     setCorrectiveActions([
       { type: "Occurrence", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+      { type: "Occurrence", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
       { type: "Detection", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+      { type: "Detection", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
+      { type: "System", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
       { type: "System", action: "", who: "", dueDate: "", breakPoint: "", status: 1 },
     ]);
     setVerification({
-      q1: "N/A", q2: "Y", q3: "Y", q4: "Y", q5: "Y", q6: "Y",
-      lessonsLearned: "", issueResolved: "Yes", dateClosed: getTodayISODate(), assignedTo: "", trackingNo: "",
+      q1: "", q2: "", q3: "", q4: "", q5: "", q6: "",
+      lessonsLearned: "", issueResolved: "", dateClosed: "", assignedTo: "", trackingNo: "",
       effectiveness: [
-        { month: "Jun-26", rejQty: "0", rejPct: "0%" },
-        { month: "Jul-26", rejQty: "0", rejPct: "0%" },
-        { month: "Aug-26", rejQty: "0", rejPct: "0%" },
+        { month: "", rejQty: "", rejPct: "" },
+        { month: "", rejQty: "", rejPct: "" },
+        { month: "", rejQty: "", rejPct: "" },
       ],
       horizontalDeployment: "",
+      closureSignOff: [
+        { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+        { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+        { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      ],
     });
     setSignatures({
       shiftSupervisorProduction: "",
@@ -381,11 +375,11 @@ export default function EightDProblemSolvingReport() {
       ...prev,
       date: keepDate !== undefined ? keepDate : prev.date,
       shift: keepShift !== undefined ? keepShift : prev.shift,
-      partName: keepPartName !== undefined ? keepPartName : prev.partName,
-      partNo: keepPartNo !== undefined ? keepPartNo : prev.partNo,
+      partName: keepPartName !== undefined ? keepPartName : "",
+      partNo: keepPartNo !== undefined ? keepPartNo : "",
       customer: "",
-      category: "Quality",
-      problemFoundBy: "Production",
+      category: "",
+      problemFoundBy: "",
       problemFoundByOther: "",
       assignedQc: "",
       assignedPe: "",
@@ -401,7 +395,7 @@ export default function EightDProblemSolvingReport() {
     if (record.problemScope) setProblemScope(record.problemScope);
     if (record.emergencyActions) setEmergencyActions(record.emergencyActions);
     if (record.problemDescription) setProblemDescription(record.problemDescription);
-    if (record.processFlow) setProcessFlow(record.processFlow);
+    if (record.processFlow && record.processFlow.length > 0) setProcessFlow(record.processFlow);
     if (record.interimActions) setInterimActions(record.interimActions);
     if (record.fishbone) {
       const normalize = (list = []) =>
@@ -418,7 +412,26 @@ export default function EightDProblemSolvingReport() {
     if (record.fiveWhy) setFiveWhy(record.fiveWhy);
     if (record.solution) setSolution(record.solution);
     if (record.correctiveActions) setCorrectiveActions(record.correctiveActions);
-    if (record.verification) setVerification(record.verification);
+    if (record.verification) {
+      setVerification((prev) => ({
+        ...prev,
+        ...record.verification,
+        effectiveness: record.verification.effectiveness && record.verification.effectiveness.length > 0
+          ? record.verification.effectiveness
+          : [
+              { month: "", rejQty: "", rejPct: "" },
+              { month: "", rejQty: "", rejPct: "" },
+              { month: "", rejQty: "", rejPct: "" },
+            ],
+        closureSignOff: record.verification.closureSignOff && record.verification.closureSignOff.length > 0
+          ? record.verification.closureSignOff
+          : [
+              { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+              { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+              { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+            ],
+      }));
+    }
     if (record.signatures) {
       setSignatures({
         shiftSupervisorProduction: record.signatures.shiftSupervisorProduction || record.signatures.teamLeader || record.signatures.shiftIncharge || "",
@@ -432,7 +445,6 @@ export default function EightDProblemSolvingReport() {
   // Check Existing Record (Date + Shift + PartNo)
   const checkExistingRecord = async (partNo, date, shift, partName) => {
     if (!partNo || !date) {
-      resetFormToBlank(date, shift, partName, partNo);
       return;
     }
 
@@ -454,15 +466,14 @@ export default function EightDProblemSolvingReport() {
           loadRecordData(data[0]);
           triggerToast("Existing 8D record loaded (Form locked for editing).", "info");
         } else {
-          // No record exists for this date+shift+part: reset cleanly to blank
-          resetFormToBlank(date, shift, partName, partNo);
+          setIsSavedRecord(false);
         }
       } else {
-        resetFormToBlank(date, shift, partName, partNo);
+        setIsSavedRecord(false);
       }
     } catch (err) {
       console.error("Failed to check existing 8D report:", err);
-      resetFormToBlank(date, shift, partName, partNo);
+      setIsSavedRecord(false);
     }
   };
 
@@ -479,25 +490,54 @@ export default function EightDProblemSolvingReport() {
     }
   }, [location.state, searchParams]);
 
-  const handlePartChange = (type, value) => {
+  // Handle manual typing in Part Name or Part Number
+  const handlePartManualChange = (field, value) => {
+    setHeader((prev) => {
+      const updated = { ...prev, [field]: value };
+      if (field === "partName") {
+        const matched = partSets.find(
+          (p) => p.PartName && p.PartName.trim().toLowerCase() === value.trim().toLowerCase()
+        );
+        if (matched && !prev.partNo) {
+          updated.partNo = matched.PartNo;
+        }
+      } else if (field === "partNo") {
+        const matched = partSets.find(
+          (p) => p.PartNo && p.PartNo.trim().toLowerCase() === value.trim().toLowerCase()
+        );
+        if (matched && !prev.partName) {
+          updated.partName = matched.PartName;
+        }
+      }
+      return updated;
+    });
+  };
+
+  // Handle selection from dropdown
+  const handlePartSelectChange = (type, value) => {
+    if (!value) return;
     let nextPartName = header.partName;
     let nextPartNo = header.partNo;
 
     if (type === "partName") {
       nextPartName = value;
       const matched = partSets.find((p) => p.PartName === value);
-      nextPartNo = matched ? matched.PartNo : "";
+      if (matched) nextPartNo = matched.PartNo;
     } else if (type === "partNo") {
       nextPartNo = value;
       const matched = partSets.find((p) => p.PartNo === value);
-      nextPartName = matched ? matched.PartName : "";
+      if (matched) nextPartName = matched.PartName;
     }
 
-    // Immediately reset non-header values and set updated part info
     resetFormToBlank(header.date, header.shift, nextPartName, nextPartNo);
-
     if (nextPartNo && header.date) {
       checkExistingRecord(nextPartNo, header.date, header.shift, nextPartName);
+    }
+  };
+
+  const handlePartBlur = () => {
+    if (header.partNo && header.date && !isSavedRecord) {
+      checkExistingRecord(header.partNo, header.date, header.shift, header.partName);
     }
   };
 
@@ -505,9 +545,7 @@ export default function EightDProblemSolvingReport() {
     const nextDate = field === "date" ? val : header.date;
     const nextShift = field === "shift" ? val : header.shift;
 
-    // Immediately reset non-header values and set updated date/shift
     resetFormToBlank(nextDate, nextShift, header.partName, header.partNo);
-
     if (header.partNo && nextDate) {
       checkExistingRecord(header.partNo, nextDate, nextShift, header.partName);
     }
@@ -646,7 +684,7 @@ export default function EightDProblemSolvingReport() {
 
   const handleSave = async () => {
     if (!header.partNo || !header.partName) {
-      triggerToast("Please select Part Name and Part No.", "error");
+      triggerToast("Please enter Part Name and Part No.", "error");
       return;
     }
 
@@ -874,39 +912,78 @@ export default function EightDProblemSolvingReport() {
             </div>
           </div>
 
+          {/* PART NAME & PART NUMBER: BOTH DROPDOWN & MANUAL EDITABLE */}
           <div className="space-y-2">
             <div>
               <label className="font-bold text-gray-700 block mb-1">Part Name</label>
-              <select
-                disabled={loadingPartSets}
-                className="w-full border border-gray-300 p-1.5 rounded font-semibold bg-white cursor-pointer disabled:bg-gray-100 text-xs"
-                value={header.partName}
-                onChange={(e) => handlePartChange("partName", e.target.value)}
-              >
-                <option value="">{loadingPartSets ? "Loading Part Names..." : "-- Select Part Name --"}</option>
-                {partSets.map((ps, idx) => (
-                  <option key={`pname-${ps.Id || idx}`} value={ps.PartName}>
-                    {ps.PartName}
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  list="partNameList"
+                  disabled={isFormLocked}
+                  placeholder="Type or select Part Name"
+                  className="w-full border border-gray-300 p-1.5 rounded font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-700 text-xs"
+                  value={header.partName}
+                  onChange={(e) => handlePartManualChange("partName", e.target.value)}
+                  onBlur={handlePartBlur}
+                />
+                <datalist id="partNameList">
+                  {partSets.map((ps, idx) => (
+                    <option key={`pndl-${ps.Id || idx}`} value={ps.PartName}>
+                      {ps.PartNo ? `(${ps.PartNo})` : ""}
+                    </option>
+                  ))}
+                </datalist>
+                <select
+                  disabled={isFormLocked || loadingPartSets}
+                  className="w-full border border-gray-200 p-1 rounded font-normal bg-gray-50 text-[11px] cursor-pointer disabled:bg-gray-100 text-gray-700"
+                  value={partSets.some((p) => p.PartName === header.partName) ? header.partName : ""}
+                  onChange={(e) => handlePartSelectChange("partName", e.target.value)}
+                >
+                  <option value="">{loadingPartSets ? "Loading Part Names..." : "-- Quick Select Part Name --"}</option>
+                  {partSets.map((ps, idx) => (
+                    <option key={`pname-${ps.Id || idx}`} value={ps.PartName}>
+                      {ps.PartName}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div>
               <label className="font-bold text-gray-700 block mb-1">Part No.</label>
-              <select
-                disabled={loadingPartSets}
-                className="w-full border border-gray-300 p-1.5 rounded font-semibold bg-white cursor-pointer disabled:bg-gray-100 text-xs"
-                value={header.partNo}
-                onChange={(e) => handlePartChange("partNo", e.target.value)}
-              >
-                <option value="">{loadingPartSets ? "Loading Part Numbers..." : "-- Select Part No --"}</option>
-                {partSets.map((ps, idx) => (
-                  <option key={`pno-${ps.Id || idx}`} value={ps.PartNo}>
-                    {ps.PartNo}
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  list="partNoList"
+                  disabled={isFormLocked}
+                  placeholder="Type or select Part No"
+                  className="w-full border border-gray-300 p-1.5 rounded font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-700 text-xs"
+                  value={header.partNo}
+                  onChange={(e) => handlePartManualChange("partNo", e.target.value)}
+                  onBlur={handlePartBlur}
+                />
+                <datalist id="partNoList">
+                  {partSets.map((ps, idx) => (
+                    <option key={`pnodl-${ps.Id || idx}`} value={ps.PartNo}>
+                      {ps.PartName ? `(${ps.PartName})` : ""}
+                    </option>
+                  ))}
+                </datalist>
+                <select
+                  disabled={isFormLocked || loadingPartSets}
+                  className="w-full border border-gray-200 p-1 rounded font-normal bg-gray-50 text-[11px] cursor-pointer disabled:bg-gray-100 text-gray-700"
+                  value={partSets.some((p) => p.PartNo === header.partNo) ? header.partNo : ""}
+                  onChange={(e) => handlePartSelectChange("partNo", e.target.value)}
+                >
+                  <option value="">{loadingPartSets ? "Loading Part Numbers..." : "-- Quick Select Part No --"}</option>
+                  {partSets.map((ps, idx) => (
+                    <option key={`pno-${ps.Id || idx}`} value={ps.PartNo}>
+                      {ps.PartNo}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -935,7 +1012,7 @@ export default function EightDProblemSolvingReport() {
             <div>
               <label className="font-bold text-gray-700 block mb-1">Problem Found By</label>
               <div className="flex gap-2 items-center flex-wrap">
-                {["Verification Station", "Maintenance", "Production", "Customer"].map((p) => (
+                {["Verification Station", "Maintenance", "Production", "Customer", "Other"].map((p) => (
                   <label key={p} className={`flex items-center gap-1 font-semibold ${isFormLocked ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
                     <input
                       type="radio"
@@ -948,6 +1025,16 @@ export default function EightDProblemSolvingReport() {
                   </label>
                 ))}
               </div>
+              {header.problemFoundBy === "Other" && (
+                <input
+                  type="text"
+                  disabled={isFormLocked}
+                  placeholder="Specify who found problem..."
+                  className="mt-1.5 w-full border border-gray-300 p-1 rounded font-semibold bg-white disabled:bg-gray-100"
+                  value={header.problemFoundByOther || ""}
+                  onChange={(e) => setHeader({ ...header, problemFoundByOther: e.target.value })}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1026,6 +1113,7 @@ export default function EightDProblemSolvingReport() {
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder="0"
                         className="w-full text-center p-1 bg-white outline-none disabled:bg-gray-100 disabled:text-gray-700"
                         value={emergencyActions.segregationCustomerQty}
                         onChange={(e) => setEmergencyActions({ ...emergencyActions, segregationCustomerQty: e.target.value })}
@@ -1035,6 +1123,7 @@ export default function EightDProblemSolvingReport() {
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder="0"
                         className="w-full text-center p-1 bg-white outline-none disabled:bg-gray-100 disabled:text-gray-700"
                         value={emergencyActions.segregationCustomerNotOk}
                         onChange={(e) => setEmergencyActions({ ...emergencyActions, segregationCustomerNotOk: e.target.value })}
@@ -1047,6 +1136,7 @@ export default function EightDProblemSolvingReport() {
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder="0"
                         className="w-full text-center p-1 bg-white outline-none disabled:bg-gray-100 disabled:text-gray-700"
                         value={emergencyActions.segregationFGQty}
                         onChange={(e) => setEmergencyActions({ ...emergencyActions, segregationFGQty: e.target.value })}
@@ -1056,6 +1146,7 @@ export default function EightDProblemSolvingReport() {
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder="0"
                         className="w-full text-center p-1 bg-white outline-none disabled:bg-gray-100 disabled:text-gray-700"
                         value={emergencyActions.segregationFGNotOk}
                         onChange={(e) => setEmergencyActions({ ...emergencyActions, segregationFGNotOk: e.target.value })}
@@ -1068,6 +1159,7 @@ export default function EightDProblemSolvingReport() {
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder="0"
                         className="w-full text-center p-1 bg-white outline-none disabled:bg-gray-100 disabled:text-gray-700"
                         value={emergencyActions.segregationWIPQty}
                         onChange={(e) => setEmergencyActions({ ...emergencyActions, segregationWIPQty: e.target.value })}
@@ -1077,6 +1169,7 @@ export default function EightDProblemSolvingReport() {
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder="0"
                         className="w-full text-center p-1 bg-white outline-none disabled:bg-gray-100 disabled:text-gray-700"
                         value={emergencyActions.segregationWIPNotOk}
                         onChange={(e) => setEmergencyActions({ ...emergencyActions, segregationWIPNotOk: e.target.value })}
@@ -1111,20 +1204,43 @@ export default function EightDProblemSolvingReport() {
               </div>
             </div>
 
+            {/* (2a) Problem Description with Special Symbols Toolbar */}
             <div className="pt-2 border-t">
-              <h3 className="text-xs font-bold uppercase text-gray-800 mb-1">(2a) Problem Description:</h3>
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="text-xs font-bold uppercase text-gray-800">(2a) Problem Description:</h3>
+              </div>
+
+              {!isFormLocked && (
+                <div className="bg-orange-50 border border-orange-200 p-2 rounded flex flex-wrap items-center gap-1.5 text-xs shadow-inner mb-2">
+                  <span className="font-bold text-gray-800 mr-2 uppercase text-[10px]">
+                    Insert Symbol:
+                  </span>
+                  {SPECIAL_CHARS.map((char) => (
+                    <button
+                      key={char}
+                      type="button"
+                      onMouseDown={(e) => insertSymbol(e, char)}
+                      className="bg-white hover:bg-orange-500 hover:text-white border border-gray-300 rounded px-2 py-0.5 font-bold text-gray-800 shadow-sm transition-all cursor-pointer text-xs"
+                    >
+                      {char}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <textarea
+                ref={problemDescRef}
                 rows={3}
                 disabled={isFormLocked}
                 className="w-full border border-gray-300 p-2 rounded text-xs bg-white font-medium outline-none focus:ring-1 focus:ring-orange-500 disabled:bg-gray-100 disabled:text-gray-700"
-                placeholder="Describe the problem in detail..."
+                placeholder="Describe the problem in detail (use symbols toolbar above if needed)..."
                 value={problemDescription}
                 onChange={(e) => setProblemDescription(e.target.value)}
               />
             </div>
           </div>
 
-          {/* (2b) Process Flow */}
+          {/* (2b) Process Flow with Dynamic Box Sizing */}
           <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
             <div>
               <div className="flex justify-between items-center mb-2">
@@ -1132,7 +1248,7 @@ export default function EightDProblemSolvingReport() {
                 {!isFormLocked && (
                   <button
                     type="button"
-                    onClick={() => setProcessFlow([...processFlow, "NEW OP"])}
+                    onClick={() => setProcessFlow([...processFlow, ""])}
                     className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" /> Add Step
@@ -1143,17 +1259,19 @@ export default function EightDProblemSolvingReport() {
               <div className="flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded min-h-[140px]">
                 {processFlow.map((step, sIdx) => (
                   <React.Fragment key={`step-${sIdx}`}>
-                    <div className="relative group border-2 border-gray-800 rounded px-2 py-1 text-[11px] font-bold text-center bg-gray-50 min-w-[90px] max-w-[140px]">
+                    <div className="relative group border-2 border-gray-800 rounded px-2.5 py-1.5 text-[11px] font-bold text-center bg-gray-50 min-w-[90px] inline-flex items-center justify-center transition-all shadow-sm">
                       <input
                         type="text"
                         disabled={isFormLocked}
+                        placeholder={`Step ${sIdx + 1}`}
                         value={step}
+                        size={Math.max(8, (step || "").length + 2)}
                         onChange={(e) => {
                           const updated = [...processFlow];
                           updated[sIdx] = e.target.value;
                           setProcessFlow(updated);
                         }}
-                        className="w-full bg-transparent text-center outline-none text-[10px] font-bold uppercase disabled:text-gray-700"
+                        className="bg-transparent text-center outline-none text-[11px] font-bold uppercase disabled:text-gray-700 px-1"
                       />
                       {!isFormLocked && processFlow.length > 1 && (
                         <button
@@ -1185,7 +1303,7 @@ export default function EightDProblemSolvingReport() {
             {!isFormLocked && (
               <button
                 type="button"
-                onClick={() => setInterimActions([...interimActions, { action: "", who: "", dueDate: getTodayISODate(), breakPoint: getTodayISODate() }])}
+                onClick={() => setInterimActions([...interimActions, { action: "", who: "", dueDate: "", breakPoint: "" }])}
                 className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Row
@@ -1210,6 +1328,7 @@ export default function EightDProblemSolvingReport() {
                     <input
                       type="text"
                       disabled={isFormLocked}
+                      placeholder="Enter containment action..."
                       className="w-full outline-none font-medium text-xs px-1 disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.action}
                       onChange={(e) => {
@@ -1223,6 +1342,7 @@ export default function EightDProblemSolvingReport() {
                     <input
                       type="text"
                       disabled={isFormLocked}
+                      placeholder="Responsibility"
                       className="w-full text-center outline-none font-medium text-xs disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.who}
                       onChange={(e) => {
@@ -1275,7 +1395,7 @@ export default function EightDProblemSolvingReport() {
           </table>
         </div>
 
-        {/* (4) ROOT CAUSE ANALYSIS - ISHIKAWA CAUSE & EFFECT */}
+        {/* (4) ROOT CAUSE ANALYSIS - ISHIKAWA CAUSE & EFFECT (WITH EDITABLE CIRCLE COLUMN) */}
         <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-xs font-bold uppercase text-gray-800">
@@ -1446,18 +1566,19 @@ export default function EightDProblemSolvingReport() {
                 );
               })}
 
-              {/* Problem Head */}
+              {/* Problem Head Circle */}
               <circle cx="780" cy="190" r="58" stroke="#1f2937" strokeWidth="2.5" fill="#f9fafb" />
               <text x="780" y="125" textAnchor="middle" fontWeight="bold" fontSize="11" fill="#1f2937">PROBLEM</text>
               <foreignObject x="730" y="152" width="100" height="75">
                 <div xmlns="http://www.w3.org/1999/xhtml" className="text-[10px] font-bold text-center text-gray-800 leading-tight">
-                  {fishbone.problem}
+                  {fishbone.problem || "PROBLEM"}
                 </div>
               </foreignObject>
             </svg>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          {/* FISHBONE CAUSES + PROBLEM CIRCLE EDITABLE COLUMNS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
             {["man", "machine", "method", "material"].map((cat) => (
               <div key={cat} className="border border-gray-300 p-2.5 rounded bg-white space-y-1.5">
                 <div className="flex justify-between items-center border-b pb-1">
@@ -1509,6 +1630,21 @@ export default function EightDProblemSolvingReport() {
                 })}
               </div>
             ))}
+
+            {/* Editable Problem Circle Column */}
+            <div className="border border-gray-300 p-2.5 rounded bg-white space-y-1.5">
+              <div className="flex justify-between items-center border-b pb-1">
+                <span className="font-bold uppercase text-gray-700">Problem (Circle)</span>
+              </div>
+              <textarea
+                rows={3}
+                disabled={isFormLocked}
+                className="border border-gray-200 p-1.5 rounded w-full text-[11px] font-medium disabled:bg-gray-100 disabled:text-gray-700 resize-none outline-none focus:ring-1 focus:ring-orange-500"
+                value={fishbone.problem || ""}
+                placeholder="Enter problem statement inside circle..."
+                onChange={(e) => setFishbone((prev) => ({ ...prev, problem: e.target.value }))}
+              />
+            </div>
           </div>
         </div>
 
@@ -1519,7 +1655,7 @@ export default function EightDProblemSolvingReport() {
             {!isFormLocked && (
               <button
                 type="button"
-                onClick={() => setValidationRows([...validationRows, { testSimulation: "", verification: "", date: getTodayISODate(), significant: "INSIGNIFICANT", remarks: "" }])}
+                onClick={() => setValidationRows([...validationRows, { testSimulation: "", verification: "", date: "", significant: "", remarks: "" }])}
                 className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Row
@@ -1544,6 +1680,7 @@ export default function EightDProblemSolvingReport() {
                     <input
                       type="text"
                       disabled={isFormLocked}
+                      placeholder="Simulation / test conducted"
                       className="w-full font-semibold text-xs outline-none disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.testSimulation}
                       onChange={(e) => {
@@ -1557,6 +1694,7 @@ export default function EightDProblemSolvingReport() {
                     <input
                       type="text"
                       disabled={isFormLocked}
+                      placeholder="Outcome of verification"
                       className="w-full font-medium text-xs outline-none disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.verification}
                       onChange={(e) => {
@@ -1592,6 +1730,7 @@ export default function EightDProblemSolvingReport() {
                         setValidationRows(updated);
                       }}
                     >
+                      <option value="">-- Select --</option>
                       <option value="INSIGNIFICANT">INSIGNIFICANT</option>
                       <option value="SIGNIFICANT">SIGNIFICANT</option>
                     </select>
@@ -1600,6 +1739,7 @@ export default function EightDProblemSolvingReport() {
                     <input
                       type="text"
                       disabled={isFormLocked}
+                      placeholder="Remarks"
                       className="w-full font-medium text-xs outline-none disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.remarks}
                       onChange={(e) => {
@@ -1643,6 +1783,7 @@ export default function EightDProblemSolvingReport() {
                           <textarea
                             rows={2}
                             disabled={isFormLocked}
+                            placeholder={`Why ${w}...`}
                             className="w-full text-xs font-medium p-1 outline-none resize-none bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
                             value={fiveWhy[type][`why${w}`] || ""}
                             onChange={(e) =>
@@ -1707,6 +1848,7 @@ export default function EightDProblemSolvingReport() {
                 <input
                   type="text"
                   disabled={isFormLocked}
+                  placeholder="Enter RPN"
                   className="border border-gray-300 p-1 rounded text-xs font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-700"
                   value={fiveWhy.pfmeaRpn}
                   onChange={(e) => setFiveWhy({ ...fiveWhy, pfmeaRpn: e.target.value })}
@@ -1736,7 +1878,7 @@ export default function EightDProblemSolvingReport() {
               rows={2}
               disabled={isFormLocked}
               className="w-full border border-gray-300 p-2 rounded text-xs bg-white font-medium outline-none disabled:bg-gray-100 disabled:text-gray-700"
-              placeholder="e.g. AFTER INSERT CHANGED CONTINUOUSLY 10 SETS QF VERIFIED OK"
+              placeholder="Confirmation trial to test proposed solution..."
               value={solution.trialRun}
               onChange={(e) => setSolution({ ...solution, trialRun: e.target.value })}
             />
@@ -1756,6 +1898,7 @@ export default function EightDProblemSolvingReport() {
                 <input
                   type="text"
                   disabled={isFormLocked}
+                  placeholder="Sequence numbers"
                   className="w-full border border-gray-300 p-1 rounded text-xs bg-white font-medium disabled:bg-gray-100 disabled:text-gray-700"
                   value={solution.trialRunSequence}
                   onChange={(e) => setSolution({ ...solution, trialRunSequence: e.target.value })}
@@ -1799,7 +1942,7 @@ export default function EightDProblemSolvingReport() {
                       disabled={isFormLocked}
                       className="w-full outline-none font-medium text-xs px-1 disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.action}
-                      placeholder={`Enter ${row.type} action`}
+                      placeholder={`Enter ${row.type} action plan...`}
                       onChange={(e) => {
                         const updated = [...correctiveActions];
                         updated[idx].action = e.target.value;
@@ -1811,6 +1954,7 @@ export default function EightDProblemSolvingReport() {
                     <input
                       type="text"
                       disabled={isFormLocked}
+                      placeholder="Responsibility"
                       className="w-full text-center outline-none font-medium text-xs disabled:bg-gray-100 disabled:text-gray-700"
                       value={row.who}
                       onChange={(e) => {
@@ -1864,74 +2008,302 @@ export default function EightDProblemSolvingReport() {
         </div>
 
         {/* (7) VERIFICATION & RESOLUTION QUESTIONS */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 space-y-2 text-xs">
-            <h3 className="font-bold uppercase text-gray-800">(7) Verification & Resolution Questions:</h3>
-            <table className="w-full border border-gray-300 text-left bg-white">
-              <thead className="bg-gray-200 font-bold text-center">
-                <tr>
-                  <th className="p-1.5 border">Question</th>
-                  <th className="p-1.5 border w-10">Y</th>
-                  <th className="p-1.5 border w-10">N</th>
-                  <th className="p-1.5 border w-10">N/A</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { key: "q1", text: "Has the Drawing been updated?" },
-                  { key: "q2", text: "Has the Work instruction, SOP/PFD been updated?" },
-                  { key: "q3", text: "Has the Product Quality Standard been updated?" },
-                  { key: "q4", text: "Have Prints, Check Sheets or other forms been updated?" },
-                  { key: "q5", text: "Have the PFMEA and Control Plans been updated?" },
-                  { key: "q6", text: "The results/changes were communicated to all affected Team Members?" },
-                ].map((q) => (
-                  <tr key={q.key} className="border-b">
-                    <td className="p-1.5 font-medium border-r">{q.text}</td>
-                    {["Y", "N", "N/A"].map((opt) => (
-                      <td key={opt} className="p-1.5 text-center border-r">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 space-y-2 text-xs">
+              <h3 className="font-bold uppercase text-gray-800">(7) Verification & Resolution Questions:</h3>
+              <table className="w-full border border-gray-300 text-left bg-white">
+                <thead className="bg-gray-200 font-bold text-center">
+                  <tr>
+                    <th className="p-1.5 border">Question</th>
+                    <th className="p-1.5 border w-10">Y</th>
+                    <th className="p-1.5 border w-10">N</th>
+                    <th className="p-1.5 border w-10">N/A</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { key: "q1", text: "Has the Drawing been updated?" },
+                    { key: "q2", text: "Has the Work instruction, SOP/PFD been updated?" },
+                    { key: "q3", text: "Has the Product Quality Standard been updated?" },
+                    { key: "q4", text: "Have Prints, Check Sheets or other forms been updated?" },
+                    { key: "q5", text: "Have the PFMEA and Control Plans been updated?" },
+                    { key: "q6", text: "The results/changes were communicated to all affected Team Members?" },
+                  ].map((q) => (
+                    <tr key={q.key} className="border-b">
+                      <td className="p-1.5 font-medium border-r">{q.text}</td>
+                      {["Y", "N", "N/A"].map((opt) => (
+                        <td key={opt} className="p-1.5 text-center border-r">
+                          <input
+                            type="radio"
+                            disabled={isFormLocked}
+                            name={q.key}
+                            checked={verification[q.key] === opt}
+                            onChange={() => setVerification({ ...verification, [q.key]: opt })}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase text-gray-800 mb-2">(7a) Lessons Learned:</h3>
+                <textarea
+                  rows={5}
+                  disabled={isFormLocked}
+                  className="w-full border border-gray-300 p-2 rounded text-xs bg-white font-medium outline-none disabled:bg-gray-100 disabled:text-gray-700"
+                  placeholder="Document key insights gained..."
+                  value={verification.lessonsLearned}
+                  onChange={(e) => setVerification({ ...verification, lessonsLearned: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* ISSUE RESOLVED SATISFACTORILY BAR */}
+          <div className="border border-gray-300 p-3 rounded-lg bg-gray-50 flex flex-wrap items-center justify-between gap-4 text-xs font-semibold">
+            <div className="flex items-center gap-4">
+              <span className="font-bold text-gray-800">Issue Resolved satisfactorily?</span>
+              <label className={`flex items-center gap-1 ${isFormLocked ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
+                <input
+                  type="radio"
+                  disabled={isFormLocked}
+                  name="issueResolved"
+                  checked={verification.issueResolved === "Yes"}
+                  onChange={() => setVerification({ ...verification, issueResolved: "Yes" })}
+                />
+                Yes
+              </label>
+              <label className={`flex items-center gap-1 ${isFormLocked ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
+                <input
+                  type="radio"
+                  disabled={isFormLocked}
+                  name="issueResolved"
+                  checked={verification.issueResolved === "No"}
+                  onChange={() => setVerification({ ...verification, issueResolved: "No" })}
+                />
+                No
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-gray-700">Date Closed:</span>
+              <input
+                type="date"
+                disabled={isFormLocked}
+                className="border border-gray-300 p-1 rounded text-xs bg-white disabled:bg-gray-100 disabled:text-gray-700"
+                value={verification.dateClosed || ""}
+                onChange={(e) => setVerification({ ...verification, dateClosed: e.target.value })}
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-gray-700">Assigned To:</span>
+              <input
+                type="text"
+                disabled={isFormLocked}
+                placeholder="Assigned person"
+                className="border border-gray-300 p-1 rounded text-xs bg-white disabled:bg-gray-100 disabled:text-gray-700 w-32"
+                value={verification.assignedTo || ""}
+                onChange={(e) => setVerification({ ...verification, assignedTo: e.target.value })}
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-gray-700">Tracking #:</span>
+              <input
+                type="text"
+                disabled={isFormLocked}
+                placeholder="Tracking number"
+                className="border border-gray-300 p-1 rounded text-xs bg-white disabled:bg-gray-100 disabled:text-gray-700 w-32"
+                value={verification.trackingNo || ""}
+                onChange={(e) => setVerification({ ...verification, trackingNo: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {/* (7b) EFFECTIVENESS MONITORING & (7c) HORIZONTAL DEPLOYMENT */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 text-xs space-y-2">
+              <h3 className="font-bold uppercase text-gray-800">(7b) Effectiveness Monitoring (up to 3 months):</h3>
+              <table className="w-full border border-gray-300 text-center bg-white text-xs">
+                <thead className="bg-gray-200 font-bold">
+                  <tr>
+                    <th className="border p-2 w-1/4">Metric</th>
+                    <th className="border p-2 w-1/4">Month 1</th>
+                    <th className="border p-2 w-1/4">Month 2</th>
+                    <th className="border p-2 w-1/4">Month 3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="border p-2 font-bold bg-gray-100 text-left">Month</td>
+                    {[0, 1, 2].map((idx) => (
+                      <td key={`month-${idx}`} className="border p-1">
                         <input
-                          type="radio"
+                          type="text"
                           disabled={isFormLocked}
-                          name={q.key}
-                          checked={verification[q.key] === opt}
-                          onChange={() => setVerification({ ...verification, [q.key]: opt })}
+                          placeholder={`Month ${idx + 1}`}
+                          className="w-full text-center outline-none text-xs font-semibold bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          value={verification.effectiveness?.[idx]?.month || ""}
+                          onChange={(e) => {
+                            const eff = [...(verification.effectiveness || [{ month: "", rejQty: "", rejPct: "" }, { month: "", rejQty: "", rejPct: "" }, { month: "", rejQty: "", rejPct: "" }])];
+                            eff[idx] = { ...eff[idx], month: e.target.value };
+                            setVerification({ ...verification, effectiveness: eff });
+                          }}
                         />
                       </td>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
-            <div>
-              <h3 className="text-xs font-bold uppercase text-gray-800 mb-2">(7a) Lessons Learned:</h3>
-              <textarea
-                rows={4}
-                disabled={isFormLocked}
-                className="w-full border border-gray-300 p-2 rounded text-xs bg-white font-medium outline-none disabled:bg-gray-100 disabled:text-gray-700"
-                placeholder="Document key insights gained..."
-                value={verification.lessonsLearned}
-                onChange={(e) => setVerification({ ...verification, lessonsLearned: e.target.value })}
-              />
+                  <tr>
+                    <td className="border p-2 font-bold bg-gray-100 text-left">Rej Qty</td>
+                    {[0, 1, 2].map((idx) => (
+                      <td key={`rejQty-${idx}`} className="border p-1">
+                        <input
+                          type="text"
+                          disabled={isFormLocked}
+                          placeholder="0"
+                          className="w-full text-center outline-none text-xs font-semibold bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          value={verification.effectiveness?.[idx]?.rejQty || ""}
+                          onChange={(e) => {
+                            const eff = [...(verification.effectiveness || [{ month: "", rejQty: "", rejPct: "" }, { month: "", rejQty: "", rejPct: "" }, { month: "", rejQty: "", rejPct: "" }])];
+                            eff[idx] = { ...eff[idx], rejQty: e.target.value };
+                            setVerification({ ...verification, effectiveness: eff });
+                          }}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="border p-2 font-bold bg-gray-100 text-left">Rej %</td>
+                    {[0, 1, 2].map((idx) => (
+                      <td key={`rejPct-${idx}`} className="border p-1">
+                        <input
+                          type="text"
+                          disabled={isFormLocked}
+                          placeholder="0%"
+                          className="w-full text-center outline-none text-xs font-semibold bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          value={verification.effectiveness?.[idx]?.rejPct || ""}
+                          onChange={(e) => {
+                            const eff = [...(verification.effectiveness || [{ month: "", rejQty: "", rejPct: "" }, { month: "", rejQty: "", rejPct: "" }, { month: "", rejQty: "", rejPct: "" }])];
+                            eff[idx] = { ...eff[idx], rejPct: e.target.value };
+                            setVerification({ ...verification, effectiveness: eff });
+                          }}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
-            <div className="pt-2 border-t mt-2">
-              <h3 className="text-xs font-bold uppercase text-gray-800 mb-1">(7c) Horizontal Deployment:</h3>
-              <textarea
-                rows={3}
-                disabled={isFormLocked}
-                className="w-full border border-gray-300 p-2 rounded text-xs bg-white font-medium outline-none disabled:bg-gray-100 disabled:text-gray-700"
-                placeholder="Detail horizontal expansion to other lines/machines..."
-                value={verification.horizontalDeployment}
-                onChange={(e) => setVerification({ ...verification, horizontalDeployment: e.target.value })}
-              />
+            <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase text-gray-800 mb-2">(7c) Horizontal Deployment:</h3>
+                <textarea
+                  rows={4}
+                  disabled={isFormLocked}
+                  className="w-full border border-gray-300 p-2 rounded text-xs bg-white font-medium outline-none disabled:bg-gray-100 disabled:text-gray-700"
+                  placeholder="Detail horizontal expansion to other lines/machines..."
+                  value={verification.horizontalDeployment || ""}
+                  onChange={(e) => setVerification({ ...verification, horizontalDeployment: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* (8) CLOSURE SIGN-OFF SECTION */}
+          <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 text-xs space-y-2">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold uppercase text-gray-800">(8) Closure Sign-off:</h3>
+              <span className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">APPROVALS</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border border-gray-300 text-center bg-white min-w-[700px]">
+                <thead className="bg-gray-200 font-bold">
+                  <tr>
+                    <th className="border p-2 w-[15%]">Shift</th>
+                    <th className="border p-2 w-[45%]">Team Members Involved</th>
+                    <th className="border p-2 w-[20%]">Team Leader / Group Leader</th>
+                    <th className="border p-2 w-[20%]">Production / Quality Head</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(verification.closureSignOff || [
+                    { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+                    { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+                    { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+                  ]).map((row, sIdx) => (
+                    <tr key={`closure-${sIdx}`}>
+                      <td className="border p-1.5 font-bold bg-gray-50">
+                        <input
+                          type="text"
+                          disabled={isFormLocked}
+                          className="w-full text-center outline-none text-xs font-bold bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          value={row.shift || ""}
+                          placeholder={`Shift ${sIdx + 1}`}
+                          onChange={(e) => {
+                            const cso = [...(verification.closureSignOff || [])];
+                            cso[sIdx] = { ...cso[sIdx], shift: e.target.value };
+                            setVerification({ ...verification, closureSignOff: cso });
+                          }}
+                        />
+                      </td>
+                      <td className="border p-1">
+                        <input
+                          type="text"
+                          disabled={isFormLocked}
+                          className="w-full outline-none text-xs px-2 bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          placeholder="Names of team members involved..."
+                          value={row.teamMembers || ""}
+                          onChange={(e) => {
+                            const cso = [...(verification.closureSignOff || [])];
+                            cso[sIdx] = { ...cso[sIdx], teamMembers: e.target.value };
+                            setVerification({ ...verification, closureSignOff: cso });
+                          }}
+                        />
+                      </td>
+                      <td className="border p-1">
+                        <input
+                          type="text"
+                          disabled={isFormLocked}
+                          className="w-full text-center outline-none text-xs px-1 bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          placeholder="Signature / Name"
+                          value={row.teamLeader || ""}
+                          onChange={(e) => {
+                            const cso = [...(verification.closureSignOff || [])];
+                            cso[sIdx] = { ...cso[sIdx], teamLeader: e.target.value };
+                            setVerification({ ...verification, closureSignOff: cso });
+                          }}
+                        />
+                      </td>
+                      <td className="border p-1">
+                        <input
+                          type="text"
+                          disabled={isFormLocked}
+                          className="w-full text-center outline-none text-xs px-1 bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                          placeholder="Signature / Name"
+                          value={row.prodQualityHead || ""}
+                          onChange={(e) => {
+                            const cso = [...(verification.closureSignOff || [])];
+                            cso[sIdx] = { ...cso[sIdx], prodQualityHead: e.target.value };
+                            setVerification({ ...verification, closureSignOff: cso });
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
 
-        {/* (8) SIGNATURES TABLE */}
+        {/* SYSTEM DIGITAL SIGNATURES & VERIFICATION WORKFLOW */}
         <div className="overflow-x-auto mt-6">
           <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center min-w-[800px]">
             <thead>

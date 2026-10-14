@@ -842,7 +842,7 @@ const generateEightDPdf = async (req, res) => {
     const teamList = r.TeamMembers ? JSON.parse(r.TeamMembers).filter(Boolean).join(", ") : "-";
     doc.font("Helvetica-Bold").text("(1) Team: ", startX + 560, metaY + 27, { continued: true }).font("Helvetica").text(teamList || '-', { width: fullWidth - 565, ellipsis: true });
 
-    // 3. (2) EMERGENCY ACTIONS & (2b) PROCESS FLOW (Height: 64)
+    // 3. (2) EMERGENCY ACTIONS & (2b) DYNAMIC PROCESS FLOW (Height: 64)
     const sec2Y = 88;
     const halfW = (fullWidth - 8) / 2;
 
@@ -871,7 +871,7 @@ const generateEightDPdf = async (req, res) => {
 
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#374151').text(`Customer Visit Required: ${r.IsCustomerVisitRequired || 'No'}`, startX + 6, segY + 44);
 
-    // Right Box: (2b) Process Flow Sketch
+    // Right Box: (2b) Process Flow Sketch with Dynamic Horizontal & Vertical Sizing
     doc.rect(startX + halfW + 8, sec2Y, halfW, 64).stroke();
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(2b) Sketch / Process Flow Sequence:", startX + halfW + 14, sec2Y + 4);
 
@@ -883,24 +883,65 @@ const generateEightDPdf = async (req, res) => {
     }
     const cleanFlow = flowSteps.filter(Boolean);
 
-    let fx = startX + halfW + 14;
-    let fy = sec2Y + 22;
-    cleanFlow.slice(0, 8).forEach((st, idx) => {
-      const stepTxt = String(st).substring(0, 16);
-      const boxW = Math.max(38, doc.widthOfString(stepTxt, { size: 5.5 }) + 10);
+    const leftLimit = startX + halfW + 14;
+    const rightLimit = startX + fullWidth - 10;
+    let fx = leftLimit;
+    let fy = sec2Y + 18;
+    const maxBoxW = 95; // Maximum horizontal box width in PDF
+    const minBoxW = 38;
 
-      if (fx + boxW > startX + fullWidth - 10) {
-        fx = startX + halfW + 14;
-        fy += 18;
+    cleanFlow.slice(0, 8).forEach((st, idx) => {
+      const stepStr = String(st).trim();
+      const textWidth = doc.font("Helvetica-Bold").fontSize(5.5).widthOfString(stepStr);
+
+      // Dynamic sizing: grow horizontally up to maxBoxW, else cap width & grow vertically
+      let boxW = Math.max(minBoxW, Math.min(maxBoxW, textWidth + 10));
+      let boxH = 14;
+      if (textWidth + 10 > maxBoxW) {
+        boxW = maxBoxW;
+        boxH = 20; // Multi-line vertical expansion
       }
 
-      doc.rect(fx, fy, boxW, 14).fillAndStroke('#ffffff', '#1f2937');
-      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(stepTxt, fx + 2, fy + 4, { width: boxW - 4, align: 'center' });
-      fx += boxW;
+      // Check if box exceeds container boundary horizontally; if so, wrap to next line
+      if (fx + boxW > rightLimit) {
+        fx = leftLimit;
+        fy += 22; // Move down to next line
+      }
 
-      if (idx < cleanFlow.length - 1 && idx < 7) {
-        doc.font("Helvetica-Bold").fontSize(7).fillColor('#ea580c').text("→", fx + 2, fy + 3);
-        fx += 12;
+      // Safeguard: keep strictly within the 2B container height
+      if (fy + boxH <= sec2Y + 63) {
+        doc.rect(fx, fy, boxW, boxH).fillAndStroke('#ffffff', '#1f2937');
+        doc.font("Helvetica-Bold").fontSize(5.2).fillColor('#111827')
+          .text(stepStr, fx + 2, fy + (boxH > 14 ? 2.5 : 3.5), {
+            width: boxW - 4,
+            align: 'center',
+            height: boxH - 2,
+            ellipsis: true
+          });
+
+        fx += boxW;
+
+        if (idx < cleanFlow.length - 1 && idx < 7) {
+          if (fx + 14 <= rightLimit) {
+            const arrowY = fy + boxH / 2;
+            const arrowStartX = fx + 2;
+            const arrowEndX = fx + 11;
+
+            // Draw orange right arrow using PDF vector lines
+            doc.save();
+            doc.lineWidth(1.2)
+              .strokeColor('#ea580c')
+              .moveTo(arrowStartX, arrowY)
+              .lineTo(arrowEndX, arrowY)
+              .moveTo(arrowEndX - 3, arrowY - 3)
+              .lineTo(arrowEndX, arrowY)
+              .lineTo(arrowEndX - 3, arrowY + 3)
+              .stroke();
+            doc.restore();
+
+            fx += 12;
+          }
+        }
       }
     });
 

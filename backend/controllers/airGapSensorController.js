@@ -3,12 +3,78 @@ const PDFDocument = require("pdfkit");
 const fs = require('fs');
 const path = require('path');
 
-// Helper to sanitize time values for SQL TIME/VARCHAR data type
-const sanitizeTime = (timeStr) => {
-    if (!timeStr || typeof timeStr !== 'string' || !timeStr.trim()) {
-        return null;
+// Helper to format Date objects or ISO strings cleanly to DD/MM/YYYY
+const formatDateDisplay = (dateVal) => {
+    if (!dateVal) return '';
+    if (dateVal instanceof Date) {
+        const dd = String(dateVal.getDate()).padStart(2, '0');
+        const mm = String(dateVal.getMonth() + 1).padStart(2, '0');
+        const yyyy = dateVal.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
     }
-    return timeStr.trim();
+    const str = String(dateVal).split('T')[0].trim();
+    const parts = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (parts) {
+        return `${parts[3]}/${parts[2]}/${parts[1]}`;
+    }
+    const d = new Date(dateVal);
+    if (!isNaN(d.getTime())) {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
+    }
+    return str;
+};
+
+// Helper to extract clean YYYY-MM-DD for grouping
+const getDateISO = (dateVal) => {
+    if (!dateVal) return '';
+    if (dateVal instanceof Date) {
+        const dd = String(dateVal.getDate()).padStart(2, '0');
+        const mm = String(dateVal.getMonth() + 1).padStart(2, '0');
+        const yyyy = dateVal.getFullYear();
+        return `${yyyy}-${mm}-${dd}`;
+    }
+    const str = String(dateVal).split('T')[0].trim();
+    const parts = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (parts) return parts[0];
+    const d = new Date(dateVal);
+    if (!isNaN(d.getTime())) {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${yyyy}-${mm}-${dd}`;
+    }
+    return str;
+};
+
+// Case-insensitive extractor for Master Unique ID
+const extractMasterId = (obj) => {
+    if (!obj) return '';
+    for (const k of Object.keys(obj)) {
+        if (/master.*unique.*id|master_?id/i.test(k)) {
+            const val = obj[k];
+            if (val !== null && val !== undefined && String(val).trim() !== '' && String(val).trim() !== '-') {
+                return String(val).trim();
+            }
+        }
+    }
+    return '';
+};
+
+// Case-insensitive extractor for Error Proof No
+const extractErrorProofNo = (obj) => {
+    if (!obj) return '';
+    for (const k of Object.keys(obj)) {
+        if (/error.*proof.*no/i.test(k)) {
+            const val = obj[k];
+            if (val !== null && val !== undefined && String(val).trim() !== '' && String(val).trim() !== '-') {
+                return String(val).trim();
+            }
+        }
+    }
+    return '';
 };
 
 // ============================================================
@@ -101,18 +167,37 @@ const saveAirGapSensor = async (req, res) => {
         await transaction.begin();
 
         const shifts = ['I', 'II', 'III'];
+        const checkDate = header.date;
 
         for (const block of blockList) {
-            const checkDate = header.date;
             const dateChecks = block.dailyChecks?.[checkDate] || {};
             const lineSignatures = block.lineInchargeSignatures?.[checkDate] || {};
             const parameters = block.parameters || [];
+
+            // Update Master Unique ID and Error Proof No on existing records for this machine/date
+            if (block.machineNo && (block.masterUniqueId || block.errorProofNo)) {
+                const metaUpdateReq = new sql.Request(transaction);
+                metaUpdateReq.input('machineShop', sql.Int, parseInt(header.machineShop))
+                    .input('lineCode', sql.NVarChar(50), header.lineCode)
+                    .input('partNo', sql.NVarChar(100), header.partNo || '')
+                    .input('checkDate', sql.Date, checkDate)
+                    .input('machineNo', sql.NVarChar(50), block.machineNo || '')
+                    .input('masterUniqueId', sql.NVarChar(100), block.masterUniqueId || '')
+                    .input('errorProofNo', sql.NVarChar(100), block.errorProofNo || '');
+
+                await metaUpdateReq.query(`
+                    UPDATE AirGapSensorCheckSheet
+                    SET masterUniqueId = CASE WHEN @masterUniqueId <> '' THEN @masterUniqueId ELSE masterUniqueId END,
+                        errorProofNo = CASE WHEN @errorProofNo <> '' THEN @errorProofNo ELSE errorProofNo END
+                    WHERE machineShop = @machineShop AND lineCode = @lineCode AND partNo = @partNo
+                      AND checkDate = @checkDate AND machineNo = @machineNo
+                `);
+            }
 
             for (const shift of shifts) {
                 const shiftHasStatus = parameters.some((_, paramIdx) => (dateChecks[paramIdx]?.[shift] || '') !== '');
                 const lineInchargeSignature = lineSignatures[shift] || '';
 
-                // Format the PE assignment to "Pending [NAME]" using ONLY the productionSignature column
                 let productionSignature = shiftProdSignatures?.[checkDate]?.[shift] || '';
                 if (productionSignature && !productionSignature.startsWith('Pending [') && !productionSignature.startsWith('Approved (')) {
                     productionSignature = `Pending [${productionSignature}]`;
@@ -134,7 +219,7 @@ const saveAirGapSensor = async (req, res) => {
                       AND checkDate = @checkDate AND machineNo = @machineNo AND shift = @shift
                 `);
 
-                if (existingResult.recordset[0].count > 0) continue;
+                const alreadyExists = existingResult.recordset[0].count > 0;
 
                 for (let paramIdx = 0; paramIdx < parameters.length; paramIdx++) {
                     const param = parameters[paramIdx];
@@ -147,6 +232,7 @@ const saveAirGapSensor = async (req, res) => {
                         .input('partNo', sql.NVarChar(100), header.partNo || '')
                         .input('checkDate', sql.Date, checkDate)
                         .input('machineNo', sql.NVarChar(50), block.machineNo || '')
+                        .input('masterUniqueId', sql.NVarChar(100), block.masterUniqueId || '')
                         .input('errorProofNo', sql.NVarChar(100), block.errorProofNo || '')
                         .input('parameter', sql.NVarChar(255), param.masterPosition || '')
                         .input('expectedStatus', sql.NVarChar(255), param.expectedStatus || '')
@@ -155,14 +241,28 @@ const saveAirGapSensor = async (req, res) => {
                         .input('lineInchargeSignature', sql.NVarChar(255), lineInchargeSignature)
                         .input('productionSignature', sql.NVarChar(255), productionSignature);
 
-                    await request.query(`
-                        INSERT INTO AirGapSensorCheckSheet
-                        (machineShop, lineCode, partName, partNo, checkDate, machineNo, errorProofNo,
-                         parameter, expectedStatus, shift, status, lineInchargeSignature, productionSignature)
-                        VALUES
-                        (@machineShop, @lineCode, @partName, @partNo, @checkDate, @machineNo, @errorProofNo,
-                         @parameter, @expectedStatus, @shift, @status, @lineInchargeSignature, @productionSignature)
-                    `);
+                    if (alreadyExists) {
+                        await request.query(`
+                            UPDATE AirGapSensorCheckSheet
+                            SET masterUniqueId = CASE WHEN @masterUniqueId <> '' THEN @masterUniqueId ELSE masterUniqueId END,
+                                errorProofNo = CASE WHEN @errorProofNo <> '' THEN @errorProofNo ELSE errorProofNo END,
+                                status = CASE WHEN @status <> '' THEN @status ELSE status END,
+                                lineInchargeSignature = CASE WHEN @lineInchargeSignature <> '' THEN @lineInchargeSignature ELSE lineInchargeSignature END,
+                                productionSignature = CASE WHEN @productionSignature <> '' THEN @productionSignature ELSE productionSignature END
+                            WHERE machineShop = @machineShop AND lineCode = @lineCode AND partNo = @partNo
+                              AND checkDate = @checkDate AND machineNo = @machineNo AND shift = @shift
+                              AND parameter = @parameter
+                        `);
+                    } else {
+                        await request.query(`
+                            INSERT INTO AirGapSensorCheckSheet
+                            (machineShop, lineCode, partName, partNo, checkDate, machineNo, masterUniqueId, errorProofNo,
+                             parameter, expectedStatus, shift, status, lineInchargeSignature, productionSignature)
+                            VALUES
+                            (@machineShop, @lineCode, @partName, @partNo, @checkDate, @machineNo, @masterUniqueId, @errorProofNo,
+                             @parameter, @expectedStatus, @shift, @status, @lineInchargeSignature, @productionSignature)
+                        `);
+                    }
                 }
             }
         }
@@ -183,8 +283,6 @@ const getPendingPEAirGapData = async (req, res) => {
         const shopId = parseInt(req.query.shopId, 10);
 
         const request = new sql.Request();
-
-        // Exact match formatting to find assignments made by the operator
         const pendingString = `Pending [${String(name || '').trim()}]`;
         request.input('peName', sql.NVarChar(255), pendingString);
 
@@ -285,7 +383,7 @@ const getAirGapSensorCheckSheet = async (req, res) => {
 };
 
 // ============================================================
-// PDF GENERATION (DATE RANGE WITH VECTOR CHECKMARKS & CROSSES)
+// PDF GENERATION
 // ============================================================
 const generateAirGapReport = async (req, res) => {
     try {
@@ -305,11 +403,29 @@ const generateAirGapReport = async (req, res) => {
         request.input('machineShop', sql.Int, targetShopId);
 
         const query = `
-            SELECT * FROM AirGapSensorCheckSheet 
-            WHERE machineShop = @machineShop 
-              AND CONVERT(date, checkDate) >= @fromDate 
-              AND CONVERT(date, checkDate) <= @toDate
-            ORDER BY checkDate ASC, lineCode ASC, machineNo ASC, parameter ASC, shift ASC
+            SELECT 
+                a.*,
+                FORMAT(a.checkDate, 'yyyy-MM-dd') AS formattedDate,
+                FORMAT(a.checkDate, 'dd/MM/yyyy') AS displayDateStr,
+                COALESCE(
+                    NULLIF(a.masterUniqueId, ''),
+                    (SELECT TOP 1 NULLIF(sub.masterUniqueId, '') 
+                     FROM AirGapSensorCheckSheet sub 
+                     WHERE sub.lineCode = a.lineCode AND sub.machineNo = a.machineNo AND NULLIF(sub.masterUniqueId, '') IS NOT NULL 
+                     ORDER BY sub.checkDate DESC, sub.id DESC)
+                ) AS resolvedMasterUniqueId,
+                COALESCE(
+                    NULLIF(a.errorProofNo, ''),
+                    (SELECT TOP 1 NULLIF(sub.errorProofNo, '') 
+                     FROM AirGapSensorCheckSheet sub 
+                     WHERE sub.lineCode = a.lineCode AND sub.machineNo = a.machineNo AND NULLIF(sub.errorProofNo, '') IS NOT NULL 
+                     ORDER BY sub.checkDate DESC, sub.id DESC)
+                ) AS resolvedErrorProofNo
+            FROM AirGapSensorCheckSheet a
+            WHERE a.machineShop = @machineShop 
+              AND CONVERT(date, a.checkDate) >= @fromDate 
+              AND CONVERT(date, a.checkDate) <= @toDate
+            ORDER BY a.checkDate ASC, a.lineCode ASC, a.machineNo ASC, a.parameter ASC, a.shift ASC
         `;
 
         const result = await request.query(query);
@@ -319,10 +435,9 @@ const generateAirGapReport = async (req, res) => {
             return res.status(404).json({ error: "No records found for the selected date range." });
         }
 
-        // Group records by unique compound key: lineCode + partNo + checkDate
         const groupedMap = new Map();
         records.forEach(r => {
-            const dateStr = String(r.checkDate).split('T')[0];
+            const dateStr = r.formattedDate || getDateISO(r.checkDate);
             const groupKey = `${r.lineCode}_${r.partNo || ''}_${dateStr}`;
             if (!groupedMap.has(groupKey)) {
                 groupedMap.set(groupKey, []);
@@ -345,17 +460,15 @@ const generateAirGapReport = async (req, res) => {
         doc.pipe(res);
 
         const startX = 20;
-        const totalWidth = doc.page.width - 40; // 801.89pt landscape width
+        const totalWidth = doc.page.width - 40;
         const pageBottom = doc.page.height - 20;
         const topMargin = 20;
 
-        // Column widths for table
-        const wMach = 90, wMast = 110, wParam = 180, wExp = 140;
-        const leftTotal = wMach + wMast + wParam + wExp;
+        const wMach = 75, wMasterUid = 85, wMast = 95, wParam = 170, wExp = 130;
+        const leftTotal = wMach + wMasterUid + wMast + wParam + wExp;
         const dateColsWidth = totalWidth - leftTotal;
         const wShift = dateColsWidth / 3;
 
-        // Helper to draw clean vector checkmark (✓) centered at (centerX, centerY)
         const drawCheckMark = (centerX, centerY, size = 10) => {
             doc.save()
                .lineWidth(1.5)
@@ -367,7 +480,6 @@ const generateAirGapReport = async (req, res) => {
                .restore();
         };
 
-        // Helper to draw clean vector cross mark (X) centered at (centerX, centerY)
         const drawCrossMark = (centerX, centerY, size = 9) => {
             const half = size / 2;
             doc.save()
@@ -392,18 +504,33 @@ const generateAirGapReport = async (req, res) => {
 
         const drawEntry = (groupRecords, entryY) => {
             const first = groupRecords[0];
-            const rawDate = String(first.checkDate).split('T')[0];
-            const [yy, mm, dd] = rawDate.split('-');
-            const displayDate = `${dd}/${mm}/${yy}`;
+            const displayDate = first.displayDateStr || formatDateDisplay(first.checkDate);
 
             const blocksMap = {};
             const prodSigns = {};
 
             groupRecords.forEach(r => {
-                const key = `${r.machineNo}_${r.errorProofNo}`;
+                const key = String(r.machineNo || 'DEFAULT').trim();
+                const mUid = extractMasterId(r);
+                const epNo = extractErrorProofNo(r);
+
                 if (!blocksMap[key]) {
-                    blocksMap[key] = { machineNo: r.machineNo, errorProofNo: r.errorProofNo, data: {}, lineSigns: {} };
+                    blocksMap[key] = { 
+                        machineNo: r.machineNo || '', 
+                        masterUniqueId: mUid, 
+                        errorProofNo: epNo, 
+                        data: {}, 
+                        lineSigns: {} 
+                    };
                 }
+
+                if ((!blocksMap[key].masterUniqueId || blocksMap[key].masterUniqueId === '-') && mUid) {
+                    blocksMap[key].masterUniqueId = mUid;
+                }
+                if ((!blocksMap[key].errorProofNo || blocksMap[key].errorProofNo === '-') && epNo) {
+                    blocksMap[key].errorProofNo = epNo;
+                }
+
                 if (!blocksMap[key].data[r.shift]) blocksMap[key].data[r.shift] = {};
                 blocksMap[key].data[r.shift][r.parameter] = r.status;
 
@@ -417,7 +544,7 @@ const generateAirGapReport = async (req, res) => {
 
             const uniqueBlocks = Object.values(blocksMap);
 
-            // 1. Header Box (65pt)
+            // 1. Header Box
             const headerH = 65;
             const metaBoxWidth = 290;
             const logoBoxWidth = 130;
@@ -434,9 +561,10 @@ const generateAirGapReport = async (req, res) => {
                 doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI AUTO", startX, entryY + 25, { width: logoBoxWidth, align: "center" });
             }
 
-            // Title
+            // Title & Revision Header
             doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerH).stroke();
-            doc.font("Helvetica-Bold").fontSize(14).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, entryY + 25, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, entryY + 18, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica").fontSize(7.5).fillColor('#374151').text("Form Code: QF/07/MPD-06   |   Revision: 05", startX + logoBoxWidth, entryY + 36, { width: titleBoxWidth, align: "center" });
 
             // Metadata Box
             const metaX = startX + logoBoxWidth + titleBoxWidth;
@@ -445,7 +573,7 @@ const generateAirGapReport = async (req, res) => {
             doc.moveTo(metaX, entryY + 36).lineTo(metaX + metaBoxWidth, entryY + 36).stroke();
             doc.moveTo(metaX, entryY + 50).lineTo(metaX + metaBoxWidth, entryY + 50).stroke();
 
-            doc.font("Helvetica-Bold").fontSize(8.5);
+            doc.font("Helvetica-Bold").fontSize(8.5).fillColor('black');
             doc.text("LINE NAME", metaX + 5, entryY + 4); doc.text(`:   ${first.lineCode || ''}`, metaX + 70, entryY + 4);
             doc.text("PART NAME", metaX + 5, entryY + 20);
             doc.font("Helvetica").fontSize(7.5).text(`:   ${first.partName || ''}`, metaX + 70, entryY + 19, { width: metaBoxWidth - 75, height: 16, ellipsis: true });
@@ -456,19 +584,22 @@ const generateAirGapReport = async (req, res) => {
 
             let currY = entryY + headerH + 4;
 
-            // 2. Table Headers (28pt)
+            // 2. Table Headers
             const headerH1 = 15, headerH2 = 13;
             doc.rect(startX, currY, wMach, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
             doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Machine No", startX, currY + 9, { width: wMach, align: "center" });
 
-            doc.rect(startX + wMach, currY, wMast, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
-            doc.fillColor('black').text("Error Proof No", startX + wMach, currY + 9, { width: wMast, align: "center" });
+            doc.rect(startX + wMach, currY, wMasterUid, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
+            doc.fillColor('black').text("Master Unique ID", startX + wMach, currY + 9, { width: wMasterUid, align: "center" });
 
-            doc.rect(startX + wMach + wMast, currY, wParam, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
-            doc.fillColor('black').text("Parameter (Master Position)", startX + wMach + wMast, currY + 9, { width: wParam, align: "center" });
+            doc.rect(startX + wMach + wMasterUid, currY, wMast, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
+            doc.fillColor('black').text("Error Proof No", startX + wMach + wMasterUid, currY + 9, { width: wMast, align: "center" });
 
-            doc.rect(startX + wMach + wMast + wParam, currY, wExp, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
-            doc.fillColor('black').text("Expected Status", startX + wMach + wMast + wParam, currY + 9, { width: wExp, align: "center" });
+            doc.rect(startX + wMach + wMasterUid + wMast, currY, wParam, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
+            doc.fillColor('black').text("Parameter (Master Position)", startX + wMach + wMasterUid + wMast, currY + 9, { width: wParam, align: "center" });
+
+            doc.rect(startX + wMach + wMasterUid + wMast + wParam, currY, wExp, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
+            doc.fillColor('black').text("Expected Status", startX + wMach + wMasterUid + wMast + wParam, currY + 9, { width: wExp, align: "center" });
 
             const curX = startX + leftTotal;
             doc.rect(curX, currY, wShift * 3, headerH1).fillAndStroke('#f3f4f6', 'black');
@@ -495,15 +626,19 @@ const generateAirGapReport = async (req, res) => {
                     if (i === 0) {
                         doc.rect(startX, currY, wMach, rowH * 4).stroke();
                         doc.font("Helvetica-Bold").fontSize(8).text(block.machineNo, startX, currY + (rowH * 2) - 5, { width: wMach, align: "center" });
-                        doc.rect(startX + wMach, currY, wMast, rowH * 4).stroke();
-                        doc.text(block.errorProofNo || '-', startX + wMach, currY + (rowH * 2) - 5, { width: wMast, align: "center" });
+
+                        doc.rect(startX + wMach, currY, wMasterUid, rowH * 4).stroke();
+                        doc.text(block.masterUniqueId || '-', startX + wMach, currY + (rowH * 2) - 5, { width: wMasterUid, align: "center" });
+
+                        doc.rect(startX + wMach + wMasterUid, currY, wMast, rowH * 4).stroke();
+                        doc.text(block.errorProofNo || '-', startX + wMach + wMasterUid, currY + (rowH * 2) - 5, { width: wMast, align: "center" });
                     }
 
-                    doc.rect(startX + wMach + wMast, currY, wParam, rowH).stroke();
-                    doc.font("Helvetica").fontSize(7.5).text(`${param.master} ${param.master2}`.trim(), startX + wMach + wMast + 6, currY + 6, { width: wParam - 12, align: "left" });
+                    doc.rect(startX + wMach + wMasterUid + wMast, currY, wParam, rowH).stroke();
+                    doc.font("Helvetica").fontSize(7.5).text(`${param.master} ${param.master2}`.trim(), startX + wMach + wMasterUid + wMast + 6, currY + 6, { width: wParam - 12, align: "left" });
 
-                    doc.rect(startX + wMach + wMast + wParam, currY, wExp, rowH).stroke();
-                    doc.text(param.expected.replace(/\n/g, ''), startX + wMach + wMast + wParam + 6, currY + 6, { width: wExp - 12, align: "left" });
+                    doc.rect(startX + wMach + wMasterUid + wMast + wParam, currY, wExp, rowH).stroke();
+                    doc.text(param.expected.replace(/\n/g, ''), startX + wMach + wMasterUid + wMast + wParam + 6, currY + 6, { width: wExp - 12, align: "left" });
 
                     let cX = startX + leftTotal;
                     const paramFullStr = `${param.master} ${param.master2}`;
@@ -576,7 +711,7 @@ const generateAirGapReport = async (req, res) => {
             drawProdSign('I'); drawProdSign('II'); drawProdSign('III');
             currY += prodRowH;
 
-            // 5. Notes Box (68pt) with rendered tick and cross
+            // 5. Notes Box
             currY += 5;
             const noteBoxHeight = 68;
             doc.rect(startX, currY, totalWidth, noteBoxHeight).stroke();
@@ -597,12 +732,11 @@ const generateAirGapReport = async (req, res) => {
             return currY + noteBoxHeight;
         };
 
-        // Render entries sequentially, packing as many as fit per landscape page
         let currentY = topMargin;
         let isFirstOnPage = true;
 
         groups.forEach(groupRecords => {
-            const uniqueBlocksCount = new Set(groupRecords.map(r => `${r.machineNo}_${r.errorProofNo}`)).size || 1;
+            const uniqueBlocksCount = new Set(groupRecords.map(r => r.machineNo)).size || 1;
             const entryH = computeEntryHeight(uniqueBlocksCount);
 
             if (!isFirstOnPage && (currentY + entryH > pageBottom)) {

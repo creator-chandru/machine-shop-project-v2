@@ -41,6 +41,7 @@ const getTodayISODate = () => {
 
 const createEmptyBlock = (defaultMachineNo = "") => ({
   machineNo: defaultMachineNo,
+  masterUniqueId: "",
   errorProofNo: "",
   parameters: defaultParameters.map((p) => ({ ...p })),
   dailyChecks: {},
@@ -230,11 +231,12 @@ export default function AirGapSensorCheckSheet() {
           const shift = row.shift;
           if (SHIFTS.includes(shift)) shiftsFound[shift] = true;
 
-          const key = `${row.machineNo || ''}__${row.errorProofNo || ''}`;
+          const key = `${row.machineNo || ''}__${row.masterUniqueId || ''}__${row.errorProofNo || ''}`;
           if (!blockMap.has(key)) blockMap.set(key, createEmptyBlock(row.machineNo || ''));
 
           const block = blockMap.get(key);
           block.machineNo = row.machineNo || '';
+          block.masterUniqueId = row.masterUniqueId || '';
           block.errorProofNo = row.errorProofNo || '';
 
           const dateChecks = block.dailyChecks[headerInfo.date] || {};
@@ -360,8 +362,7 @@ export default function AirGapSensorCheckSheet() {
     });
   };
 
-  // Download PDF Report by Date Range
-  const handleDownloadPdfRange = async () => {
+ const handleDownloadPdfRange = async () => {
     if (!pdfFromDate || !pdfToDate) {
       triggerToast("Please select both From Date and To Date.", "error");
       return;
@@ -375,6 +376,20 @@ export default function AirGapSensorCheckSheet() {
     setIsDownloadingPdf(true);
     try {
       const token = localStorage.getItem("token");
+
+      // Sync current on-screen Master Unique ID & Error Proof No to the database
+      if (headerInfo.lineCode && headerInfo.partNo && headerInfo.date && blocks[0]?.machineNo) {
+        await fetch(`${process.env.REACT_APP_API_URL}/api/air-gap-sensor`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            header: { ...headerInfo, machineShop: shopId },
+            blocks,
+            shiftProdSignatures
+          })
+        }).catch(() => {});
+      }
+
       const params = new URLSearchParams({
         fromDate: pdfFromDate,
         toDate: pdfToDate,
@@ -418,7 +433,9 @@ export default function AirGapSensorCheckSheet() {
 
     const date = headerInfo.date;
 
-    // --- APPROVAL AND PE ASSIGNMENT CONSTRAINTS ---
+    // Check if any shift is already locked/recorded
+    const hasLockedShifts = SHIFTS.some((shift) => lockedShifts[shift]);
+
     for (const shift of SHIFTS) {
       if (lockedShifts[shift]) continue;
 
@@ -455,7 +472,8 @@ export default function AirGapSensorCheckSheet() {
       });
     });
 
-    if (completeShifts.length === 0) {
+    // Only block if there are NO locked shifts AND no completed new shifts
+    if (completeShifts.length === 0 && !hasLockedShifts) {
       triggerToast("Please complete all parameter statuses and line signature for at least one unrecorded shift.", "error");
       return;
     }
@@ -649,6 +667,7 @@ export default function AirGapSensorCheckSheet() {
             <thead className="bg-gray-100 text-gray-800 font-bold">
               <tr>
                 <th rowSpan={2} className="border border-gray-800 p-2 w-40">Machine No</th>
+                <th rowSpan={2} className="border border-gray-800 p-2 w-40">Master Unique ID</th>
                 <th rowSpan={2} className="border border-gray-800 p-2 w-40">Error Proof No</th>
                 <th rowSpan={2} className="border border-gray-800 p-2 text-left px-3">Parameter (Master Position)</th>
                 <th rowSpan={2} className="border border-gray-800 p-2 w-64 text-left px-3">Expected Status</th>
@@ -674,6 +693,15 @@ export default function AirGapSensorCheckSheet() {
                               </select>
                             </td>
                             <td rowSpan={4} className="border border-gray-800 p-0">
+                              <input 
+                                type="text" 
+                                className="w-full h-full text-center px-3 outline-none bg-transparent py-2" 
+                                placeholder="Master Unique ID" 
+                                value={block.masterUniqueId || ''} 
+                                onChange={(e) => handleBlockMetaChange(bIdx, 'masterUniqueId', e.target.value)} 
+                              />
+                            </td>
+                            <td rowSpan={4} className="border border-gray-800 p-0">
                               <input type="text" className="w-full h-full text-center px-3 outline-none bg-transparent py-2" placeholder="Error Proof No" value={block.errorProofNo} onChange={(e) => handleBlockMetaChange(bIdx, 'errorProofNo', e.target.value)} />
                             </td>
                           </>
@@ -692,7 +720,7 @@ export default function AirGapSensorCheckSheet() {
                   })}
 
                   <tr>
-                    <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">Line Incharge Signature</td>
+                    <td colSpan={5} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">Line Incharge Signature</td>
                     {SHIFTS.map((shift) => {
                       const sign = block.lineInchargeSignatures[headerInfo.date]?.[shift] || "";
                       return (
@@ -710,7 +738,7 @@ export default function AirGapSensorCheckSheet() {
               ))}
 
               <tr>
-                <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
+                <td colSpan={5} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
                     Shift Production Incharge Signature (PE)
                 </td>
                 {SHIFTS.map((shift) => {

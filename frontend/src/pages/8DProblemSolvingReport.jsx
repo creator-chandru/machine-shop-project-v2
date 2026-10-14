@@ -53,7 +53,6 @@ const StatusQuadrantIcon = ({ level = 1, onChange, editable = true }) => {
     >
       <svg width="22" height="22" viewBox="0 0 24 24" className="transform -rotate-90">
         {level >= 4 ? (
-          // Level 4: Fully closed circle
           <circle cx="12" cy="12" r="10" stroke="#1f2937" strokeWidth="1.5" fill="#16a34a" />
         ) : (
           <>
@@ -1240,7 +1239,7 @@ export default function EightDProblemSolvingReport() {
             </div>
           </div>
 
-          {/* (2b) Process Flow with Dynamic Box Sizing */}
+          {/* (2b) Process Flow with Horizontal Cap & Vertical Auto-Expansion */}
           <div className="border border-gray-300 p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
             <div>
               <div className="flex justify-between items-center mb-2">
@@ -1256,38 +1255,55 @@ export default function EightDProblemSolvingReport() {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded min-h-[140px]">
-                {processFlow.map((step, sIdx) => (
-                  <React.Fragment key={`step-${sIdx}`}>
-                    <div className="relative group border-2 border-gray-800 rounded px-2.5 py-1.5 text-[11px] font-bold text-center bg-gray-50 min-w-[90px] inline-flex items-center justify-center transition-all shadow-sm">
-                      <input
-                        type="text"
-                        disabled={isFormLocked}
-                        placeholder={`Step ${sIdx + 1}`}
-                        value={step}
-                        size={Math.max(8, (step || "").length + 2)}
-                        onChange={(e) => {
-                          const updated = [...processFlow];
-                          updated[sIdx] = e.target.value;
-                          setProcessFlow(updated);
-                        }}
-                        className="bg-transparent text-center outline-none text-[11px] font-bold uppercase disabled:text-gray-700 px-1"
-                      />
-                      {!isFormLocked && processFlow.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setProcessFlow(processFlow.filter((_, i) => i !== sIdx))}
-                          className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-4 h-4 text-[10px] hidden group-hover:flex items-center justify-center shadow"
-                        >
-                          ×
-                        </button>
+              <div className="flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded min-h-[140px] max-w-full overflow-hidden">
+                {processFlow.map((step, sIdx) => {
+                  const charCount = (step || "").length;
+                  const boxWidth = Math.min(220, Math.max(90, charCount * 8.5 + 24));
+
+                  return (
+                    <React.Fragment key={`step-${sIdx}`}>
+                      <div
+                        style={{ width: `${boxWidth}px`, maxWidth: "100%" }}
+                        className="relative group border-2 border-gray-800 rounded px-2 py-1.5 text-[11px] font-bold text-center bg-gray-50 flex items-center justify-center transition-all shadow-sm box-border"
+                      >
+                        <textarea
+                          rows={1}
+                          disabled={isFormLocked}
+                          placeholder={`Step ${sIdx + 1}`}
+                          value={step}
+                          onChange={(e) => {
+                            const updated = [...processFlow];
+                            updated[sIdx] = e.target.value;
+                            setProcessFlow(updated);
+                          }}
+                          onInput={(e) => {
+                            e.target.style.height = "auto";
+                            e.target.style.height = `${e.target.scrollHeight}px`;
+                          }}
+                          ref={(el) => {
+                            if (el) {
+                              el.style.height = "auto";
+                              el.style.height = `${el.scrollHeight}px`;
+                            }
+                          }}
+                          className="w-full bg-transparent text-center outline-none text-[11px] font-bold uppercase disabled:text-gray-700 resize-none overflow-hidden leading-tight [overflow-wrap:anywhere] break-all px-0.5"
+                        />
+                        {!isFormLocked && processFlow.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setProcessFlow(processFlow.filter((_, i) => i !== sIdx))}
+                            className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-4 h-4 text-[10px] hidden group-hover:flex items-center justify-center shadow z-10"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      {sIdx < processFlow.length - 1 && (
+                        <span className="text-gray-500 font-bold select-none">→</span>
                       )}
-                    </div>
-                    {sIdx < processFlow.length - 1 && (
-                      <span className="text-gray-500 font-bold">→</span>
-                    )}
-                  </React.Fragment>
-                ))}
+                    </React.Fragment>
+                  );
+                })}
               </div>
             </div>
             <span className="text-[10px] text-gray-400 italic mt-2">

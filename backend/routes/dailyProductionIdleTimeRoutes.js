@@ -10,7 +10,8 @@ const {
   saveDailyProductionIdleTime,
   getPendingPEIdleTimeData,
   signPEApproval,
-  generateIdleTimeReport
+  generateIdleTimeReport,
+  generateIdleTimeDayReport // <--- Add single-day report generator
 } = require('../controllers/dailyProductionIdleTimeController.js');
 
 // Master data (line codes / part names) 
@@ -32,8 +33,12 @@ router.get('/daily-production-idle-time/pe/:name', getPendingPEIdleTimeData);
 router.post('/daily-production-idle-time/pe/sign', signPEApproval);
 router.post('/daily-production-idle-time/sign-pe', signPEApproval);
 
-// PDF preview / download
-router.get('/daily-production-idle-time/report', generateIdleTimeReport);
+// PDF preview / download: Routes range query to generateIdleTimeReport, else single-day approval report
+router.get('/daily-production-idle-time/report', (req, res) =>
+  (req.query.fromDate && req.query.toDate)
+    ? generateIdleTimeReport(req, res)
+    : generateIdleTimeDayReport(req, res)
+);
 
 // Load saved report for shopId + date (+ lineCode)
 router.get('/daily-production-idle-time', getDailyProductionIdleTime);

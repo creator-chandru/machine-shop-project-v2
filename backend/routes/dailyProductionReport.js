@@ -12,6 +12,7 @@ const {
   signPeApproval,
   signHofApproval,
   generateReport,
+  generateDailyProductionDayReport, // <--- Add new single-day function
   getPartTraceability,
   getIncharges,
   getPeIncharges,
@@ -47,7 +48,11 @@ router.post('/daily-production-report/sign-pe', signPeApproval);
 router.get('/daily-production-report/hof/:name', getHofReports);
 router.post('/daily-production-report/sign-hof', signHofApproval);
 
-// 9. PDF Preview & Report Generation
-router.get('/daily-production-report/report', generateReport);
+// 9. PDF Preview & Report Generation (Range vs Single-day Approval Routing)
+router.get('/daily-production-report/report', (req, res) =>
+  (req.query.fromDate && req.query.toDate)
+    ? generateReport(req, res)
+    : generateDailyProductionDayReport(req, res)
+);
 
 module.exports = router;

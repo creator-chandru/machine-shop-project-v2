@@ -156,6 +156,7 @@ const ShiftIncharge = () => {
 
   const buttons = [
     { name: "Pre-Operation Checklist", path: `/shift-incharge/${shopId}/pre-operation-checklist`, icon: ClipboardCheck },
+    { name: "level 1-maintenance", path: `/shift-incharge/${shopId}/level1-maintenance`, icon: ClipboardCheck },
     { name: "Error-Proofing CheckSheet", path: `/shift-incharge/${shopId}/error-proofing-checksheet`, icon: ShieldCheck },
     { name: "Air-Gap-Sensor CheckSheet", path: `/shift-incharge/${shopId}/air-gap-sensor`, icon: PenLine },
     { name: "4M-Change-Monitoring CheckSheet", path: `/shift-incharge/${shopId}/four-m-change-monitoring`, icon: RefreshCw },
@@ -172,7 +173,6 @@ const ShiftIncharge = () => {
     { name: "8D Problem Solving Report", path: `/shift-incharge/${shopId}/8d-problem-solving-report`, icon: Clock },
     { name: "Operator Allotment", path: `/shift-incharge/${shopId}/operator-allotment`, icon: ClipboardCheck },
     { name: "Job Setup Verification", path: `/shift-incharge/${shopId}/job-setup-verification`, icon: ShieldCheck },
-    { name: "level 1-maintenance", path: `/shift-incharge/${shopId}/level1-maintenance`, icon: ClipboardCheck },
     { name: "Operator Observation Plan", path :`/shift-incharge/${shopId}/operator-observation-plan`, icon : FileCheck}
   ];
 

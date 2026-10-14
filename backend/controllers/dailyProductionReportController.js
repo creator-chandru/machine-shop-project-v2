@@ -640,6 +640,228 @@ const generateReport = async (req, res) => {
   }
 };
 
+// ============================================================
+// PDF GENERATION - SINGLE DAY / ENTRY (used by approval dashboards)
+// Query: lineCode, date, [shift], [shopId]
+// ============================================================
+const generateDailyProductionDayReport = async (req, res) => {
+  try {
+    const { lineCode, date, shift, shopId } = req.query;
+
+    if (!lineCode || !date) {
+      return res.status(400).json({ error: "lineCode and date are required" });
+    }
+
+    const cleanDate = String(date).split('T')[0];
+    const request = new sql.Request();
+    request.input('lineCode', sql.NVarChar(50), lineCode);
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+
+    let query = `
+      SELECT Id, MachineShop, lineCode, PartTraceabilityMachining, FORMAT(ReportDate, 'yyyy-MM-dd') AS ReportDate, Shift, ShiftInchargeName, MachineNo, MachineName, PartNameNo, OperationDescription, OperatorName, Produced, Accepted, HoldNonConformance, ReasonForHold_Casting, ReasonForHold_CastingQty, ReasonForHold_Machining, ReasonForHold_MachiningQty, McStopTimeReason, CONVERT(VARCHAR(5), TimeFrom, 108) AS TimeFrom, CONVERT(VARCHAR(5), TimeTo, 108) AS TimeTo, Sign_SupervisorProduction, Sign_SupervisorQuality, Sign_ProductionEngineer, Sign_HOFProduction
+      FROM DailyProductionReport
+      WHERE lineCode = @lineCode AND CONVERT(date, ReportDate) = CONVERT(date, @reportDate)
+    `;
+
+    if (shift) {
+      request.input('shift', sql.NVarChar(10), shift);
+      query += ` AND Shift = @shift`;
+    }
+
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      query += ` AND MachineShop = @machineShop`;
+    }
+
+    query += ` ORDER BY Shift ASC, Id ASC`;
+
+    const result = await request.query(query);
+    const records = result.recordset;
+
+    if (!records || records.length === 0) {
+      return res.status(404).json({ error: "No records found for the selected date." });
+    }
+
+    const groupedMap = new Map();
+    records.forEach(r => {
+      const groupKey = `${r.lineCode}_${r.ReportDate}_${r.Shift}`;
+      if (!groupedMap.has(groupKey)) groupedMap.set(groupKey, []);
+      groupedMap.get(groupKey).push(r);
+    });
+
+    const groups = Array.from(groupedMap.values());
+    const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename=Daily_Production_${lineCode}_${cleanDate}.pdf`);
+    doc.pipe(res);
+
+    const startX = 20;
+    const totalWidth = doc.page.width - 40;
+    const pageBottom = doc.page.height - 20;
+    const topMargin = 20;
+
+    const headers = ["M/C No", "Part Name / No", "Operator", "Prod", "Acc", "Hold", "Casting Reason", "Machining Reason", "Time", "M/C Stop Reason"];
+    const fractions = [0.08, 0.16, 0.10, 0.05, 0.05, 0.06, 0.12, 0.12, 0.08, 0.18];
+    const colWidths = fractions.map((f) => f * totalWidth);
+    const pad = 3;
+    const fontSize = 6.5;
+
+    const computeEntryHeight = (groupRecords) => {
+      const headerH = 34;
+      const tableHeaderH = 15;
+      const sigH = 38;
+      let rowsH = 0;
+
+      doc.font("Helvetica").fontSize(fontSize);
+      groupRecords.forEach((r) => {
+        let rowH = 14;
+        const timeVal = (r.TimeFrom || r.TimeTo) ? `${r.TimeFrom || ''}-${r.TimeTo || ''}` : '-';
+        const castHold = r.ReasonForHold_Casting ? `${r.ReasonForHold_Casting} (${r.ReasonForHold_CastingQty || 0})` : '-';
+        const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
+
+        const rowCells = [
+          r.MachineNo || "-", r.PartNameNo || "-", r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-", r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-", castHold, machHold, timeVal, r.McStopTimeReason || "-"
+        ];
+
+        rowCells.forEach((c, i) => {
+          const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 4;
+          if (h > rowH) rowH = h;
+        });
+        rowsH += rowH;
+      });
+
+      return headerH + 4 + tableHeaderH + rowsH + sigH + 10;
+    };
+
+    const drawEntry = (groupRecords, entryY) => {
+      const first = groupRecords[0];
+      const [yy, mm, dd] = String(first.ReportDate).split('-');
+      const displayDate = `${dd}/${mm}/${yy}`;
+
+      const headerH = 34;
+      doc.lineWidth(0.8).strokeColor('black');
+      doc.rect(startX, entryY, 90, headerH).stroke();
+
+      const logoPath = path.join(__dirname, 'logo.jpg');
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, startX + 5, entryY + 4, { width: 80, height: 26, fit: [80, 26], align: 'center', valign: 'center' });
+      } else {
+        doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("SAKTHI\nAUTO", startX, entryY + 8, { width: 90, align: "center" });
+      }
+
+      const titleW = totalWidth - 90 - 160;
+      doc.rect(startX + 90, entryY, titleW, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("DAILY PRODUCTION REPORT (MACHINE SHOP)", startX + 90, entryY + 12, { width: titleW, align: "center" });
+
+      doc.rect(startX + totalWidth - 160, entryY, 160, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - 160, entryY + 6, { width: 160, align: "center" });
+      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - 160, entryY + 18, { width: 160, align: "center" });
+
+      let currY = entryY + headerH + 3;
+
+      doc.font("Helvetica-Bold").fontSize(fontSize);
+      let curX = startX;
+      headers.forEach((h, i) => {
+        doc.rect(curX, currY, colWidths[i], 15).fillAndStroke('#f0f0f0', 'black');
+        doc.fillColor('black').text(h, curX + pad, currY + 4, { width: colWidths[i] - pad * 2, align: "center" });
+        curX += colWidths[i];
+      });
+      currY += 15;
+
+      doc.font("Helvetica").fontSize(fontSize);
+      doc.lineWidth(0.5).strokeColor('black');
+
+      let opSig = '', qcSig = '', peSig = '', hofSig = '';
+
+      groupRecords.forEach((r) => {
+        const timeVal = (r.TimeFrom || r.TimeTo) ? `${r.TimeFrom || ''}-${r.TimeTo || ''}` : '-';
+        const castHold = r.ReasonForHold_Casting ? `${r.ReasonForHold_Casting} (${r.ReasonForHold_CastingQty || 0})` : '-';
+        const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
+
+        const rowCells = [
+          r.MachineNo || "-", r.PartNameNo || "-", r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-", r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-", castHold, machHold, timeVal, r.McStopTimeReason || "-"
+        ];
+
+        let rowH = 14;
+        rowCells.forEach((c, i) => {
+          const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 }) + 4;
+          if (h > rowH) rowH = h;
+        });
+
+        let x = startX;
+        rowCells.forEach((c, i) => {
+          doc.rect(x, currY, colWidths[i], rowH).stroke();
+          doc.fillColor('black').text(String(c), x + pad, currY + 3, { width: colWidths[i] - pad * 2, align: "center" });
+          x += colWidths[i];
+        });
+
+        currY += rowH;
+
+        if (!opSig && r.Sign_SupervisorProduction && !String(r.Sign_SupervisorProduction).includes('Pending')) opSig = r.Sign_SupervisorProduction;
+        if (!qcSig && r.Sign_SupervisorQuality && !String(r.Sign_SupervisorQuality).includes('Pending')) qcSig = r.Sign_SupervisorQuality;
+        if (!peSig && r.Sign_ProductionEngineer && !String(r.Sign_ProductionEngineer).includes('Pending')) peSig = r.Sign_ProductionEngineer;
+        if (!hofSig && r.Sign_HOFProduction && !String(r.Sign_HOFProduction).includes('Pending')) hofSig = r.Sign_HOFProduction;
+      });
+
+      let sigY = currY + 4;
+      const sigColWidth = totalWidth / 4;
+
+      doc.lineWidth(0.5).strokeColor('black');
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Supervisor (Production)", startX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(startX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      doc.fillColor(opSig ? 'black' : 'red').font(opSig ? 'Helvetica-Bold' : 'Helvetica').fontSize(7).text(opSig ? String(opSig).toUpperCase() : "Pending", startX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+
+      const qcX = startX + sigColWidth;
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Supervisor (Quality)", qcX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(qcX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      doc.fillColor(qcSig ? '#16a34a' : 'red').font('Helvetica-Bold').fontSize(7).text(qcSig ? `APPROVED` : "Pending", qcX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+
+      const peX = startX + sigColWidth * 2;
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Production Engineer", peX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(peX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      doc.fillColor(peSig ? '#16a34a' : 'red').font('Helvetica-Bold').fontSize(7).text(peSig ? `APPROVED` : "Pending", peX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+
+      const hofX = startX + sigColWidth * 3;
+      doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("HOF - Production", hofX, sigY, { width: sigColWidth - 10, align: "center" });
+      doc.rect(hofX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
+      doc.fillColor(hofSig ? '#16a34a' : 'red').font('Helvetica-Bold').fontSize(7).text(hofSig ? `APPROVED` : "Pending", hofX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
+
+      return sigY + 34;
+    };
+
+    let currentY = topMargin;
+    let isFirstOnPage = true;
+
+    groups.forEach((groupRecords) => {
+      const entryH = computeEntryHeight(groupRecords);
+      if (!isFirstOnPage && (currentY + entryH > pageBottom)) {
+        doc.addPage();
+        currentY = topMargin;
+        isFirstOnPage = true;
+      }
+
+      if (!isFirstOnPage) {
+        doc.save().lineWidth(0.5).dash(3, { space: 3 }).strokeColor('#9ca3af').moveTo(startX, currentY - 4).lineTo(startX + totalWidth, currentY - 4).stroke().restore();
+      }
+
+      const endY = drawEntry(groupRecords, currentY);
+      currentY = endY + 10;
+      isFirstOnPage = false;
+    });
+
+    doc.end();
+  } catch (err) {
+    console.error("Daily Production Day PDF error:", err);
+    if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
+    else res.end();
+  }
+};
+
 module.exports = {
   getMachineShopDetails,
   saveDailyProductionReport,
@@ -651,6 +873,7 @@ module.exports = {
   signPeApproval,
   signHofApproval,
   generateReport,
+  generateDailyProductionDayReport, 
   getPartTraceability,
   getIncharges,
   getPeIncharges,

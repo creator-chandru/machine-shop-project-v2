@@ -832,6 +832,254 @@ const generateIdleTimeReport = async (req, res) => {
 };
 
 // ============================================================
+// 10. PDF REPORT - SINGLE ENTRY / DAY (used by PE approval dashboard)
+// Query: date, [lineCode], [shopId]
+// ============================================================
+const generateIdleTimeDayReport = async (req, res) => {
+  try {
+    const { shopId, date, lineCode } = req.query;
+    if (!date) {
+      return res.status(400).json({ error: 'date is required' });
+    }
+
+    const cleanDate = cleanDateStr(date);
+    const request = new sql.Request();
+    request.input('reportDate', sql.NVarChar(50), cleanDate);
+
+    let query = `
+      SELECT * FROM ${TABLE} 
+      WHERE ReportDate = CONVERT(date, @reportDate)
+    `;
+
+    const parsedShop = validShopId(shopId);
+    if (parsedShop) {
+      request.input('machineShop', sql.Int, parsedShop);
+      query += ' AND MachineShop = @machineShop';
+    }
+    if (lineCode) {
+      request.input('lineCode', sql.NVarChar(50), lineCode);
+      query += ' AND LineCode = @lineCode';
+    }
+    query += ' ORDER BY LineCode ASC, Id ASC';
+
+    const result = await request.query(query);
+    const records = result.recordset || [];
+
+    if (records.length === 0) {
+      return res.status(404).json({ error: 'No records found for the selected date.' });
+    }
+
+    const doc = new PDFDocument({
+      margin: 20,
+      size: 'A4',
+      layout: 'landscape',
+      bufferPages: true,
+      autoPageBreak: false
+    });
+
+    const filename = lineCode 
+      ? `Daily_Production_Idle_Time_${lineCode}_${cleanDate}.pdf`
+      : `Daily_Production_Idle_Time_${cleanDate}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=${filename}`);
+    doc.pipe(res);
+
+    const startX = 20;
+    const totalWidth = doc.page.width - 40;
+    const topMargin = 20;
+    const rowH = 11.2;
+    const fontSize = 6.8;
+
+    const drawCell = (x, y, w, h, text, isBold = false, bg = null, align = 'center') => {
+      if (bg) doc.rect(x, y, w, h).fillAndStroke(bg, 'black');
+      else doc.rect(x, y, w, h).stroke();
+
+      doc.fillColor('black')
+        .font(isBold ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(fontSize)
+        .text(String(text != null ? text : '-'), x + 2, y + 2.5, { width: w - 4, align });
+    };
+
+    const [yy, mm, dd] = String(cleanDate).split('-');
+    const displayDate = `${dd}/${mm}/${yy}`;
+    const first = records[0];
+
+    // Header Box (32pt)
+    doc.lineWidth(0.8).strokeColor('black');
+    doc.rect(startX, topMargin, 90, 32).stroke();
+
+    const logoPath = path.join(__dirname, 'logo.jpg');
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, startX + 5, topMargin + 4, { width: 80, height: 24, fit: [80, 24], align: 'center', valign: 'center' });
+    } else {
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('black')
+        .text('SAKTHI\nAUTO', startX, topMargin + 7, { width: 90, align: 'center' });
+    }
+
+    const titleW = totalWidth - 90 - 160;
+    doc.rect(startX + 90, topMargin, titleW, 32).stroke();
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
+      .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, topMargin + 11, {
+        width: titleW,
+        align: 'center'
+      });
+
+    const distinctLines = [...new Set(records.map((r) => r.LineCode).filter(Boolean))].join(', ');
+    doc.rect(startX + totalWidth - 160, topMargin, 160, 32).stroke();
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
+      .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 160, topMargin + 5, {
+        width: 160,
+        align: 'center'
+      });
+    doc.font('Helvetica').fontSize(7).fillColor('black')
+      .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 160, topMargin + 18, {
+        width: 160,
+        align: 'center'
+      });
+
+    let curY = topMargin + 36;
+    const numCols = records.length;
+    const colW = Math.min(130, (totalWidth - 150) / Math.max(1, numCols));
+    const descW = totalWidth - colW * numCols;
+    const shiftW = colW / 4;
+
+    doc.lineWidth(0.5).strokeColor('black');
+    const colX = (idx) => startX + descW + idx * colW;
+
+    // Table Header Rows
+    drawCell(startX, curY, descW, rowH, 'LINE CODE', true, '#f0f0f0', 'left');
+    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.LineCode || '-', true, '#f0f0f0'));
+    curY += rowH;
+
+    drawCell(startX, curY, descW, rowH, 'PART NAME', true, '#ffffff', 'left');
+    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.PartName || '-', false, '#ffffff'));
+    curY += rowH;
+
+    drawCell(startX, curY, descW, rowH, 'ABS / NABS', true, '#ffffff', 'left');
+    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.BrakeType || '-', false, '#ffffff'));
+    curY += rowH;
+
+    drawCell(startX, curY, descW, rowH, 'SHIFT DETAILS / PARAMETERS', true, '#f0f0f0', 'left');
+    records.forEach((rec, idx) => {
+      ['I', 'II', 'III', 'T'].forEach((sh, shIdx) => {
+        drawCell(colX(idx) + shIdx * shiftW, curY, shiftW, rowH, sh, true, sh === 'T' ? '#e5e7eb' : '#f9fafb');
+      });
+    });
+    curY += rowH;
+
+    // Data Rows Helper
+    const drawShiftDataRow = (title, getVals, isBold = false, bgColor = '#ffffff') => {
+      drawCell(startX, curY, descW, rowH, title, isBold, bgColor, 'left');
+
+      records.forEach((rec, idx) => {
+        const vals = getVals(rec).map((v) => (v != null && v !== '' ? parseFloat(v) : 0));
+        const total = vals[0] + vals[1] + vals[2];
+
+        [vals[0], vals[1], vals[2], total].forEach((val, shIdx) => {
+          drawCell(
+            colX(idx) + shIdx * shiftW,
+            curY,
+            shiftW,
+            rowH,
+            val !== 0 ? String(val) : '-',
+            isBold || shIdx === 3,
+            shIdx === 3 ? '#e5e7eb' : bgColor
+          );
+        });
+      });
+
+      curY += rowH;
+    };
+
+    drawShiftDataRow('CAPACITY QTY IN SETS', (r) => [r.Capacity_Shift1, r.Capacity_Shift2, r.Capacity_Shift3], true, '#f3f4f6');
+    drawShiftDataRow('ACTUAL PROD QTY (LH)', (r) => [r.ActualProd_LH_Shift1, r.ActualProd_LH_Shift2, r.ActualProd_LH_Shift3]);
+    drawShiftDataRow('ACTUAL PROD QTY (RH)', (r) => [r.ActualProd_RH_Shift1, r.ActualProd_RH_Shift2, r.ActualProd_RH_Shift3]);
+    drawShiftDataRow('NO OF MANPOWER (UTILIZED)', (r) => [r.Manpower_Shift1, r.Manpower_Shift2, r.Manpower_Shift3], false, '#f9fafb');
+
+    LOSS_REASONS.forEach((loss) => {
+      drawShiftDataRow(
+        `${loss.id}. [${loss.category}] ${loss.name}`,
+        (r) => [r[`Loss${loss.id}_Shift1`], r[`Loss${loss.id}_Shift2`], r[`Loss${loss.id}_Shift3`]]
+      );
+    });
+
+    const calcTotalLossRec = (r, shift) =>
+      LOSS_IDS.reduce((sum, i) => sum + (r[`Loss${i}_Shift${shift}`] || 0), 0);
+
+    drawShiftDataRow(
+      'TOTAL LOSS (MINS)',
+      (r) => [calcTotalLossRec(r, 1), calcTotalLossRec(r, 2), calcTotalLossRec(r, 3)],
+      true,
+      '#e5e7eb'
+    );
+
+    // Signatures
+    const signH = rowH * 3;
+    drawCell(startX, curY, descW, signH, 'SHIFT OFFICER SIGN (APPROVED BY SHIFT INCHARGE)', true, '#f3f4f6', 'left');
+    records.forEach((rec, idx) => {
+      const x = colX(idx);
+      doc.rect(x, curY, colW, signH).stroke();
+      [
+        ['I', rec.ShiftInchargeSign_Shift1],
+        ['II', rec.ShiftInchargeSign_Shift2],
+        ['III', rec.ShiftInchargeSign_Shift3]
+      ].forEach(([label, v], i) => {
+        doc.fillColor(v ? '#16a34a' : '#6b7280')
+          .font('Helvetica-Bold')
+          .fontSize(5.8)
+          .text(`${label}: ${v ? String(v).toUpperCase() : '-'}`, x + 2, curY + 2.5 + i * rowH, {
+            width: colW - 4,
+            lineBreak: false
+          });
+      });
+    });
+    curY += signH;
+
+    const peH = rowH * 2;
+    drawCell(startX, curY, descW, peH, 'SECTION INCHARGE (PE) SIGN', true, '#f3f4f6', 'left');
+    records.forEach((rec, idx) => {
+      const x = colX(idx);
+      doc.rect(x, curY, colW, peH).stroke();
+
+      const sig = rec.Sign_ProductionEngineer || '';
+      if (sig && !isPendingSign(sig)) {
+        const name = String(sig).replace('Approved (', '').replace(')', '').trim();
+        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(6)
+          .text('APPROVED', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
+        doc.fillColor('black').font('Helvetica-Bold').fontSize(6)
+          .text(name.toUpperCase(), x + 2, curY + 11, { width: colW - 4, align: 'center', lineBreak: false });
+      } else {
+        doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(6)
+          .text('PENDING', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
+        doc.fillColor('black').font('Helvetica').fontSize(6)
+          .text(rec.assignedPe ? `[${String(rec.assignedPe).toUpperCase()}]` : '', x + 2, curY + 11, {
+            width: colW - 4,
+            align: 'center',
+            lineBreak: false
+          });
+      }
+    });
+    curY += peH + 4;
+
+    // Notes
+    doc.lineWidth(0.5).strokeColor('black');
+    doc.rect(startX, curY, totalWidth, 20).stroke();
+    doc.fillColor('black').font('Helvetica-Bold').fontSize(6.5)
+      .text('Notes: 1. Tool change losses above 20 mins only. 2. Verify and record parameters during set-up change.', startX + 4, curY + 6);
+
+    doc.end();
+  } catch (err) {
+    console.error('Single-day Idle Time PDF generation error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'PDF generation failed' });
+    } else {
+      res.end();
+    }
+  }
+};
+
+// ============================================================
 // EXPORTS
 // ============================================================
 module.exports = {
@@ -843,5 +1091,6 @@ module.exports = {
   saveDailyProductionIdleTime,
   getPendingPEIdleTimeData,
   signPEApproval,
-  generateIdleTimeReport
+  generateIdleTimeReport,
+  generateIdleTimeDayReport // <--- Exported here
 };

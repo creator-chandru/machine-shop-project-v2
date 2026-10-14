@@ -158,7 +158,7 @@ const ShiftIncharge = () => {
     { name: "Pre-Operation Checklist", path: `/shift-incharge/${shopId}/pre-operation-checklist`, icon: ClipboardCheck },
     { name: "Error-Proofing CheckSheet", path: `/shift-incharge/${shopId}/error-proofing-checksheet`, icon: ShieldCheck },
     { name: "Air-Gap-Sensor CheckSheet", path: `/shift-incharge/${shopId}/air-gap-sensor`, icon: PenLine },
-    { name: "Four-M-Change-Monitoring CheckSheet", path: `/shift-incharge/${shopId}/four-m-change-monitoring`, icon: RefreshCw },
+    { name: "4M-Change-Monitoring CheckSheet", path: `/shift-incharge/${shopId}/four-m-change-monitoring`, icon: RefreshCw },
     { name: "Record Of Significant Event", path: `/shift-incharge/${shopId}/significant-event-record`, icon: FileClock },
     { name: "Tool Change Record", path: `/shift-incharge/${shopId}/tool-change-record`, icon: Wrench },
     { name: "Daily Production Report", path: `/shift-incharge/${shopId}/daily-production-report`, icon: FileText },

@@ -190,7 +190,7 @@ const Hod = () => {
     fetchPendingCompetencyReports();
   }, [shopId, currentHOD]);
 
-  // Open 4M Review Modal
+  // Open 4M Review Modal (Fixed with required date parameters for backend compatibility)[cite: 1, 2]
   const handleOpenReviewModal = async (report) => {
     setSelectedReport(report);
     setPdfUrl(null);
@@ -198,11 +198,12 @@ const Hod = () => {
 
     try {
       const token = localStorage.getItem("token");
+      const targetDate = report.reportDate ? String(report.reportDate).split(" ")[0] : new Date().toISOString().split("T")[0];
+
       const params = new URLSearchParams({
-        lineCode: report.lineCode,
-        partName: report.partName,
-        shopId: String(report.machineShop || shopId || 3),
-        hodSign: `Pending [${currentHOD}]`
+        fromDate: targetDate,
+        toDate: targetDate,
+        shopId: String(report.machineShop || shopId || 3)
       });
 
       const res = await fetch(
@@ -781,9 +782,9 @@ const Hod = () => {
 
       {/* FULL-SCREEN SPLIT MODAL FOR 4M REVIEW */}
       {selectedReport && (
-        <div className="fixed inset-0 z-[8000] bg-white flex flex-col overflow-hidden animate-fade-in">
-          <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
-            <h3 className="font-bold text-xl uppercase tracking-wider">
+        <div className="fixed inset-0 z-[8000] bg-slate-950/90 backdrop-blur-md flex flex-col overflow-hidden animate-fade-in">
+          <div className="bg-slate-900 text-white px-8 py-5 flex justify-between items-center shrink-0 border-b border-slate-800 shadow-xl z-10">
+            <h3 className="font-extrabold text-xl tracking-wide uppercase text-indigo-400">
               Verify 4M Checksheet
             </h3>
             <button
@@ -791,9 +792,9 @@ const Hod = () => {
                 setSelectedReport(null);
                 setPdfUrl(null);
               }}
-              className="text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
+              className="text-gray-400 hover:text-white bg-slate-800 p-2 rounded-xl transition-colors cursor-pointer"
             >
-              <X size={28} />
+              <X size={22} />
             </button>
           </div>
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
@@ -803,19 +804,30 @@ const Hod = () => {
                 <iframe src={`${pdfUrl}#toolbar=0&view=FitH`} className="w-full h-full border-none relative z-10" title="PDF Preview" />
               )}
             </div>
-            <div className="w-full lg:w-[400px] bg-gray-50 border-l border-gray-300 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
-              <div className="p-6 flex-1 flex flex-col">
-                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 mb-6 text-sm flex flex-col gap-2 shadow-sm text-indigo-900">
-                  <p><span className="font-bold">Line Code:</span> {selectedReport.lineCode}</p>
-                  <p><span className="font-bold">Part Name:</span> {selectedReport.partName}</p>
+            
+            <div className="w-full lg:w-[420px] bg-slate-900 text-gray-100 border-l border-slate-800 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
+              <div className="p-8 flex-1 flex flex-col justify-between">
+                <div className="space-y-6">
+                  <h4 className="text-xs font-black text-indigo-400 tracking-widest uppercase">Report Metadata</h4>
+                  
+                  <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700/80 shadow-inner flex flex-col gap-3">
+                    <div className="flex justify-between items-center border-b border-slate-700/60 pb-3">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Line Code</span>
+                      <span className="text-sm font-extrabold text-white">{selectedReport.lineCode}</span>
+                    </div>
+                    <div className="flex flex-col gap-1 pt-1">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Part Name</span>
+                      <span className="text-xs font-semibold text-gray-200 leading-relaxed">{selectedReport.partName}</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="mt-auto">
+                <div className="pt-6">
                   <button
                     onClick={submitHODSignature}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1 cursor-pointer"
+                    className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-900/30 transition-all hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
                   >
-                    Verify & Approve
+                    Verify & Approve Checksheet
                   </button>
                 </div>
               </div>

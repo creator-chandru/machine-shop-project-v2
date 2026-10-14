@@ -542,7 +542,22 @@ export default function FourMChangeMonitoringCheckSheet() {
                       {machineOptions.map((machine) => (<option key={machine.id} value={machine.machineNo}>{machine.machineNo}</option>))}
                     </select>
                   </td>
-                  <td className="border border-gray-800 p-0"><input type="text" className="w-full h-full text-center outline-none bg-transparent py-1.5 px-1 font-medium" placeholder="Man/M/c/Mat/Meth" value={row.typeOf4M} onChange={(e) => handleRowChange(rIdx, "typeOf4M", e.target.value)} /></td>
+                  
+                  {/* TYPE OF 4M DROPDOWN */}
+                  <td className="border border-gray-800 p-0">
+                    <select 
+                      value={row.typeOf4M} 
+                      className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" 
+                      onChange={(e) => handleRowChange(rIdx, "typeOf4M", e.target.value)}
+                    >
+                      <option value="">Select</option>
+                      <option value="Man">Man</option>
+                      <option value="Machine">Machine</option>
+                      <option value="Method">Method</option>
+                      <option value="Material">Material</option>
+                    </select>
+                  </td>
+
                   <td className="border border-gray-800 p-0"><input type="text" className="w-full h-full text-left px-3 outline-none bg-transparent py-1.5 font-medium" value={row.description} onChange={(e) => handleRowChange(rIdx, "description", e.target.value)} /></td>
                   <td className="border border-gray-800 p-0"><select value={row.firstPart} className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" onChange={(e) => handleRowChange(rIdx, "firstPart", e.target.value)}><option value=""></option><option value="✓">✓</option><option value="X">X</option></select></td>
                   <td className="border border-gray-800 p-0"><select value={row.lastPart} className="w-full h-full text-center outline-none bg-transparent py-1.5 cursor-pointer font-bold text-sm" onChange={(e) => handleRowChange(rIdx, "lastPart", e.target.value)}><option value=""></option><option value="✓">✓</option><option value="X">X</option></select></td>

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, FileDown } from "lucide-react";
+import { ArrowLeft, FileDown, Clipboard, Copy, ArrowRight, Sparkles } from "lucide-react";
 import Header from "../components/Header";
+
 const INITIAL_ROWS = 1;
 
 const formMeta = {
@@ -15,6 +16,23 @@ const formMeta = {
 };
 
 const OP_OPTIONS = ["20", "30", "40", "50", "60", "70"];
+
+// Engineering & Metrology Symbols
+const MEASUREMENT_SYMBOLS = [
+  { symbol: "Ø", label: "Diameter (Ø)" },
+  { symbol: "±", label: "Plus-Minus (±)" },
+  { symbol: "°", label: "Degree (°)" },
+  { symbol: "µm", label: "Micron (µm)" },
+  { symbol: "Ra", label: "Roughness (Ra)" },
+  { symbol: "≤", label: "Less than or equal (≤)" },
+  { symbol: "≥", label: "Greater than or equal (≥)" },
+  { symbol: "×", label: "Times (×)" },
+  { symbol: "∥", label: "Parallelism (∥)" },
+  { symbol: "⟂", label: "Perpendicularity (⟂)" },
+  { symbol: "◎", label: "Concentricity (◎)" },
+  { symbol: "MAX", label: "Max" },
+  { symbol: "MIN", label: "Min" },
+];
 
 const getTodayISODate = () => {
   const today = new Date();
@@ -68,6 +86,9 @@ export default function RecordOfSignificantEvent() {
   const [toast, setToast] = useState({ message: "", type: "" });
   const lookupSeqRef = useRef(0);
 
+  // Reference for the last active input for symbol insertion
+  const activeInputRef = useRef(null);
+
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
     setTimeout(() => {
@@ -90,7 +111,7 @@ export default function RecordOfSignificantEvent() {
     to: "",
   });
 
-  // 2. Traceability Information (Manual and auto-generated are editable)
+  // 2. Traceability Information
   const [traceability, setTraceability] = useState({
     casting: {
       before: { part1: "", part2: "", part3: "" },
@@ -118,7 +139,7 @@ export default function RecordOfSignificantEvent() {
   const [qcUsers, setQcUsers] = useState([]);
   const [hofUsers, setHofUsers] = useState([]);
 
-  // Load master data (details & mappings)
+  // Load master data
   useEffect(() => {
     const fetchMasterData = async () => {
       try {
@@ -226,8 +247,13 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Reset form to blank template state
-  const resetFormState = (retainingLine = "", retainingMc = "", retainingDate = getTodayISODate(), retainingShift = "I") => {
+  // Reset form to blank state
+  const resetFormState = (
+    retainingLine = "",
+    retainingMc = "",
+    retainingDate = getTodayISODate(),
+    retainingShift = "I"
+  ) => {
     setIsSavedRecord(false);
     setHeader((prev) => ({
       ...prev,
@@ -259,9 +285,7 @@ export default function RecordOfSignificantEvent() {
     });
   };
 
-  // ==========================================================
-  // COMBO CHECK: lineCode + mcNo + date + shift
-  // ==========================================================
+  // COMBO CHECK
   const checkExistingRecord = async (lineCode, mcNo, date, shift) => {
     if (!lineCode || !mcNo || !date || !shift) {
       resetFormState(lineCode, mcNo, date, shift);
@@ -358,7 +382,7 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Header change handler with combo refresh
+  // Header change handler
   const handleHeaderChange = (field, val) => {
     let nextHeader = { ...header, [field]: val };
 
@@ -430,6 +454,149 @@ export default function RecordOfSignificantEvent() {
     setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   };
 
+  // ==========================================================
+  // SYMBOL INSERTION LOGIC
+  // ==========================================================
+  const handleInsertSymbol = (sym) => {
+    if (isSavedRecord) return;
+
+    const activeInfo = activeInputRef.current;
+    if (!activeInfo || !activeInfo.element) {
+      triggerToast(`Click inside an input field first to insert "${sym}"`, "info");
+      return;
+    }
+
+    const input = activeInfo.element;
+    const start = input.selectionStart || 0;
+    const end = input.selectionEnd || 0;
+    const currentVal = input.value || "";
+    const newVal = currentVal.substring(0, start) + sym + currentVal.substring(end);
+
+    // Call state update based on type
+    if (activeInfo.type === "controlSpec") {
+      handleRowChange(activeInfo.rowIdx, "controlSpec", null, newVal);
+    } else if (activeInfo.type === "inspectionGauge") {
+      handleRowChange(activeInfo.rowIdx, "inspectionGauge", null, newVal);
+    } else if (activeInfo.type === "before" || activeInfo.type === "after") {
+      handleRowChange(activeInfo.rowIdx, activeInfo.type, activeInfo.part, newVal);
+    }
+
+    // Restore focus and cursor position after insertion
+    setTimeout(() => {
+      input.focus();
+      input.setSelectionRange(start + sym.length, start + sym.length);
+    }, 0);
+  };
+
+  // ==========================================================
+  // CASTING TRACEABILITY COPY / PASTE HELPERS
+  // ==========================================================
+  // 1. One-tap copy Part 1 to Part 2 & Part 3
+  const handleCopyPart1ToAll = (timing) => {
+    if (isSavedRecord) return;
+    const p1Val = traceability.casting[timing].part1;
+    if (!p1Val) {
+      triggerToast(`Part 1 (${timing.toUpperCase()}) is empty. Enter a value first.`, "error");
+      return;
+    }
+    setTraceability((prev) => ({
+      ...prev,
+      casting: {
+        ...prev.casting,
+        [timing]: {
+          part1: p1Val,
+          part2: p1Val,
+          part3: p1Val,
+        },
+      },
+    }));
+    triggerToast(`Copied ${timing.toUpperCase()} Part 1 to all parts!`, "success");
+  };
+
+  // 2. One-tap copy all Before to After
+  const handleCopyBeforeToAfter = () => {
+    if (isSavedRecord) return;
+    const beforeCasting = traceability.casting.before;
+    setTraceability((prev) => ({
+      ...prev,
+      casting: {
+        ...prev.casting,
+        after: { ...beforeCasting },
+      },
+    }));
+    triggerToast("Copied Casting BEFORE to AFTER!", "success");
+  };
+
+  // 3. One-tap Paste from Clipboard
+  const handlePasteFromClipboard = async (timing, targetPart = "part1") => {
+    if (isSavedRecord) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) {
+        triggerToast("Clipboard is empty.", "error");
+        return;
+      }
+
+      // Check if multi-value (tab, comma, semicolon or newline delimited)
+      const values = text
+        .trim()
+        .split(/[\t,\n\r;]+/)
+        .map((v) => v.trim())
+        .filter(Boolean);
+
+      if (values.length >= 2) {
+        // Multi-part paste into part1, part2, part3
+        setTraceability((prev) => ({
+          ...prev,
+          casting: {
+            ...prev.casting,
+            [timing]: {
+              part1: values[0] || "",
+              part2: values[1] || "",
+              part3: values[2] || values[1] || values[0],
+            },
+          },
+        }));
+        triggerToast(`Pasted ${values.length} codes into Casting (${timing.toUpperCase()})!`, "success");
+      } else {
+        // Single value: paste into specified part
+        handleTraceabilityChange("casting", timing, targetPart, values[0]);
+        triggerToast(`Pasted "${values[0]}" into ${targetPart.toUpperCase()}!`, "success");
+      }
+    } catch (err) {
+      console.error("Clipboard paste error:", err);
+      triggerToast("Clipboard access denied. Please allow permission.", "error");
+    }
+  };
+
+  // 4. Smart onPaste handler for input fields (splits tab/comma copied data)
+  const handleSmartPasteCasting = (timing, part, e) => {
+    const pasteData = e.clipboardData.getData("text");
+    if (!pasteData) return;
+
+    const values = pasteData
+      .trim()
+      .split(/[\t,\n\r;]+/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    if (values.length > 1) {
+      e.preventDefault();
+      setTraceability((prev) => ({
+        ...prev,
+        casting: {
+          ...prev.casting,
+          [timing]: {
+            part1: values[0] || "",
+            part2: values[1] || "",
+            part3: values[2] || values[1] || values[0],
+          },
+        },
+      }));
+      triggerToast(`Auto-distributed ${values.length} values to Part 1, 2, 3!`, "success");
+    }
+  };
+
   // Download PDF
   const handleDownloadPdf = async () => {
     if (!isSavedRecord) {
@@ -476,9 +643,8 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Save handler with inner table checks removed
+  // Save handler
   const handleSave = async () => {
-    // 1. Header validations
     if (!header.lineCode) {
       triggerToast("Please select Line Code.", "error");
       return;
@@ -508,7 +674,6 @@ export default function RecordOfSignificantEvent() {
       return;
     }
 
-    // 2. Casting Traceability validations
     const cB = traceability.casting.before;
     const cA = traceability.casting.after;
     if (!cB.part1 || !cB.part2 || !cB.part3 || !cA.part1 || !cA.part2 || !cA.part3) {
@@ -516,7 +681,6 @@ export default function RecordOfSignificantEvent() {
       return;
     }
 
-    // 3. Machining Traceability validations
     const mB = traceability.machining.before;
     const mA = traceability.machining.after;
     if (!mB.part1 || !mB.part2 || !mB.part3 || !mA.part1 || !mA.part2 || !mA.part3) {
@@ -524,7 +688,6 @@ export default function RecordOfSignificantEvent() {
       return;
     }
 
-    // 4. Signature validations
     if (!signatures.prodnIncharge) {
       triggerToast("Please select Production Incharge signature before submitting.", "error");
       return;
@@ -572,6 +735,12 @@ export default function RecordOfSignificantEvent() {
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+      {/* Suggestions datalist for Before / After occurrence */}
+      <datalist id="occurrence-spec-options">
+        <option value="OK">OK</option>
+        <option value="NOT OK">NOT OK</option>
+      </datalist>
+
       <Toast
         message={toast.message}
         type={toast.type}
@@ -795,24 +964,46 @@ export default function RecordOfSignificantEvent() {
           </table>
         </div>
 
-        {/* 2. MEASUREMENTS & SPECIFICATIONS TABLE */}
-        <div className="pt-2">
-          <div className="flex justify-between items-center mb-2 px-1">
+        {/* 2. MEASUREMENTS & SPECIFICATIONS SECTION */}
+        <div className="pt-2 space-y-3">
+          {/* Top Bar with Dynamic Controls & Symbols Palette */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+              <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">
                 Inspection & Control Specifications
               </span>
-              <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
+              <span className="text-[11px] bg-orange-100 text-orange-800 border border-orange-200 px-2 py-0.5 rounded-full font-semibold">
                 {rows.length} {rows.length === 1 ? "Custom Row" : "Custom Rows"}
               </span>
             </div>
 
+            {/* Quick Measurement Symbols Palette */}
             {!isSavedRecord && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 bg-white border border-gray-300 px-2.5 py-1 rounded-md shadow-inner">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1 mr-1">
+                  <Sparkles className="w-3 h-3 text-orange-500" /> Symbols:
+                </span>
+                {MEASUREMENT_SYMBOLS.map(({ symbol, label }) => (
+                  <button
+                    key={symbol}
+                    type="button"
+                    title={`Insert ${label} at cursor`}
+                    onMouseDown={(e) => e.preventDefault()} // Keeps active input focused!
+                    onClick={() => handleInsertSymbol(symbol)}
+                    className="px-2 py-0.5 bg-gray-100 hover:bg-orange-500 hover:text-white text-gray-800 text-xs font-bold rounded border border-gray-200 hover:border-orange-600 transition-colors cursor-pointer select-none"
+                  >
+                    {symbol}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!isSavedRecord && (
+              <div className="flex items-center gap-2 self-end md:self-auto">
                 <button
                   type="button"
                   onClick={handleAddRow}
-                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
                 >
                   <span className="text-sm font-bold leading-none">+</span> Add Row
                 </button>
@@ -821,7 +1012,7 @@ export default function RecordOfSignificantEvent() {
                   <button
                     type="button"
                     onClick={handleRemoveRow}
-                    className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow hover:cursor-pointer"
+                    className="inline-flex items-center gap-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
                   >
                     <span className="text-sm font-bold leading-none">−</span> Delete Row
                   </button>
@@ -841,7 +1032,7 @@ export default function RecordOfSignificantEvent() {
                     INSPECTION INSTRUMENT / GAUGE
                   </th>
                   <th colSpan={3} className="border border-gray-800 p-1.5 w-[27%] bg-gray-200">
-                    BEFORE OCCURANCE
+                    BEFORE OCCURRENCE
                   </th>
                   <th colSpan={3} className="border border-gray-800 p-1.5 w-[27%] bg-gray-200">
                     AFTER CORRECTION
@@ -859,42 +1050,136 @@ export default function RecordOfSignificantEvent() {
               </thead>
 
               <tbody>
-                {/* 1) Part Traceability - Casting (Manual Entry) */}
-                <tr className="h-8">
-                  <td colSpan={2} className="border border-gray-800 px-3 py-1 text-left font-medium bg-gray-50">
-                    1) Part Traceability - Casting (date code):
+                {/* 1) Part Traceability - Casting (Date Code) with One-Tap Copy-Paste Options */}
+                <tr className="h-9 bg-orange-50/20">
+                  <td colSpan={2} className="border border-gray-800 px-3 py-1.5 text-left font-semibold bg-gray-50">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                      <span className="text-gray-900 font-bold">
+                        1) Part Traceability - Casting (date code):
+                      </span>
+                      {!isSavedRecord && (
+                        <div className="flex items-center gap-1.5">
+                          {/* Tap to copy Before -> After */}
+                          <button
+                            type="button"
+                            onClick={handleCopyBeforeToAfter}
+                            title="Copy all Before casting date codes to After"
+                            className="inline-flex items-center gap-1 text-[10px] bg-white hover:bg-orange-100 text-orange-700 font-bold px-2 py-0.5 rounded border border-orange-300 transition-colors shadow-xs cursor-pointer"
+                          >
+                            <ArrowRight className="w-3 h-3" /> Before → After
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
-                  {["part1", "part2", "part3"].map((p) => (
-                    <td key={`cast-b-${p}`} className="border border-gray-800 p-0">
-                      <input
-                        type="text"
-                        disabled={isSavedRecord}
-                        placeholder="Manual"
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100 font-medium"
-                        value={traceability.casting.before[p]}
-                        onChange={(e) =>
-                          handleTraceabilityChange("casting", "before", p, e.target.value)
-                        }
-                      />
+
+                  {/* Casting BEFORE: Part 1, 2, 3 */}
+                  {["part1", "part2", "part3"].map((p, idx) => (
+                    <td key={`cast-b-${p}`} className="border border-gray-800 p-0 relative group">
+                      <div className="w-full h-full flex items-center">
+                        <input
+                          type="text"
+                          disabled={isSavedRecord}
+                          placeholder={idx === 0 ? "P1 Date Code" : "Date Code"}
+                          className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-semibold disabled:bg-gray-100 focus:bg-orange-50 focus:border-orange-500"
+                          value={traceability.casting.before[p]}
+                          onChange={(e) =>
+                            handleTraceabilityChange("casting", "before", p, e.target.value)
+                          }
+                          onPaste={(e) => handleSmartPasteCasting("before", p, e)}
+                        />
+                        {/* One-tap copy/paste quick helper pills */}
+                        {!isSavedRecord && (
+                          <div className="absolute right-0.5 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white/95 rounded px-0.5 shadow border border-gray-200">
+                            {idx === 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyPart1ToAll("before")}
+                                  title="Copy Part 1 to Part 2 & 3"
+                                  className="p-0.5 text-orange-600 hover:text-orange-800 cursor-pointer"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePasteFromClipboard("before", "part1")}
+                                  title="Paste from clipboard"
+                                  className="p-0.5 text-blue-600 hover:text-blue-800 cursor-pointer"
+                                >
+                                  <Clipboard className="w-3 h-3" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handlePasteFromClipboard("before", p)}
+                                title="Paste from clipboard"
+                                className="p-0.5 text-blue-600 hover:text-blue-800 cursor-pointer"
+                              >
+                                <Clipboard className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
                   ))}
-                  {["part1", "part2", "part3"].map((p) => (
-                    <td key={`cast-a-${p}`} className="border border-gray-800 p-0">
-                      <input
-                        type="text"
-                        disabled={isSavedRecord}
-                        placeholder="Manual"
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-1 disabled:bg-gray-100 font-medium"
-                        value={traceability.casting.after[p]}
-                        onChange={(e) =>
-                          handleTraceabilityChange("casting", "after", p, e.target.value)
-                        }
-                      />
+
+                  {/* Casting AFTER: Part 1, 2, 3 */}
+                  {["part1", "part2", "part3"].map((p, idx) => (
+                    <td key={`cast-a-${p}`} className="border border-gray-800 p-0 relative group">
+                      <div className="w-full h-full flex items-center">
+                        <input
+                          type="text"
+                          disabled={isSavedRecord}
+                          placeholder={idx === 0 ? "P1 Date Code" : "Date Code"}
+                          className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-semibold disabled:bg-gray-100 focus:bg-orange-50 focus:border-orange-500"
+                          value={traceability.casting.after[p]}
+                          onChange={(e) =>
+                            handleTraceabilityChange("casting", "after", p, e.target.value)
+                          }
+                          onPaste={(e) => handleSmartPasteCasting("after", p, e)}
+                        />
+                        {!isSavedRecord && (
+                          <div className="absolute right-0.5 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white/95 rounded px-0.5 shadow border border-gray-200">
+                            {idx === 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyPart1ToAll("after")}
+                                  title="Copy Part 1 to Part 2 & 3"
+                                  className="p-0.5 text-orange-600 hover:text-orange-800 cursor-pointer"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePasteFromClipboard("after", "part1")}
+                                  title="Paste from clipboard"
+                                  className="p-0.5 text-blue-600 hover:text-blue-800 cursor-pointer"
+                                >
+                                  <Clipboard className="w-3 h-3" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handlePasteFromClipboard("after", p)}
+                                title="Paste from clipboard"
+                                className="p-0.5 text-blue-600 hover:text-blue-800 cursor-pointer"
+                              >
+                                <Clipboard className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
                   ))}
                 </tr>
 
-                {/* 2) Part Traceability - Machining (Auto-Generated + Manually Editable) */}
+                {/* 2) Part Traceability - Machining */}
                 <tr className="h-8">
                   <td colSpan={2} className="border border-gray-800 px-3 py-1 text-left font-medium bg-gray-50">
                     2) Part Traceability - Machining:
@@ -937,9 +1222,16 @@ export default function RecordOfSignificantEvent() {
                       <input
                         type="text"
                         disabled={isSavedRecord}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100 font-medium"
-                        placeholder="Specification"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100 font-medium focus:bg-orange-50 focus:border-orange-400"
+                        placeholder="e.g. Ø25.0 ± 0.05"
                         value={row.controlSpec}
+                        onFocus={(e) => {
+                          activeInputRef.current = {
+                            element: e.target,
+                            type: "controlSpec",
+                            rowIdx: rIdx,
+                          };
+                        }}
                         onChange={(e) =>
                           handleRowChange(rIdx, "controlSpec", null, e.target.value)
                         }
@@ -951,50 +1243,95 @@ export default function RecordOfSignificantEvent() {
                       <input
                         type="text"
                         disabled={isSavedRecord}
-                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100 font-medium"
+                        className="w-full h-full text-center outline-none bg-transparent py-1 px-2 disabled:bg-gray-100 font-medium focus:bg-orange-50 focus:border-orange-400"
                         placeholder="Instrument / Gauge"
                         value={row.inspectionGauge}
+                        onFocus={(e) => {
+                          activeInputRef.current = {
+                            element: e.target,
+                            type: "inspectionGauge",
+                            rowIdx: rIdx,
+                          };
+                        }}
                         onChange={(e) =>
                           handleRowChange(rIdx, "inspectionGauge", null, e.target.value)
                         }
                       />
                     </td>
 
-                    {/* BEFORE OCCURANCE (PART 1, 2, 3) */}
-                    {["part1", "part2", "part3"].map((p) => (
-                      <td key={`b-${p}-${rIdx}`} className="border border-gray-800 p-0">
-                        <select
-                          disabled={isSavedRecord}
-                          className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-semibold cursor-pointer disabled:bg-gray-100"
-                          value={row.before[p]}
-                          onChange={(e) =>
-                            handleRowChange(rIdx, "before", p, e.target.value)
-                          }
-                        >
-                          <option value="">-</option>
-                          <option value="OK">OK</option>
-                          <option value="NOT OK">NOT OK</option>
-                        </select>
-                      </td>
-                    ))}
+                    {/* BEFORE OCCURRENCE (PART 1, 2, 3) - Freeform Specification Value Entry */}
+                    {["part1", "part2", "part3"].map((p) => {
+                      const val = row.before[p] || "";
+                      const isOk = val.trim().toUpperCase() === "OK";
+                      const isNotOk = val.trim().toUpperCase() === "NOT OK";
 
-                    {/* AFTER CORRECTION (PART 1, 2, 3) */}
-                    {["part1", "part2", "part3"].map((p) => (
-                      <td key={`a-${p}-${rIdx}`} className="border border-gray-800 p-0">
-                        <select
-                          disabled={isSavedRecord}
-                          className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-semibold cursor-pointer disabled:bg-gray-100"
-                          value={row.after[p]}
-                          onChange={(e) =>
-                            handleRowChange(rIdx, "after", p, e.target.value)
-                          }
-                        >
-                          <option value="">-</option>
-                          <option value="OK">OK</option>
-                          <option value="NOT OK">NOT OK</option>
-                        </select>
-                      </td>
-                    ))}
+                      return (
+                        <td key={`b-${p}-${rIdx}`} className="border border-gray-800 p-0">
+                          <input
+                            type="text"
+                            list="occurrence-spec-options"
+                            disabled={isSavedRecord}
+                            placeholder="Value / OK"
+                            className={`w-full h-full text-center outline-none bg-transparent py-1 px-1 font-semibold disabled:bg-gray-100 focus:bg-orange-50 ${
+                              isOk
+                                ? "text-green-700 bg-green-50"
+                                : isNotOk
+                                ? "text-red-700 bg-red-50"
+                                : "text-gray-800"
+                            }`}
+                            value={val}
+                            onFocus={(e) => {
+                              activeInputRef.current = {
+                                element: e.target,
+                                type: "before",
+                                rowIdx: rIdx,
+                                part: p,
+                              };
+                            }}
+                            onChange={(e) =>
+                              handleRowChange(rIdx, "before", p, e.target.value)
+                            }
+                          />
+                        </td>
+                      );
+                    })}
+
+                    {/* AFTER CORRECTION (PART 1, 2, 3) - Freeform Specification Value Entry */}
+                    {["part1", "part2", "part3"].map((p) => {
+                      const val = row.after[p] || "";
+                      const isOk = val.trim().toUpperCase() === "OK";
+                      const isNotOk = val.trim().toUpperCase() === "NOT OK";
+
+                      return (
+                        <td key={`a-${p}-${rIdx}`} className="border border-gray-800 p-0">
+                          <input
+                            type="text"
+                            list="occurrence-spec-options"
+                            disabled={isSavedRecord}
+                            placeholder="Value / OK"
+                            className={`w-full h-full text-center outline-none bg-transparent py-1 px-1 font-semibold disabled:bg-gray-100 focus:bg-orange-50 ${
+                              isOk
+                                ? "text-green-700 bg-green-50"
+                                : isNotOk
+                                ? "text-red-700 bg-red-50"
+                                : "text-gray-800"
+                            }`}
+                            value={val}
+                            onFocus={(e) => {
+                              activeInputRef.current = {
+                                element: e.target,
+                                type: "after",
+                                rowIdx: rIdx,
+                                part: p,
+                              };
+                            }}
+                            onChange={(e) =>
+                              handleRowChange(rIdx, "after", p, e.target.value)
+                            }
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

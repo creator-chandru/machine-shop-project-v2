@@ -3,6 +3,20 @@ const PDFDocument = require("pdfkit");
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Helper to ensure symbols and text render safely in standard PDFKit fonts
+ * without font encoding exceptions.
+ */
+const sanitizePdfText = (val) => {
+    if (val === undefined || val === null || val === '') return '-';
+    return String(val)
+        .replace(/≤/g, '<=')
+        .replace(/≥/g, '>=')
+        .replace(/∥/g, '||')
+        .replace(/⟂/g, '_|_')
+        .replace(/◎/g, '(O)');
+};
+
 // POST: Save Record of Significant Event
 const saveSignificantEvent = async (req, res) => {
     const { header, traceability, rows, signatures } = req.body;
@@ -116,7 +130,7 @@ const saveSignificantEvent = async (req, res) => {
     }
 };
 
-// GET: Fetch Records (Exact match for lineCode + mcNo + date + shift)
+// GET: Fetch Records
 const getSignificantEventRecords = async (req, res) => {
     const { date, partName, lineCode, mcNo, shift, machineShop } = req.query;
 
@@ -159,7 +173,7 @@ const getSignificantEventRecords = async (req, res) => {
     }
 };
 
-// 1. Fetch Users for Dropdowns
+// Fetch Users for Dropdowns
 const getMachineShopUsers = async (req, res) => {
     try {
         const result = await sql.query`
@@ -174,7 +188,7 @@ const getMachineShopUsers = async (req, res) => {
     }
 };
 
-// 2. Fetch Pending Approvals
+// Fetch Pending Approvals
 const getPendingSignificantEvents = async (req, res) => {
     try {
         const { role, username } = req.params;
@@ -204,7 +218,7 @@ const getPendingSignificantEvents = async (req, res) => {
     }
 };
 
-// 3. Sign Approval
+// Sign Approval
 const signSignificantEvent = async (req, res) => {
     try {
         const { role, username, partName, lineCode, recordDate, event, shift } = req.body;
@@ -237,7 +251,7 @@ const signSignificantEvent = async (req, res) => {
     }
 };
 
-// 4. Generate PDF Report (Untouched)
+// Generate PDF Report
 const generateSignificantEventPDF = async (req, res) => {
     try {
         const { lineCode, mcNo, date, shift } = req.query;
@@ -276,7 +290,6 @@ const generateSignificantEventPDF = async (req, res) => {
         const records = result.recordset;
         const header = records[0];
 
-        // Safe Date Formatter (DD/MM/YYYY)
         const formatDisplayDate = (rawDate) => {
             if (!rawDate) return '-';
             const d = new Date(rawDate);
@@ -309,9 +322,7 @@ const generateSignificantEventPDF = async (req, res) => {
         let currentY = 25;
         const totalWidth = doc.page.width - 50;
 
-        // ============================================================
-        // 1. TOP TITLE BLOCK
-        // ============================================================
+        // TOP TITLE BLOCK
         const topHeaderH = 42;
         doc.lineWidth(1).strokeColor('black');
 
@@ -329,7 +340,7 @@ const generateSignificantEventPDF = async (req, res) => {
         doc.rect(startX + 110, currentY, titleW, topHeaderH).stroke();
         doc.fillColor('black').font("Helvetica-Bold").fontSize(13).text("RECORD OF SIGNIFICANT EVENT (MACHINE SHOP)", startX + 110, currentY + 14, { width: titleW, align: "center" });
 
-        // Meta Info Box (Doc code, Shift, Date)
+        // Meta Info Box
         doc.rect(startX + totalWidth - 150, currentY, 150, topHeaderH).stroke();
         doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text("DOC: QF/07/MPD-02 | REV: 07", startX + totalWidth - 150, currentY + 6, { width: 150, align: "center" });
         doc.font("Helvetica").fontSize(7.5).text(`LINE: ${lineCode} | SHIFT: ${header.shift || 'I'}`, startX + totalWidth - 150, currentY + 18, { width: 150, align: "center" });
@@ -337,31 +348,25 @@ const generateSignificantEventPDF = async (req, res) => {
 
         currentY += topHeaderH;
 
-        // ============================================================
-        // 2. HEADER DETAILS GRID
-        // ============================================================
+        // HEADER DETAILS GRID
         doc.lineWidth(0.5);
 
-        // Row 1: Line Code (35%) & Part Name (65%) with adaptive height for multiline part names
         const partNameText = header.partName ? String(header.partName).trim() : "-";
         const partNameW = (totalWidth * 0.65) - 95;
         doc.font("Helvetica").fontSize(7.5);
         const partNameH = doc.heightOfString(partNameText, { width: partNameW });
         const row1H = Math.max(22, partNameH + 8);
 
-        // LINE CODE cell
         doc.rect(startX, currentY, totalWidth * 0.35, row1H).stroke();
         doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("LINE CODE:", startX + 6, currentY + (row1H / 2) - 4);
         doc.font("Helvetica").fontSize(8).text(header.lineCode || '-', startX + 75, currentY + (row1H / 2) - 4);
 
-        // PART NAME cell
         doc.rect(startX + (totalWidth * 0.35), currentY, totalWidth * 0.65, row1H).stroke();
         doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("PART NAME:", startX + (totalWidth * 0.35) + 6, currentY + 5);
         doc.font("Helvetica").fontSize(7.5).text(partNameText, startX + (totalWidth * 0.35) + 85, currentY + 5, { width: partNameW });
 
         currentY += row1H;
 
-        // Row 2: Event (Full width)
         const eventText = header.event ? String(header.event).trim() : "-";
         doc.font("Helvetica").fontSize(8);
         const eventTextH = doc.heightOfString(eventText, { width: totalWidth - 85 });
@@ -373,7 +378,6 @@ const generateSignificantEventPDF = async (req, res) => {
 
         currentY += row2H;
 
-        // Helper for two-column 20px rows
         const halfW = totalWidth / 2;
         const draw2ColRow = (l1, v1, l2, v2) => {
             const h = 20;
@@ -387,23 +391,17 @@ const generateSignificantEventPDF = async (req, res) => {
             currentY += h;
         };
 
-        // Row 3: M/C No & OP No
         draw2ColRow("M/C NO", header.mcNo, "OP NO", header.opNo);
-
-        // Row 4: Time From & Time To
         draw2ColRow("TIME FROM", header.fromTime, "TIME TO", header.toTime);
 
-        currentY += 6; // Spacing before table
+        currentY += 6;
 
-        // ============================================================
-        // 3. MEASUREMENTS & SPECIFICATIONS TABLE
-        // ============================================================
-        const c1 = 145; // Control Spec
-        const c2 = 135; // Inspection Gauge
-        const ptW = (totalWidth - c1 - c2) / 6; // ~85px each for Part 1-3
+        // MEASUREMENTS & SPECIFICATIONS TABLE
+        const c1 = 145;
+        const c2 = 135;
+        const ptW = (totalWidth - c1 - c2) / 6;
         const headerRowH = 18;
 
-        // Header Row 1
         doc.rect(startX, currentY, c1, headerRowH * 2).fillAndStroke('#e5e7eb', 'black');
         doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("CONTROL SPEC", startX, currentY + 12, { width: c1, align: "center" });
 
@@ -418,7 +416,6 @@ const generateSignificantEventPDF = async (req, res) => {
 
         currentY += headerRowH;
 
-        // Header Row 2 (Part 1, 2, 3)
         for (let i = 0; i < 6; i++) {
             const xPos = startX + c1 + c2 + (i * ptW);
             doc.rect(xPos, currentY, ptW, headerRowH).fillAndStroke('#e5e7eb', 'black');
@@ -426,27 +423,23 @@ const generateSignificantEventPDF = async (req, res) => {
         }
         currentY += headerRowH;
 
-        // Row renderer
         const drawTableRow = (title, gauge, b1, b2, b3, a1, a2, a3, isBoldTitle = false) => {
             const rowH = 19;
             const vals = [b1, b2, b3, a1, a2, a3];
 
-            // Col 1: Title / Spec
             doc.rect(startX, currentY, c1, rowH).stroke();
             doc.fillColor('black').font(isBoldTitle ? "Helvetica-Bold" : "Helvetica").fontSize(7.5)
-               .text(title || '-', startX + 5, currentY + 5, { width: c1 - 10, align: 'left', ellipsis: true });
+               .text(sanitizePdfText(title), startX + 5, currentY + 5, { width: c1 - 10, align: 'left', ellipsis: true });
 
-            // Col 2: Gauge
             doc.rect(startX + c1, currentY, c2, rowH).stroke();
             doc.font("Helvetica").fontSize(7.5)
-               .text(gauge || '-', startX + c1 + 5, currentY + 5, { width: c2 - 10, align: 'center', ellipsis: true });
+               .text(sanitizePdfText(gauge), startX + c1 + 5, currentY + 5, { width: c2 - 10, align: 'center', ellipsis: true });
 
-            // Cols 3-8: Before & After measurements
             vals.forEach((v, idx) => {
                 const xPos = startX + c1 + c2 + (idx * ptW);
                 doc.rect(xPos, currentY, ptW, rowH).stroke();
                 doc.font("Helvetica").fontSize(7.5)
-                   .text(v ? String(v) : '-', xPos, currentY + 5, { width: ptW, align: 'center' });
+                   .text(sanitizePdfText(v), xPos, currentY + 5, { width: ptW, align: 'center', ellipsis: true });
             });
 
             currentY += rowH;
@@ -468,7 +461,7 @@ const generateSignificantEventPDF = async (req, res) => {
             true
         );
 
-        // Dynamic Inspection Custom Rows
+        // Dynamic Inspection Custom Rows (Renders user-entered specifications or OK/NOT OK)
         records.forEach((r) => {
             drawTableRow(
                 r.controlSpec, r.inspectionGauge,
@@ -480,19 +473,15 @@ const generateSignificantEventPDF = async (req, res) => {
 
         currentY += 8;
 
-        // ============================================================
-        // 4. SIGNATURES BLOCK
-        // ============================================================
+        // SIGNATURES BLOCK
         const sigWidth = totalWidth / 3;
         const sigHeaderH = 18;
         const sigBoxH = 34;
 
         const drawSigBox = (title, sigVal, x) => {
-            // Header
             doc.rect(x, currentY, sigWidth, sigHeaderH).fillAndStroke('#e5e7eb', 'black');
             doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text(title, x, currentY + 5, { width: sigWidth, align: 'center' });
 
-            // Content
             doc.rect(x, currentY + sigHeaderH, sigWidth, sigBoxH).stroke();
             const textY = currentY + sigHeaderH + 11;
 
@@ -513,9 +502,7 @@ const generateSignificantEventPDF = async (req, res) => {
 
         currentY += sigHeaderH + sigBoxH + 6;
 
-        // ============================================================
-        // 5. APPLICABLE EVENTS FOOTER
-        // ============================================================
+        // APPLICABLE EVENTS FOOTER
         doc.rect(startX, currentY, totalWidth, 18).stroke();
         doc.fillColor('black').font("Helvetica-Bold").fontSize(7.5).text("Applicable Events:", startX + 6, currentY + 5);
         doc.font("Helvetica").fontSize(7.5).text("Significant Machine Break Downs & Other unusual situation and applicable 4M change.", startX + 85, currentY + 5);

@@ -601,6 +601,42 @@ const generateLevel1Report = async (req, res) => {
     }
 
     // ========================================================
+    // FETCH DYNAMIC QF HISTORY FOR LEVEL 1
+    // ========================================================
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date
+        FROM Level1MaintenanceQFvalues
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch Level1MaintenanceQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/07/MPD-47, Rev.No: 01 dt 01.12.2025";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
+
+    // ========================================================
     // GROUP CHECKLIST RECORDS
     // ========================================================
 
@@ -698,6 +734,7 @@ const generateLevel1Report = async (req, res) => {
       ).split("-");
 
       const displayDate = `${dd}/${mm}/${yy}`;
+      const effectiveQf = getEffectiveQfValue(first.checklistDate);
 
       // ======================================================
       // HEADER
@@ -761,7 +798,21 @@ const generateLevel1Report = async (req, res) => {
         .text(
           "LEVEL 1 MAINTENANCE CHECK SHEET",
           startX + 85,
-          blockStartY + 6,
+          blockStartY + 4,
+          {
+            width: midWidth - 10,
+            align: "center",
+          }
+        );
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(6)
+        .fillColor("#374151")
+        .text(
+          effectiveQf,
+          startX + 85,
+          blockStartY + 14,
           {
             width: midWidth - 10,
             align: "center",
@@ -775,7 +826,7 @@ const generateLevel1Report = async (req, res) => {
         .text(
           `LINE: ${first.lineCode}   |   M/C NO: ${first.machineNo}   |   OP: ${first.opNo || "-"}`,
           startX + 85,
-          blockStartY + 20,
+          blockStartY + 23,
           {
             width: midWidth - 10,
             align: "center",

@@ -145,7 +145,6 @@ const saveDailyProductionReport = async (req, res) => {
     const peSignature = signatures?.productionEngineer || '';
     const hofSignature = signatures?.hofProduction || '';
 
-    // Clear existing unverified records for this shift/line combo[cite: 1, 2]
     const deleteReq = transaction.request();
     deleteReq.input('MachineShop', sql.NVarChar(50), machineShop);
     deleteReq.input('lineCode', sql.NVarChar(50), lineCode);
@@ -165,7 +164,6 @@ const saveDailyProductionReport = async (req, res) => {
         )
     `);
 
-    // Insert ALL incoming row records individually to guarantee all operation rows are retained[cite: 1, 2]
     for (const row of rows) {
       await transaction.request()
         .input('MachineShop', sql.NVarChar(50), machineShop)
@@ -420,7 +418,7 @@ const getDailyProductionRecords = async (req, res) => {
 };
 
 // ============================================================
-// 14. PDF REPORT GENERATOR (SUPPORTS RANGE OR SPECIFIC REPORT)[cite: 1, 2]
+// 14. PDF REPORT GENERATOR (SUPPORTS RANGE OR SPECIFIC REPORT)
 // ============================================================
 const generateReport = async (req, res) => {
   try {
@@ -433,7 +431,6 @@ const generateReport = async (req, res) => {
       WHERE 1=1
     `;
 
-    // Support both HOF specific report preview (lineCode + date) and date ranges (fromDate + toDate)[cite: 1, 2]
     if (lineCode && date) {
       request.input('lineCode', sql.NVarChar(50), lineCode);
       request.input('reportDate', sql.NVarChar(50), String(date).split('T')[0]);
@@ -460,6 +457,42 @@ const generateReport = async (req, res) => {
     const result = await request.query(query);
     const records = result.recordset;
     if (!records || records.length === 0) return res.status(404).send("No records found for the selected criteria.");
+
+    // ========================================================
+    // FETCH DYNAMIC QF HISTORY
+    // ========================================================
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date
+        FROM DailyProductionReportQFvalues
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch DailyProductionReportQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
 
     const groupedMap = new Map();
     records.forEach(r => {
@@ -519,6 +552,7 @@ const generateReport = async (req, res) => {
       const first = groupRecords[0];
       const [yy, mm, dd] = String(first.ReportDate).split('-');
       const displayDate = `${dd}/${mm}/${yy}`;
+      const effectiveQf = getEffectiveQfValue(first.ReportDate);
 
       const headerH = 34;
       doc.lineWidth(0.8).strokeColor('black');
@@ -531,13 +565,15 @@ const generateReport = async (req, res) => {
         doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("SAKTHI\nAUTO", startX, entryY + 8, { width: 90, align: "center" });
       }
 
-      const titleW = totalWidth - 90 - 160;
+      const rightBoxW = 200;
+      const titleW = totalWidth - 90 - rightBoxW;
       doc.rect(startX + 90, entryY, titleW, headerH).stroke();
       doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("DAILY PRODUCTION REPORT (MACHINE SHOP)", startX + 90, entryY + 12, { width: titleW, align: "center" });
 
-      doc.rect(startX + totalWidth - 160, entryY, 160, headerH).stroke();
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - 160, entryY + 6, { width: 160, align: "center" });
-      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - 160, entryY + 18, { width: 160, align: "center" });
+      doc.rect(startX + totalWidth - rightBoxW, entryY, rightBoxW, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(7).fillColor('black').text(effectiveQf, startX + totalWidth - rightBoxW, entryY + 4, { width: rightBoxW, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(7.5).text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - rightBoxW, entryY + 14, { width: rightBoxW, align: "center" });
+      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - rightBoxW, entryY + 24, { width: rightBoxW, align: "center" });
 
       let currY = entryY + headerH + 3;
 
@@ -641,8 +677,7 @@ const generateReport = async (req, res) => {
 };
 
 // ============================================================
-// PDF GENERATION - SINGLE DAY / ENTRY (used by approval dashboards)
-// Query: lineCode, date, [shift], [shopId]
+// PDF GENERATION - SINGLE DAY / ENTRY
 // ============================================================
 const generateDailyProductionDayReport = async (req, res) => {
   try {
@@ -681,6 +716,42 @@ const generateDailyProductionDayReport = async (req, res) => {
     if (!records || records.length === 0) {
       return res.status(404).json({ error: "No records found for the selected date." });
     }
+
+    // ========================================================
+    // FETCH DYNAMIC QF HISTORY
+    // ========================================================
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date
+        FROM DailyProductionReportQFvalues
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch DailyProductionReportQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
 
     const groupedMap = new Map();
     records.forEach(r => {
@@ -740,6 +811,7 @@ const generateDailyProductionDayReport = async (req, res) => {
       const first = groupRecords[0];
       const [yy, mm, dd] = String(first.ReportDate).split('-');
       const displayDate = `${dd}/${mm}/${yy}`;
+      const effectiveQf = getEffectiveQfValue(first.ReportDate);
 
       const headerH = 34;
       doc.lineWidth(0.8).strokeColor('black');
@@ -752,13 +824,15 @@ const generateDailyProductionDayReport = async (req, res) => {
         doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("SAKTHI\nAUTO", startX, entryY + 8, { width: 90, align: "center" });
       }
 
-      const titleW = totalWidth - 90 - 160;
+      const rightBoxW = 200;
+      const titleW = totalWidth - 90 - rightBoxW;
       doc.rect(startX + 90, entryY, titleW, headerH).stroke();
       doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("DAILY PRODUCTION REPORT (MACHINE SHOP)", startX + 90, entryY + 12, { width: titleW, align: "center" });
 
-      doc.rect(startX + totalWidth - 160, entryY, 160, headerH).stroke();
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - 160, entryY + 6, { width: 160, align: "center" });
-      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - 160, entryY + 18, { width: 160, align: "center" });
+      doc.rect(startX + totalWidth - rightBoxW, entryY, rightBoxW, headerH).stroke();
+      doc.font("Helvetica-Bold").fontSize(7).fillColor('black').text(effectiveQf, startX + totalWidth - rightBoxW, entryY + 4, { width: rightBoxW, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(7.5).text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - rightBoxW, entryY + 14, { width: rightBoxW, align: "center" });
+      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - rightBoxW, entryY + 24, { width: rightBoxW, align: "center" });
 
       let currY = entryY + headerH + 3;
 

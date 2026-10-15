@@ -65,6 +65,10 @@ export default function FourMChangeMonitoringCheckSheet() {
   const [pdfToDate, setPdfToDate] = useState("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF / 07 / MPD-36, Rev.No: 01, 13.03.2019");
+
   const lookupSeqRef = useRef(0);
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
@@ -91,8 +95,8 @@ export default function FourMChangeMonitoringCheckSheet() {
         // Fetch HOD Users
         const hodRes = await fetch(`${process.env.REACT_APP_API_URL || ""}/api/four-m-change-monitoring/hods`, { headers });
         if (hodRes.ok) {
-            const hodData = await hodRes.json();
-            setHodUsers(hodData.hodList || []);
+          const hodData = await hodRes.json();
+          setHodUsers(hodData.hodList || []);
         }
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -104,15 +108,63 @@ export default function FourMChangeMonitoringCheckSheet() {
   }, [shopId]);
 
   // ==========================================================
+  // FETCH QF HISTORY ON MOUNT
+  // ==========================================================
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/four-m-change-monitoring`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // ==========================================================
   // TRACK CURRENT LINE, MACHINE, DATE, AND SHIFT COMBO
   // ==========================================================
   const firstRowDate = rows[0]?.date || "";
   const firstRowShift = rows[0]?.shift || "I";
   const selectedMachineNo = rows.find(r => r.mcNo)?.mcNo || headerInfo.machineNo || "";
 
+  // ==========================================================
+  // CALCULATE QF BASED ON SELECTED DATE
+  // ==========================================================
+  useEffect(() => {
+    let currentQf = "QF / 07 / MPD-36, Rev.No: 01, 13.03.2019"; // Fallback
+
+    if (firstRowDate && qfHistory.length > 0) {
+      const selectedDate = new Date(firstRowDate);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [firstRowDate, qfHistory]);
+
   useEffect(() => {
     const checkExistingRecord = async () => {
-      // Must have all parts of the combo
       if (!headerInfo.lineCode || !selectedMachineNo || !firstRowDate || !firstRowShift) {
         setIsSavedRecord(false);
         setHodSign("");
@@ -149,7 +201,6 @@ export default function FourMChangeMonitoringCheckSheet() {
             }
             triggerToast("Existing 4M record loaded for this combo.", "success");
           } else {
-            // Fresh combo with no record: reset rows to clean state with chosen combo
             setIsSavedRecord(false);
             setHodSign("");
             setRows([emptyRow(firstRowDate, firstRowShift, selectedMachineNo)]);
@@ -176,7 +227,6 @@ export default function FourMChangeMonitoringCheckSheet() {
       ...prev, lineCode, partName: autoPartName, partNo: autoPartNo, machineNo: ""
     }));
 
-    // Reset rows to clean state on line change
     setRows([emptyRow(firstRowDate || getTodayISODate(), firstRowShift || "I", "")]);
     setHodSign("");
     setIsSavedRecord(false);
@@ -224,7 +274,6 @@ export default function FourMChangeMonitoringCheckSheet() {
     });
   };
 
-  // Strictly validated approval handler
   const handleApproveIncharge = (rIdx) => {
     const row = rows[rIdx];
     const mc = row.mcNo || selectedMachineNo;
@@ -249,7 +298,6 @@ export default function FourMChangeMonitoringCheckSheet() {
     triggerToast("Incharge signature approved successfully!", "success");
   };
 
-  // Download PDF Report by Date Range
   const handleDownloadPdfRange = async () => {
     if (!pdfFromDate || !pdfToDate) {
       triggerToast("Please select both From Date and To Date.", "error");
@@ -305,7 +353,6 @@ export default function FourMChangeMonitoringCheckSheet() {
     if (!headerInfo.partName) return triggerToast("Part Name is missing.", "error");
     if (!selectedMachineNo) return triggerToast("Please select a Machine No in the table.", "error");
 
-    // Approve button constraint for data insertion
     for (let rIdx = 0; rIdx < rows.length; rIdx++) {
       const row = rows[rIdx];
       const hasDataEntered = Boolean(
@@ -435,10 +482,9 @@ export default function FourMChangeMonitoringCheckSheet() {
           <div>
             <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">{formMeta.company}</span>
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">{formMeta.title}</h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span><span>|</span>
-              <span>Revision: {formMeta.revision}</span><span>|</span>
-              <span>Revision Date: {formMeta.revisionDate}</span>
+            {/* Dynamic QF Value Display */}
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
             </div>
           </div>
           <button
@@ -591,7 +637,8 @@ export default function FourMChangeMonitoringCheckSheet() {
         </div>
 
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mt-5 pt-3 gap-3">
-          <div className="text-xs text-gray-600 font-semibold">{formMeta.formCode}, Rev.No: {formMeta.revision}, {formMeta.revisionDate}</div>
+          {/* Dynamic QF Footer Display */}
+          <div className="text-xs text-gray-600 font-semibold">{qfValue}</div>
           
           {/* HOD DROP DOWN */}
           <div className="flex items-center gap-2">

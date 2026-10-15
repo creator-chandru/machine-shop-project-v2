@@ -98,6 +98,9 @@ export default function DailyProductionReport() {
 
   const isReadOnlyApprover = isQC || isPE || isHOF;
 
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-10, Rev.No: 00 dt 01.07.2021");
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -137,6 +140,52 @@ export default function DailyProductionReport() {
     assignedHof: "",
   });
 
+  
+  // Fetch QF History on Mount
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/daily-production-report`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // Calculate QF based on selected Date
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021"; // Fallback
+
+    if (header.date && qfHistory.length > 0) {
+      const selectedDate = new Date(header.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [header.date, qfHistory]);
+  
   const [rows, setRows] = useState(
     Array.from({ length: INITIAL_ROWS }, () => createEmptyRow())
   );
@@ -824,14 +873,10 @@ const handleRowChange = (rowIdx, field, subField, val) => {
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
-              <span>|</span>
-              <span>Revision: {formMeta.revision}</span>
-              <span>|</span>
-              <span>Revision Date: {formMeta.revisionDate}</span>
-              <span>|</span>
-              <span className="font-bold text-orange-600">Shop ID: {shopId}</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
+              <span className="font-normal text-gray-400">|</span>
+              <span className="text-orange-600">Shop ID: {shopId}</span>
             </div>
           </div>
 

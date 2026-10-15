@@ -77,6 +77,42 @@ const extractErrorProofNo = (obj) => {
     return '';
 };
 
+// Helper to resolve dynamic QF value based on record date
+const fetchQfHistory = async () => {
+    try {
+        const res = await sql.query(`
+            SELECT id, formName, qfValue, date 
+            FROM AirGapSensorQFvalues 
+            ORDER BY date DESC, id DESC
+        `);
+        return res.recordset || [];
+    } catch (e) {
+        console.error("Warning: Could not fetch AirGapSensorQFvalues:", e.message);
+        return [];
+    }
+};
+
+const getEffectiveQfValue = (qfHistory, recordDateStr) => {
+    const fallback = "QF/07/MPD-06, Rev.No: 05 dt 10.07.2026";
+    if (!qfHistory || qfHistory.length === 0) return fallback;
+
+    if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+            if (!qf.date) continue;
+            const qfDate = new Date(qf.date);
+            qfDate.setHours(0, 0, 0, 0);
+
+            if (qfDate <= targetDate) {
+                return qf.qfValue;
+            }
+        }
+    }
+    return qfHistory[0]?.qfValue || fallback;
+};
+
 // ============================================================
 // Helper: Generate Part Traceability Code (Internal)
 // ============================================================
@@ -174,7 +210,6 @@ const saveAirGapSensor = async (req, res) => {
             const lineSignatures = block.lineInchargeSignatures?.[checkDate] || {};
             const parameters = block.parameters || [];
 
-            // Update Master Unique ID and Error Proof No on existing records for this machine/date
             if (block.machineNo && (block.masterUniqueId || block.errorProofNo)) {
                 const metaUpdateReq = new sql.Request(transaction);
                 metaUpdateReq.input('machineShop', sql.Int, parseInt(header.machineShop))
@@ -383,7 +418,7 @@ const getAirGapSensorCheckSheet = async (req, res) => {
 };
 
 // ============================================================
-// PDF GENERATION
+// PDF GENERATION - RANGE
 // ============================================================
 const generateAirGapReport = async (req, res) => {
     try {
@@ -434,6 +469,9 @@ const generateAirGapReport = async (req, res) => {
         if (!records || records.length === 0) {
             return res.status(404).json({ error: "No records found for the selected date range." });
         }
+
+        // Fetch dynamic QF values for Air Gap Sensor
+        const qfHistory = await fetchQfHistory();
 
         const groupedMap = new Map();
         records.forEach(r => {
@@ -505,6 +543,7 @@ const generateAirGapReport = async (req, res) => {
         const drawEntry = (groupRecords, entryY) => {
             const first = groupRecords[0];
             const displayDate = first.displayDateStr || formatDateDisplay(first.checkDate);
+            const effectiveQf = getEffectiveQfValue(qfHistory, first.checkDate);
 
             const blocksMap = {};
             const prodSigns = {};
@@ -561,10 +600,10 @@ const generateAirGapReport = async (req, res) => {
                 doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI AUTO", startX, entryY + 25, { width: logoBoxWidth, align: "center" });
             }
 
-            // Title & Revision Header
+            // Title & Dynamic QF
             doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerH).stroke();
             doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, entryY + 18, { width: titleBoxWidth, align: "center" });
-            doc.font("Helvetica").fontSize(7.5).fillColor('#374151').text("Form Code: QF/07/MPD-06   |   Revision: 05", startX + logoBoxWidth, entryY + 36, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(8).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, entryY + 36, { width: titleBoxWidth, align: "center" });
 
             // Metadata Box
             const metaX = startX + logoBoxWidth + titleBoxWidth;
@@ -770,16 +809,7 @@ const generateAirGapReport = async (req, res) => {
 };
 
 // ============================================================
-// PASTE THIS into airGapSensorCheckSheetController.js
-// (anywhere above module.exports). It reuses the helpers and
-// imports already present in that file:
-//   sql, PDFDocument, fs, path,
-//   formatDateDisplay, getDateISO, extractMasterId, extractErrorProofNo
-// ============================================================
-
-// ============================================================
 // PDF GENERATION - SINGLE DAY (used by approval dashboards)
-// Query: lineCode, date, [partNo], [shopId]
 // ============================================================
 const generateAirGapDayReport = async (req, res) => {
     try {
@@ -832,8 +862,12 @@ const generateAirGapDayReport = async (req, res) => {
             return res.status(404).json({ error: "No records found for the selected date." });
         }
 
+        // Fetch dynamic QF values for Air Gap Sensor
+        const qfHistory = await fetchQfHistory();
+
         const first = records[0];
         const displayDate = first.displayDateStr || formatDateDisplay(first.checkDate);
+        const effectiveQf = getEffectiveQfValue(qfHistory, first.checkDate);
 
         // Group by machine
         const blocksMap = {};
@@ -889,7 +923,6 @@ const generateAirGapDayReport = async (req, res) => {
                .stroke().restore();
         };
 
-        // ---------- Title / meta header ----------
         let currY = topMargin;
         const headerH = 65, metaBoxWidth = 290, logoBoxWidth = 130;
         const titleBoxWidth = totalWidth - logoBoxWidth - metaBoxWidth;
@@ -906,7 +939,7 @@ const generateAirGapDayReport = async (req, res) => {
 
             doc.rect(startX + logoBoxWidth, currY, titleBoxWidth, headerH).stroke();
             doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, currY + 18, { width: titleBoxWidth, align: "center" });
-            doc.font("Helvetica").fontSize(7.5).fillColor('#374151').text("Form Code: QF/07/MPD-06   |   Revision: 05", startX + logoBoxWidth, currY + 36, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(8).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, currY + 36, { width: titleBoxWidth, align: "center" });
 
             const metaX = startX + logoBoxWidth + titleBoxWidth;
             doc.rect(metaX, currY, metaBoxWidth, headerH).stroke();
@@ -923,7 +956,6 @@ const generateAirGapDayReport = async (req, res) => {
             currY += headerH + 4;
         };
 
-        // ---------- Table column header ----------
         const drawTableHeader = () => {
             const h1 = 15, h2 = 13;
             const cell = (x, w, label, y, h, ty) => {
@@ -945,9 +977,7 @@ const generateAirGapDayReport = async (req, res) => {
         drawTitleHeader();
         drawTableHeader();
 
-        // ---------- Machine blocks ----------
         uniqueBlocks.forEach(block => {
-            // leave room for this block; PE row + notes are checked at the end
             if (currY + blockH > pageBottom) {
                 doc.addPage();
                 currY = topMargin;
@@ -986,7 +1016,6 @@ const generateAirGapDayReport = async (req, res) => {
                 currY += rowH;
             }
 
-            // Line Incharge row
             doc.rect(startX, currY, leftTotal, signRowH).fillAndStroke('#f9fafb', 'black');
             doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Line Incharge Signature", startX + 10, currY + 7);
             ['I', 'II', 'III'].forEach((s, si) => {
@@ -1001,7 +1030,6 @@ const generateAirGapDayReport = async (req, res) => {
             currY += signRowH;
         });
 
-        // ---------- PE signature row ----------
         if (currY + prodRowH + 5 + noteBoxHeight > pageBottom) {
             doc.addPage();
             currY = topMargin;
@@ -1024,11 +1052,11 @@ const generateAirGapDayReport = async (req, res) => {
         });
         currY += prodRowH;
 
-        // ---------- Notes ----------
         currY += 5;
         doc.rect(startX, currY, totalWidth, noteBoxHeight).stroke();
         doc.rect(startX, currY, totalWidth, 14).fillAndStroke('#f3f4f6', 'black');
         doc.font("Helvetica-Bold").fontSize(8).fillColor('black').text("Note:", startX + 6, currY + 3);
+
         doc.font("Helvetica").fontSize(7);
         doc.text("a) If status OK - ", startX + 6, currY + 18);
         drawCheckMark(startX + 69, currY + 22, 8);
@@ -1047,15 +1075,6 @@ const generateAirGapDayReport = async (req, res) => {
         else res.end();
     }
 };
-
-// ============================================================
-// UPDATE module.exports -> add generateAirGapDayReport
-// ============================================================
-// module.exports = {
-//     getPEUsers, saveAirGapSensor, getPendingPEAirGapData, signPEApproval,
-//     getPendingAirGapData, getAirGapSensorCheckSheet, generateAirGapReport,
-//     generateAirGapDayReport          // <-- add
-// };
 
 module.exports = {
     getPEUsers,

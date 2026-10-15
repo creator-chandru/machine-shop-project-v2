@@ -5,12 +5,6 @@ import { FileDown, Calendar, X } from "lucide-react";
 import Header from "../components/Header";
 
 // ============================================================
-// API
-// ============================================================
-
-const API_BASE = "http://localhost:5000/api";
-
-// ============================================================
 // INITIAL FORM DATA
 // ============================================================
 
@@ -151,6 +145,12 @@ export default function Level1MaintenanceChecksheet() {
       ?.username || "Unknown";
 
   // ============================================================
+  // DYNAMIC QF STATES
+  // ============================================================
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-47, Rev.No: 01 dt 01.12.2025");
+
+  // ============================================================
   // PRODUCT ENGINEERS
   // ============================================================
 
@@ -195,6 +195,56 @@ export default function Level1MaintenanceChecksheet() {
   };
 
   // ============================================================
+  // FETCH QF HISTORY ON MOUNT
+  // ============================================================
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/level1-maintenance-checklist`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // ============================================================
+  // CALCULATE QF BASED ON SELECTED DATE
+  // ============================================================
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-47, Rev.No: 01 dt 01.12.2025"; // Fallback
+
+    if (headerInfo.date && qfHistory.length > 0) {
+      const selectedDate = new Date(headerInfo.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [headerInfo.date, qfHistory]);
+
+  // ============================================================
   // FETCH PRODUCT ENGINEERS
   // ============================================================
 
@@ -206,7 +256,7 @@ export default function Level1MaintenanceChecksheet() {
         const token = localStorage.getItem("token");
 
         const response = await fetch(
-          `${API_BASE}/level1-maintenance-checklist/product-engineers`,
+          `${process.env.REACT_APP_API_URL}/api/level1-maintenance-checklist/product-engineers`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -259,7 +309,7 @@ export default function Level1MaintenanceChecksheet() {
         };
 
         const machineRes = await fetch(
-          `${API_BASE}/machine-shop/${shopId}/pre-operation-details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/pre-operation-details`,
           { headers }
         );
 
@@ -270,7 +320,7 @@ export default function Level1MaintenanceChecksheet() {
         }
 
         const mappingRes = await fetch(
-          `${API_BASE}/mappings/${shopId}/lines`,
+          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
           { headers }
         );
 
@@ -324,7 +374,7 @@ export default function Level1MaintenanceChecksheet() {
         });
 
         const response = await fetch(
-          `${API_BASE}/level1-maintenance-checklist/record?${params.toString()}`,
+          `${process.env.REACT_APP_API_URL}/api/level1-maintenance-checklist/record?${params.toString()}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -581,7 +631,7 @@ export default function Level1MaintenanceChecksheet() {
       });
 
       const response = await fetch(
-        `${API_BASE}/level1-maintenance-checklist/report?${params.toString()}`,
+        `${process.env.REACT_APP_API_URL}/api/level1-maintenance-checklist/report?${params.toString()}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -718,7 +768,7 @@ export default function Level1MaintenanceChecksheet() {
       };
 
       const response = await fetch(
-        `${API_BASE}/level1-maintenance-checklist`,
+        `${process.env.REACT_APP_API_URL}/api/level1-maintenance-checklist`,
         {
           method: "POST",
 
@@ -892,22 +942,9 @@ export default function Level1MaintenanceChecksheet() {
               {initialFormData.title}
             </h2>
 
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>
-                Form Code: {initialFormData.formCode}
-              </span>
-
-              |
-
-              <span>
-                Rev: {initialFormData.revision}
-              </span>
-
-              |
-
-              <span>
-                Date: {initialFormData.revisionDate}
-              </span>
+            {/* DYNAMIC QF VALUE DISPLAY */}
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
             </div>
           </div>
 
@@ -1070,8 +1107,6 @@ export default function Level1MaintenanceChecksheet() {
               }
             />
           </div>
-
-
         </div>
 
         {/* =====================================================
@@ -1180,7 +1215,6 @@ export default function Level1MaintenanceChecksheet() {
                     </button>
                   )}
                 </td>
-
               </tr>
               {/* PRODUCT ENGINEER - SEPARATE ROW */}
               <tr>

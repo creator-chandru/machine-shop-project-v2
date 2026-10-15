@@ -142,6 +142,9 @@ export default function DailyProductionIdleTimeReport() {
   const currentUser = getCurrentUser();
   const chunkSize = useChunkSize();
 
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-10, Rev.No: 00 dt 01.07.2021");
   const [machineShopDetails, setMachineShopDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [peUsers, setPeUsers] = useState([]);
@@ -230,6 +233,51 @@ export default function DailyProductionIdleTimeReport() {
       });
     }
   }, [lineSet]);
+
+  // Fetch QF History on Mount
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${API}/api/qf-values/history/daily-production-idle-time`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // Calculate QF based on selected Date
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021"; // Fallback
+
+    if (reportDate && qfHistory.length > 0) {
+      const selectedDate = new Date(reportDate);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [reportDate, qfHistory]);
 
   const lineCodes = [
     ...new Set(
@@ -747,6 +795,10 @@ export default function DailyProductionIdleTimeReport() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               DAILY PRODUCTION & IDLE TIME REPORT
             </h2>
+            {/* Dynamic QF Display */}
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
+            </div>
           </div>
 
           <button

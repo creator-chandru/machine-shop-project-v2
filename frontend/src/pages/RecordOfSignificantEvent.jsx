@@ -86,6 +86,10 @@ export default function RecordOfSignificantEvent() {
   const [toast, setToast] = useState({ message: "", type: "" });
   const lookupSeqRef = useRef(0);
 
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-02, Rev.No: 07 dt 13.08.2024");
+
   // Reference for the last active input for symbol insertion
   const activeInputRef = useRef(null);
 
@@ -139,6 +143,51 @@ export default function RecordOfSignificantEvent() {
   const [qcUsers, setQcUsers] = useState([]);
   const [hofUsers, setHofUsers] = useState([]);
 
+  // Fetch QF History on Mount
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/qf-values/history/significant-event-record`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // Calculate dynamic QF value based on selected Date
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-02, Rev.No: 07 dt 13.08.2024"; // Fallback
+
+    if (header.date && qfHistory.length > 0) {
+      const selectedDate = new Date(header.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [header.date, qfHistory]);
+
   // Load master data
   useEffect(() => {
     const fetchMasterData = async () => {
@@ -148,7 +197,7 @@ export default function RecordOfSignificantEvent() {
         const headers = { Authorization: `Bearer ${token}` };
 
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/machine-shop/${shopId}/details`,
+          `${process.env.REACT_APP_API_URL}/api/machine-shop/${shopId}/details`,
           { headers }
         );
         if (res.ok) {
@@ -157,7 +206,7 @@ export default function RecordOfSignificantEvent() {
         }
 
         const mappingRes = await fetch(
-          `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/mappings/${shopId}/lines`,
+          `${process.env.REACT_APP_API_URL}/api/mappings/${shopId}/lines`,
           { headers }
         );
         if (mappingRes.ok) {
@@ -179,7 +228,7 @@ export default function RecordOfSignificantEvent() {
       try {
         const token = localStorage.getItem("token");
         const res = await fetch(
-          `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-users`,
+          `${process.env.REACT_APP_API_URL}/api/significant-event-users`,
           {
             method: "GET",
             headers: {
@@ -223,7 +272,7 @@ export default function RecordOfSignificantEvent() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/daily-production-report/traceability?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL}/api/daily-production-report/traceability?lineCode=${encodeURIComponent(
           lineCode
         )}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -296,7 +345,7 @@ export default function RecordOfSignificantEvent() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL || "http://localhost:5000"}/api/significant-event-record?lineCode=${encodeURIComponent(
+        `${process.env.REACT_APP_API_URL}/api/significant-event-record?lineCode=${encodeURIComponent(
           lineCode
         )}&mcNo=${encodeURIComponent(mcNo)}&date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}&machineShop=${encodeURIComponent(shopId || 3)}`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -367,9 +416,9 @@ export default function RecordOfSignificantEvent() {
           );
 
           setSignatures({
-            prodnIncharge: first.prodnIncharge?.replace(/^(Pending \[|Approved \()\vert{}(\]\vert{}\))$/g, "") || "",
-            qcIncharge: first.qcIncharge?.replace(/^(Pending \[|Approved \()\vert{}(\]\vert{}\))$/g, "") || "",
-            prodnHofSign: first.prodnHofSign?.replace(/^(Pending \[|Approved \()\vert{}(\]\vert{}\))$/g, "") || "",
+            prodnIncharge: first.prodnIncharge?.replace(/^(Pending \[|Approved \()|(])|(\))$/g, "") || "",
+            qcIncharge: first.qcIncharge?.replace(/^(Pending \[|Approved \()|(])|(\))$/g, "") || "",
+            prodnHofSign: first.prodnHofSign?.replace(/^(Pending \[|Approved \()|(])|(\))$/g, "") || "",
           });
           triggerToast("Existing record loaded for this combo.", "success");
         } else {
@@ -382,7 +431,6 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Header change handler
   const handleHeaderChange = (field, val) => {
     let nextHeader = { ...header, [field]: val };
 
@@ -454,9 +502,6 @@ export default function RecordOfSignificantEvent() {
     setRows((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   };
 
-  // ==========================================================
-  // SYMBOL INSERTION LOGIC
-  // ==========================================================
   const handleInsertSymbol = (sym) => {
     if (isSavedRecord) return;
 
@@ -472,7 +517,6 @@ export default function RecordOfSignificantEvent() {
     const currentVal = input.value || "";
     const newVal = currentVal.substring(0, start) + sym + currentVal.substring(end);
 
-    // Call state update based on type
     if (activeInfo.type === "controlSpec") {
       handleRowChange(activeInfo.rowIdx, "controlSpec", null, newVal);
     } else if (activeInfo.type === "inspectionGauge") {
@@ -481,17 +525,12 @@ export default function RecordOfSignificantEvent() {
       handleRowChange(activeInfo.rowIdx, activeInfo.type, activeInfo.part, newVal);
     }
 
-    // Restore focus and cursor position after insertion
     setTimeout(() => {
       input.focus();
       input.setSelectionRange(start + sym.length, start + sym.length);
     }, 0);
   };
 
-  // ==========================================================
-  // CASTING TRACEABILITY COPY / PASTE HELPERS
-  // ==========================================================
-  // 1. One-tap copy Part 1 to Part 2 & Part 3
   const handleCopyPart1ToAll = (timing) => {
     if (isSavedRecord) return;
     const p1Val = traceability.casting[timing].part1;
@@ -513,7 +552,6 @@ export default function RecordOfSignificantEvent() {
     triggerToast(`Copied ${timing.toUpperCase()} Part 1 to all parts!`, "success");
   };
 
-  // 2. One-tap copy all Before to After
   const handleCopyBeforeToAfter = () => {
     if (isSavedRecord) return;
     const beforeCasting = traceability.casting.before;
@@ -527,7 +565,6 @@ export default function RecordOfSignificantEvent() {
     triggerToast("Copied Casting BEFORE to AFTER!", "success");
   };
 
-  // 3. One-tap Paste from Clipboard
   const handlePasteFromClipboard = async (timing, targetPart = "part1") => {
     if (isSavedRecord) return;
     try {
@@ -537,7 +574,6 @@ export default function RecordOfSignificantEvent() {
         return;
       }
 
-      // Check if multi-value (tab, comma, semicolon or newline delimited)
       const values = text
         .trim()
         .split(/[\t,\n\r;]+/)
@@ -545,7 +581,6 @@ export default function RecordOfSignificantEvent() {
         .filter(Boolean);
 
       if (values.length >= 2) {
-        // Multi-part paste into part1, part2, part3
         setTraceability((prev) => ({
           ...prev,
           casting: {
@@ -559,7 +594,6 @@ export default function RecordOfSignificantEvent() {
         }));
         triggerToast(`Pasted ${values.length} codes into Casting (${timing.toUpperCase()})!`, "success");
       } else {
-        // Single value: paste into specified part
         handleTraceabilityChange("casting", timing, targetPart, values[0]);
         triggerToast(`Pasted "${values[0]}" into ${targetPart.toUpperCase()}!`, "success");
       }
@@ -569,7 +603,6 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // 4. Smart onPaste handler for input fields (splits tab/comma copied data)
   const handleSmartPasteCasting = (timing, part, e) => {
     const pasteData = e.clipboardData.getData("text");
     if (!pasteData) return;
@@ -597,7 +630,6 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Download PDF
   const handleDownloadPdf = async () => {
     if (!isSavedRecord) {
       triggerToast(
@@ -643,7 +675,6 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
-  // Save handler
   const handleSave = async () => {
     if (!header.lineCode) {
       triggerToast("Please select Line Code.", "error");
@@ -735,7 +766,6 @@ export default function RecordOfSignificantEvent() {
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
-      {/* Suggestions datalist for Before / After occurrence */}
       <datalist id="occurrence-spec-options">
         <option value="OK">OK</option>
         <option value="NOT OK">NOT OK</option>
@@ -767,12 +797,9 @@ export default function RecordOfSignificantEvent() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
-              <span>|</span>
-              <span>Revision: {formMeta.revision}</span>
-              <span>|</span>
-              <span>Revision Date: {formMeta.revisionDate}</span>
+            {/* Dynamic QF Value Display */}
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
               <span>|</span>
               <span className="font-bold text-orange-600">Shop ID: {shopId}</span>
             </div>
@@ -966,7 +993,6 @@ export default function RecordOfSignificantEvent() {
 
         {/* 2. MEASUREMENTS & SPECIFICATIONS SECTION */}
         <div className="pt-2 space-y-3">
-          {/* Top Bar with Dynamic Controls & Symbols Palette */}
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">
@@ -977,7 +1003,6 @@ export default function RecordOfSignificantEvent() {
               </span>
             </div>
 
-            {/* Quick Measurement Symbols Palette */}
             {!isSavedRecord && (
               <div className="flex flex-wrap items-center gap-1.5 bg-white border border-gray-300 px-2.5 py-1 rounded-md shadow-inner">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1 mr-1">
@@ -988,7 +1013,7 @@ export default function RecordOfSignificantEvent() {
                     key={symbol}
                     type="button"
                     title={`Insert ${label} at cursor`}
-                    onMouseDown={(e) => e.preventDefault()} // Keeps active input focused!
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleInsertSymbol(symbol)}
                     className="px-2 py-0.5 bg-gray-100 hover:bg-orange-500 hover:text-white text-gray-800 text-xs font-bold rounded border border-gray-200 hover:border-orange-600 transition-colors cursor-pointer select-none"
                   >
@@ -1050,7 +1075,7 @@ export default function RecordOfSignificantEvent() {
               </thead>
 
               <tbody>
-                {/* 1) Part Traceability - Casting (Date Code) with One-Tap Copy-Paste Options */}
+                {/* 1) Part Traceability - Casting */}
                 <tr className="h-9 bg-orange-50/20">
                   <td colSpan={2} className="border border-gray-800 px-3 py-1.5 text-left font-semibold bg-gray-50">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
@@ -1059,7 +1084,6 @@ export default function RecordOfSignificantEvent() {
                       </span>
                       {!isSavedRecord && (
                         <div className="flex items-center gap-1.5">
-                          {/* Tap to copy Before -> After */}
                           <button
                             type="button"
                             onClick={handleCopyBeforeToAfter}
@@ -1088,7 +1112,6 @@ export default function RecordOfSignificantEvent() {
                           }
                           onPaste={(e) => handleSmartPasteCasting("before", p, e)}
                         />
-                        {/* One-tap copy/paste quick helper pills */}
                         {!isSavedRecord && (
                           <div className="absolute right-0.5 top-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white/95 rounded px-0.5 shadow border border-gray-200">
                             {idx === 0 ? (
@@ -1217,7 +1240,6 @@ export default function RecordOfSignificantEvent() {
                 {/* Dynamic Custom Data Rows */}
                 {rows.map((row, rIdx) => (
                   <tr key={`data-row-${rIdx}`} className="h-8">
-                    {/* CONTROL SPEC */}
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
@@ -1238,7 +1260,6 @@ export default function RecordOfSignificantEvent() {
                       />
                     </td>
 
-                    {/* INSPECTION INSTRUMENT / GAUGE */}
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
@@ -1259,7 +1280,6 @@ export default function RecordOfSignificantEvent() {
                       />
                     </td>
 
-                    {/* BEFORE OCCURRENCE (PART 1, 2, 3) - Freeform Specification Value Entry */}
                     {["part1", "part2", "part3"].map((p) => {
                       const val = row.before[p] || "";
                       const isOk = val.trim().toUpperCase() === "OK";
@@ -1296,7 +1316,6 @@ export default function RecordOfSignificantEvent() {
                       );
                     })}
 
-                    {/* AFTER CORRECTION (PART 1, 2, 3) - Freeform Specification Value Entry */}
                     {["part1", "part2", "part3"].map((p) => {
                       const val = row.after[p] || "";
                       const isOk = val.trim().toUpperCase() === "OK";
@@ -1426,9 +1445,9 @@ export default function RecordOfSignificantEvent() {
           </table>
         </div>
 
-        {/* Footer Meta Code */}
+        {/* Dynamic QF Footer Display */}
         <div className="text-xs text-gray-600 font-semibold pt-1">
-          {formMeta.formCode}, Rev.No: {formMeta.revision} dt {formMeta.revisionDate}
+          {qfValue}
         </div>
 
         {/* Save Button */}

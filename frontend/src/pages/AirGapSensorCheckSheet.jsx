@@ -94,12 +94,61 @@ export default function AirGapSensorCheckSheet() {
   const [pdfToDate, setPdfToDate] = useState('');
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-06, Rev.No: 05 dt 10.07.2026");
+
   const currentUser = JSON.parse(localStorage.getItem('user'))?.username || 'Unknown';
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
+
+  // Fetch QF History on Mount
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/qf-values/history/air-gap-sensor`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // Calculate QF based on selected Date
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-06, Rev.No: 05 dt 10.07.2026"; // Fallback
+
+    if (headerInfo.date && qfHistory.length > 0) {
+      const selectedDate = new Date(headerInfo.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [headerInfo.date, qfHistory]);
 
   useEffect(() => {
     if (lineSet) {
@@ -186,9 +235,7 @@ export default function AirGapSensorCheckSheet() {
     setLineSet({ machineShop: shopId, lineCode, partName: autoPartName, partNo: autoPartNo, machineNo: "" });
   };
 
-  // ==========================================================
-  // FETCH SAVED DATA ONLY FOR EXACT (lineCode + date + machineNo)
-  // ==========================================================
+  // Fetch saved data for exact (lineCode + date + machineNo)
   useEffect(() => {
     const fetchSavedAirGapData = async () => {
       if (!shopId || !headerInfo.lineCode || !headerInfo.partNo || !headerInfo.date || !headerInfo.machineNo) {
@@ -313,7 +360,6 @@ export default function AirGapSensorCheckSheet() {
     });
   };
 
-  // Sign Line Incharge with strict validation
   const handleLineInchargeSignChange = (blockIdx, shift, val) => {
     if (lockedShifts[shift]) return;
 
@@ -362,7 +408,7 @@ export default function AirGapSensorCheckSheet() {
     });
   };
 
- const handleDownloadPdfRange = async () => {
+  const handleDownloadPdfRange = async () => {
     if (!pdfFromDate || !pdfToDate) {
       triggerToast("Please select both From Date and To Date.", "error");
       return;
@@ -377,7 +423,6 @@ export default function AirGapSensorCheckSheet() {
     try {
       const token = localStorage.getItem("token");
 
-      // Sync current on-screen Master Unique ID & Error Proof No to the database
       if (headerInfo.lineCode && headerInfo.partNo && headerInfo.date && blocks[0]?.machineNo) {
         await fetch(`${process.env.REACT_APP_API_URL}/api/air-gap-sensor`, {
           method: 'POST',
@@ -432,8 +477,6 @@ export default function AirGapSensorCheckSheet() {
     }
 
     const date = headerInfo.date;
-
-    // Check if any shift is already locked/recorded
     const hasLockedShifts = SHIFTS.some((shift) => lockedShifts[shift]);
 
     for (const shift of SHIFTS) {
@@ -472,7 +515,6 @@ export default function AirGapSensorCheckSheet() {
       });
     });
 
-    // Only block if there are NO locked shifts AND no completed new shifts
     if (completeShifts.length === 0 && !hasLockedShifts) {
       triggerToast("Please complete all parameter statuses and line signature for at least one unrecorded shift.", "error");
       return;
@@ -612,10 +654,9 @@ export default function AirGapSensorCheckSheet() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {initialFormData.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {initialFormData.formCode}</span>
-              <span>|</span>
-              <span>Revision: {initialFormData.revision}</span>
+            {/* Dynamic QF Display */}
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
             </div>
           </div>
           <button

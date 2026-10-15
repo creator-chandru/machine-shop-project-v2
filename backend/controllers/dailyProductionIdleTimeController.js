@@ -38,6 +38,22 @@ const cleanDateStr = (date) => {
   return d;
 };
 
+// Formats any incoming Date object, ISO string, or timestamp into DD/MM/YYYY
+const formatDisplayDate = (val) => {
+  if (!val) return '';
+  const str = String(val).split('T')[0].trim();
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  return str;
+};
+
 const toInt = (v) => {
   if (v === '' || v == null) return null;
   const n = parseInt(v, 10);
@@ -63,6 +79,44 @@ const httpError = (status, message) => {
   const err = new Error(message);
   err.status = status;
   return err;
+};
+
+// ============================================================
+// DYNAMIC QF HELPERS
+// ============================================================
+const fetchQfHistory = async () => {
+  try {
+    const res = await sql.query(`
+      SELECT id, formName, qfValue, date 
+      FROM DailyProductionIdleTimeQFvalues 
+      ORDER BY date DESC, id DESC
+    `);
+    return res.recordset || [];
+  } catch (e) {
+    console.error("Warning: Could not fetch DailyProductionIdleTimeQFvalues:", e.message);
+    return [];
+  }
+};
+
+const getEffectiveQfValue = (qfHistory, recordDateStr) => {
+  const fallback = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021";
+  if (!qfHistory || qfHistory.length === 0) return fallback;
+
+  if (recordDateStr) {
+    const targetDate = new Date(recordDateStr);
+    targetDate.setHours(0, 0, 0, 0);
+
+    for (let qf of qfHistory) {
+      if (!qf.date) continue;
+      const qfDate = new Date(qf.date);
+      qfDate.setHours(0, 0, 0, 0);
+
+      if (qfDate <= targetDate) {
+        return qf.qfValue;
+      }
+    }
+  }
+  return qfHistory[0]?.qfValue || fallback;
 };
 
 // ============================================================
@@ -574,6 +628,9 @@ const generateIdleTimeReport = async (req, res) => {
       return res.status(404).send('No records found for the selected date range.');
     }
 
+    // Fetch dynamic QF values for Idle Time Report
+    const qfHistory = await fetchQfHistory();
+
     // Group records by ReportDate
     const groupedMap = new Map();
     records.forEach(r => {
@@ -615,15 +672,35 @@ const generateIdleTimeReport = async (req, res) => {
         .text(String(text != null ? text : '-'), x + 2, y + 2.5, { width: w - 4, align });
     };
 
+    // Auto-fit Part Name text nicely without overlapping borders
+    const drawPartNameCell = (x, y, w, h, text) => {
+      doc.rect(x, y, w, h).stroke();
+      const str = String(text != null ? text : '-');
+
+      let fSize = 6.5;
+      if (str.length > 28) fSize = 5.2;
+      if (str.length > 40) fSize = 4.5;
+
+      doc.fillColor('black')
+        .font('Helvetica-Bold')
+        .fontSize(fSize)
+        .text(str, x + 2, y + 2, {
+          width: w - 4,
+          height: h - 3,
+          align: 'center',
+          ellipsis: true
+        });
+    };
+
     const computeGroupHeight = () => {
-      // Header 32pt + Table Headers (4 rows) + Data Rows (18 rows) + Signatures (5 rows) + Notes (20pt)
-      return 32 + (4 * rowH) + (18 * rowH) + (5 * rowH) + 24 + 10;
+      // Header 32pt + Table Headers (3 rows + 1 partRow) + Data Rows (18 rows) + Signatures (5 rows) + Notes (20pt)
+      return 32 + (3 * rowH + 14) + (18 * rowH) + (5 * rowH) + 24 + 10;
     };
 
     const renderDateGroup = (dateKey, dateRecords, groupY) => {
-      const [yy, mm, dd] = String(dateKey).split('-');
-      const displayDate = `${dd}/${mm}/${yy}`;
+      const displayDate = formatDisplayDate(dateKey);
       const first = dateRecords[0];
+      const effectiveQf = getEffectiveQfValue(qfHistory, dateKey);
 
       // Header Box (32pt)
       doc.lineWidth(0.8).strokeColor('black');
@@ -637,24 +714,29 @@ const generateIdleTimeReport = async (req, res) => {
           .text('SAKTHI\nAUTO', startX, groupY + 7, { width: 90, align: 'center' });
       }
 
-      const titleW = totalWidth - 90 - 160;
+      const titleW = totalWidth - 90 - 180;
       doc.rect(startX + 90, groupY, titleW, 32).stroke();
       doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
-        .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, groupY + 11, {
+        .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, groupY + 7, {
+          width: titleW,
+          align: 'center'
+        });
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+        .text(effectiveQf, startX + 90, groupY + 20, {
           width: titleW,
           align: 'center'
         });
 
       const distinctLines = [...new Set(dateRecords.map((r) => r.LineCode).filter(Boolean))].join(', ');
-      doc.rect(startX + totalWidth - 160, groupY, 160, 32).stroke();
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
-        .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 160, groupY + 5, {
-          width: 160,
+      doc.rect(startX + totalWidth - 180, groupY, 180, 32).stroke();
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('black')
+        .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 180, groupY + 6, {
+          width: 180,
           align: 'center'
         });
-      doc.font('Helvetica').fontSize(7).fillColor('black')
-        .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 160, groupY + 18, {
-          width: 160,
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
+        .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 180, groupY + 18, {
+          width: 180,
           align: 'center'
         });
 
@@ -668,18 +750,23 @@ const generateIdleTimeReport = async (req, res) => {
       const colX = (idx) => startX + descW + idx * colW;
 
       // Table Header Rows
+      // 1. LINE CODE
       drawCell(startX, curY, descW, rowH, 'LINE CODE', true, '#f0f0f0', 'left');
       dateRecords.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.LineCode || '-', true, '#f0f0f0'));
       curY += rowH;
 
-      drawCell(startX, curY, descW, rowH, 'PART NAME', true, '#ffffff', 'left');
-      dateRecords.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.PartName || '-', false, '#ffffff'));
-      curY += rowH;
+      // 2. PART NAME
+      const partRowH = 14;
+      drawCell(startX, curY, descW, partRowH, 'PART NAME', true, '#ffffff', 'left');
+      dateRecords.forEach((rec, idx) => drawPartNameCell(colX(idx), curY, colW, partRowH, rec.PartName || '-'));
+      curY += partRowH;
 
+      // 3. ABS / NABS
       drawCell(startX, curY, descW, rowH, 'ABS / NABS', true, '#ffffff', 'left');
       dateRecords.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.BrakeType || '-', false, '#ffffff'));
       curY += rowH;
 
+      // 4. SHIFT PARAMETERS
       drawCell(startX, curY, descW, rowH, 'SHIFT DETAILS / PARAMETERS', true, '#f0f0f0', 'left');
       dateRecords.forEach((rec, idx) => {
         ['I', 'II', 'III', 'T'].forEach((sh, shIdx) => {
@@ -869,6 +956,10 @@ const generateIdleTimeDayReport = async (req, res) => {
       return res.status(404).json({ error: 'No records found for the selected date.' });
     }
 
+    // Fetch dynamic QF values for Idle Time Report
+    const qfHistory = await fetchQfHistory();
+    const effectiveQf = getEffectiveQfValue(qfHistory, cleanDate);
+
     const doc = new PDFDocument({
       margin: 20,
       size: 'A4',
@@ -901,8 +992,26 @@ const generateIdleTimeDayReport = async (req, res) => {
         .text(String(text != null ? text : '-'), x + 2, y + 2.5, { width: w - 4, align });
     };
 
-    const [yy, mm, dd] = String(cleanDate).split('-');
-    const displayDate = `${dd}/${mm}/${yy}`;
+    const drawPartNameCell = (x, y, w, h, text) => {
+      doc.rect(x, y, w, h).stroke();
+      const str = String(text != null ? text : '-');
+
+      let fSize = 6.5;
+      if (str.length > 28) fSize = 5.2;
+      if (str.length > 40) fSize = 4.5;
+
+      doc.fillColor('black')
+        .font('Helvetica-Bold')
+        .fontSize(fSize)
+        .text(str, x + 2, y + 2, {
+          width: w - 4,
+          height: h - 3,
+          align: 'center',
+          ellipsis: true
+        });
+    };
+
+    const displayDate = formatDisplayDate(cleanDate);
     const first = records[0];
 
     // Header Box (32pt)
@@ -917,24 +1026,29 @@ const generateIdleTimeDayReport = async (req, res) => {
         .text('SAKTHI\nAUTO', startX, topMargin + 7, { width: 90, align: 'center' });
     }
 
-    const titleW = totalWidth - 90 - 160;
+    const titleW = totalWidth - 90 - 180;
     doc.rect(startX + 90, topMargin, titleW, 32).stroke();
     doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
-      .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, topMargin + 11, {
+      .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, topMargin + 7, {
+        width: titleW,
+        align: 'center'
+      });
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+      .text(effectiveQf, startX + 90, topMargin + 20, {
         width: titleW,
         align: 'center'
       });
 
     const distinctLines = [...new Set(records.map((r) => r.LineCode).filter(Boolean))].join(', ');
-    doc.rect(startX + totalWidth - 160, topMargin, 160, 32).stroke();
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
-      .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 160, topMargin + 5, {
-        width: 160,
+    doc.rect(startX + totalWidth - 180, topMargin, 180, 32).stroke();
+    doc.font('Helvetica-Bold').fontSize(8).fillColor('black')
+      .text(`LINE: ${distinctLines || 'ALL'}`, startX + totalWidth - 180, topMargin + 6, {
+        width: 180,
         align: 'center'
       });
-    doc.font('Helvetica').fontSize(7).fillColor('black')
-      .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 160, topMargin + 18, {
-        width: 160,
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
+      .text(`DATE: ${displayDate} | MS: ${shopId || first.MachineShop || 3}`, startX + totalWidth - 180, topMargin + 18, {
+        width: 180,
         align: 'center'
       });
 
@@ -948,18 +1062,23 @@ const generateIdleTimeDayReport = async (req, res) => {
     const colX = (idx) => startX + descW + idx * colW;
 
     // Table Header Rows
+    // 1. LINE CODE
     drawCell(startX, curY, descW, rowH, 'LINE CODE', true, '#f0f0f0', 'left');
     records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.LineCode || '-', true, '#f0f0f0'));
     curY += rowH;
 
-    drawCell(startX, curY, descW, rowH, 'PART NAME', true, '#ffffff', 'left');
-    records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.PartName || '-', false, '#ffffff'));
-    curY += rowH;
+    // 2. PART NAME
+    const partRowH = 14;
+    drawCell(startX, curY, descW, partRowH, 'PART NAME', true, '#ffffff', 'left');
+    records.forEach((rec, idx) => drawPartNameCell(colX(idx), curY, colW, partRowH, rec.PartName || '-'));
+    curY += partRowH;
 
+    // 3. ABS / NABS
     drawCell(startX, curY, descW, rowH, 'ABS / NABS', true, '#ffffff', 'left');
     records.forEach((rec, idx) => drawCell(colX(idx), curY, colW, rowH, rec.BrakeType || '-', false, '#ffffff'));
     curY += rowH;
 
+    // 4. SHIFT PARAMETERS
     drawCell(startX, curY, descW, rowH, 'SHIFT DETAILS / PARAMETERS', true, '#f0f0f0', 'left');
     records.forEach((rec, idx) => {
       ['I', 'II', 'III', 'T'].forEach((sh, shIdx) => {
@@ -1092,5 +1211,5 @@ module.exports = {
   getPendingPEIdleTimeData,
   signPEApproval,
   generateIdleTimeReport,
-  generateIdleTimeDayReport // <--- Exported here
+  generateIdleTimeDayReport
 };

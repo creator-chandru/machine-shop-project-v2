@@ -4,7 +4,12 @@ const sql = require("../db");
 const FORM_QF_TABLES = {
   "pre-operation-checklist": "PreOperationQFvalues",
   "error-proofing-checksheet": "ErrorProofingQFvalues",
-  "air-gap-sensor": "AirGapSensorQFvalues"
+  "air-gap-sensor": "AirGapSensorQFvalues",
+  "level1-maintenance-checklist": "Level1MaintenanceQFvalues",
+  "four-m-change-monitoring": "FourMChangeMonitoringQFvalues",
+  "significant-event-record": "SignificantEventQFvalues",
+  "daily-production-report": "DailyProductionReportQFvalues",
+  "daily-production-idle-time": "DailyProductionIdleTimeQFvalues"
   // Add upcoming forms here: 'form-name': 'TableName'
 };
 

@@ -316,6 +316,42 @@ const generate4MReport = async (req, res) => {
             return res.status(404).json({ error: "No records found for the selected date range." });
         }
 
+        // ========================================================
+        // FETCH DYNAMIC QF HISTORY FOR 4M CHANGE MONITORING
+        // ========================================================
+        let qfHistory = [];
+        try {
+            const qfRes = await sql.query(`
+                SELECT id, formName, qfValue, date
+                FROM FourMChangeMonitoringQFvalues
+                ORDER BY date DESC, id DESC
+            `);
+            qfHistory = qfRes.recordset || [];
+        } catch (qfErr) {
+            console.error("Warning: Could not fetch FourMChangeMonitoringQFvalues:", qfErr.message);
+        }
+
+        const getEffectiveQfValue = (recordDateStr) => {
+            const fallback = "QF / 07 / MPD-36, Rev.No: 01, 13.03.2019";
+            if (!qfHistory || qfHistory.length === 0) return fallback;
+
+            if (recordDateStr) {
+                const targetDate = new Date(recordDateStr);
+                targetDate.setHours(0, 0, 0, 0);
+
+                for (let qf of qfHistory) {
+                    if (!qf.date) continue;
+                    const qfDate = new Date(qf.date);
+                    qfDate.setHours(0, 0, 0, 0);
+
+                    if (qfDate <= targetDate) {
+                        return qf.qfValue;
+                    }
+                }
+            }
+            return qfHistory[0]?.qfValue || fallback;
+        };
+
         // Group records by unique combo: lineCode + mcNo + date + shift
         const groupedMap = new Map();
         records.forEach(r => {
@@ -404,6 +440,9 @@ const generate4MReport = async (req, res) => {
         // Render one full entry block
         const drawEntry = (groupRecords, entryY) => {
             const first = groupRecords[0];
+            const dateParts = String(first.dateShift || "").trim().split(" ");
+            const recordDate = dateParts[0] || cleanFromDate;
+            const effectiveQf = getEffectiveQfValue(recordDate);
 
             // 1. Header Box (50pt)
             const headerTotalH = 50;
@@ -519,7 +558,7 @@ const generate4MReport = async (req, res) => {
             const footerH = 32;
             doc.lineWidth(0.5).strokeColor('black');
             doc.rect(startX, currY, totalWidth - 250, footerH).stroke();
-            doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text("QF / 07 / MPD-36, Rev.No: 01, 13.03.2019", startX + 10, currY + 12);
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(effectiveQf, startX + 10, currY + 12);
 
             const hodX = startX + totalWidth - 250;
             doc.rect(hodX, currY, 250, footerH).stroke();

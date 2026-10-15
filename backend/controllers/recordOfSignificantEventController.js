@@ -290,6 +290,44 @@ const generateSignificantEventPDF = async (req, res) => {
         const records = result.recordset;
         const header = records[0];
 
+        // ========================================================
+        // FETCH DYNAMIC QF HISTORY FOR SIGNIFICANT EVENT
+        // ========================================================
+        let qfHistory = [];
+        try {
+            const qfRes = await sql.query(`
+                SELECT id, formName, qfValue, date 
+                FROM SignificantEventQFvalues 
+                ORDER BY date DESC, id DESC
+            `);
+            qfHistory = qfRes.recordset || [];
+        } catch (qfErr) {
+            console.error("Warning: Could not fetch SignificantEventQFvalues:", qfErr.message);
+        }
+
+        const getEffectiveQfValue = (recordDateStr) => {
+            const fallback = "QF/07/MPD-02, Rev.No: 07 dt 13.08.2024";
+            if (!qfHistory || qfHistory.length === 0) return fallback;
+
+            if (recordDateStr) {
+                const targetDate = new Date(recordDateStr);
+                targetDate.setHours(0, 0, 0, 0);
+
+                for (let qf of qfHistory) {
+                    if (!qf.date) continue;
+                    const qfDate = new Date(qf.date);
+                    qfDate.setHours(0, 0, 0, 0);
+
+                    if (qfDate <= targetDate) {
+                        return qf.qfValue;
+                    }
+                }
+            }
+            return qfHistory[0]?.qfValue || fallback;
+        };
+
+        const effectiveQf = getEffectiveQfValue(header.recordDate || cleanDate);
+
         const formatDisplayDate = (rawDate) => {
             if (!rawDate) return '-';
             const d = new Date(rawDate);
@@ -336,15 +374,16 @@ const generateSignificantEventPDF = async (req, res) => {
         }
 
         // Title Box
-        const titleW = totalWidth - 110 - 150;
+        const titleW = totalWidth - 110 - 200;
         doc.rect(startX + 110, currentY, titleW, topHeaderH).stroke();
         doc.fillColor('black').font("Helvetica-Bold").fontSize(13).text("RECORD OF SIGNIFICANT EVENT (MACHINE SHOP)", startX + 110, currentY + 14, { width: titleW, align: "center" });
 
-        // Meta Info Box
-        doc.rect(startX + totalWidth - 150, currentY, 150, topHeaderH).stroke();
-        doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text("DOC: QF/07/MPD-02 | REV: 07", startX + totalWidth - 150, currentY + 6, { width: 150, align: "center" });
-        doc.font("Helvetica").fontSize(7.5).text(`LINE: ${lineCode} | SHIFT: ${header.shift || 'I'}`, startX + totalWidth - 150, currentY + 18, { width: 150, align: "center" });
-        doc.text(`DATE: ${displayDate}`, startX + totalWidth - 150, currentY + 29, { width: 150, align: "center" });
+        // Meta Info Box with Dynamic QF Value
+        const metaBoxW = 200;
+        doc.rect(startX + totalWidth - metaBoxW, currentY, metaBoxW, topHeaderH).stroke();
+        doc.font("Helvetica-Bold").fontSize(7).fillColor('black').text(effectiveQf, startX + totalWidth - metaBoxW, currentY + 6, { width: metaBoxW, align: "center" });
+        doc.font("Helvetica").fontSize(7.5).text(`LINE: ${lineCode} | SHIFT: ${header.shift || 'I'}`, startX + totalWidth - metaBoxW, currentY + 18, { width: metaBoxW, align: "center" });
+        doc.text(`DATE: ${displayDate}`, startX + totalWidth - metaBoxW, currentY + 29, { width: metaBoxW, align: "center" });
 
         currentY += topHeaderH;
 
@@ -461,7 +500,7 @@ const generateSignificantEventPDF = async (req, res) => {
             true
         );
 
-        // Dynamic Inspection Custom Rows (Renders user-entered specifications or OK/NOT OK)
+        // Dynamic Inspection Custom Rows
         records.forEach((r) => {
             drawTableRow(
                 r.controlSpec, r.inspectionGauge,

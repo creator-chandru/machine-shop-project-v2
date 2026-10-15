@@ -122,6 +122,10 @@ export default function ToolChangeRecord() {
   const [loadingMachineDetails, setLoadingMachineDetails] = useState(true);
   const [qcUsers, setQcUsers] = useState([]);
 
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-32, Rev.No: 02 dt 10.01.2023");
+
   const [sections, setSections] = useState(
     Array.from({ length: INITIAL_SECTIONS }, () =>
       createEmptySection("", getTodayISODate(), "I", INITIAL_ROWS)
@@ -139,6 +143,51 @@ export default function ToolChangeRecord() {
       setToast({ message: "", type: "" });
     }, 4000);
   };
+
+  // Fetch QF History on Mount
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/tool-change-record`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // Calculate QF based on selected Date
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-32, Rev.No: 02 dt 10.01.2023"; // Fallback
+
+    if (headerInfo.date && qfHistory.length > 0) {
+      const selectedDate = new Date(headerInfo.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [headerInfo.date, qfHistory]);
 
   // Helper to load record data into component state
   const loadRecordData = (record) => {
@@ -805,12 +854,9 @@ export default function ToolChangeRecord() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
-              <span>|</span>
-              <span>Revision: {formMeta.revision}</span>
-              <span>|</span>
-              <span>Revision Date: {formMeta.revisionDate}</span>
+            {/* Dynamic QF Display */}
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
             </div>
           </div>
 

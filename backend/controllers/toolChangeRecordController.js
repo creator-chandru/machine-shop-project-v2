@@ -12,6 +12,44 @@ const sanitizeTime = (timeStr) => {
 };
 
 // ============================================================
+// DYNAMIC QF HELPERS
+// ============================================================
+const fetchQfHistory = async () => {
+    try {
+        const res = await sql.query(`
+            SELECT id, formName, qfValue, date 
+            FROM ToolChangeRecordQFvalues 
+            ORDER BY date DESC, id DESC
+        `);
+        return res.recordset || [];
+    } catch (e) {
+        console.error("Warning: Could not fetch ToolChangeRecordQFvalues:", e.message);
+        return [];
+    }
+};
+
+const getEffectiveQfValue = (qfHistory, recordDateStr) => {
+    const fallback = "QF/07/MPD-32, Rev.No: 02 dt 10.01.2023";
+    if (!qfHistory || qfHistory.length === 0) return fallback;
+
+    if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+            if (!qf.date) continue;
+            const qfDate = new Date(qf.date);
+            qfDate.setHours(0, 0, 0, 0);
+
+            if (qfDate <= targetDate) {
+                return qf.qfValue;
+            }
+        }
+    }
+    return qfHistory[0]?.qfValue || fallback;
+};
+
+// ============================================================
 // Helper: Generate Part Traceability Code (Internal)
 // ============================================================
 const generatePartTraceability = async (transaction, lineCode, checkDate, shift) => {
@@ -167,7 +205,7 @@ const saveToolChangeRecord = async (req, res) => {
               ${machineFilter}
         `);
 
-for (let secIdx = 0; secIdx < sections.length; secIdx++) {
+        for (let secIdx = 0; secIdx < sections.length; secIdx++) {
             const sec = sections[secIdx];
 
             const toolDescription = sec.toolDescription || '';
@@ -198,7 +236,6 @@ for (let secIdx = 0; secIdx < sections.length; secIdx++) {
                 const afterValue = row.after || row.afterValue || '';
                 const units = row.units || '';
                 const unitType = row.unitType || '';
-
 
                 await transaction.request()
                     .input('machineShop', sql.Int, machineShop)
@@ -522,7 +559,6 @@ const generateReport = async (req, res) => {
             FROM ToolChangeRecord
             WHERE lineCode = @lineCode
               AND CONVERT(date, checkDate) = CONVERT(date, @checkDate)
-
         `;
         if (machineParams.length) {
             query += ` AND machineNo IN (${machineParams.join(', ')})`;
@@ -538,6 +574,10 @@ const generateReport = async (req, res) => {
         if (records.length === 0) {
             return res.status(404).send('No records found for the selected line, date and machine(s).');
         }
+
+        // Fetch dynamic QF value based on report date
+        const qfHistory = await fetchQfHistory();
+        const effectiveQf = getEffectiveQfValue(qfHistory, cleanDate);
 
         // Each group corresponds to one frontend machine column; slNo restarts at 1 per column.
         const sections = [];
@@ -618,9 +658,9 @@ const generateReport = async (req, res) => {
 
         const drawPageHeading = () => {
             y = drawCells(
-                ['SAKTHI AUTO', 'TOOL CHANGE RECORD', 'FORM: QF/07/MPD-32  |  REV: 02  |  10.01.2023'],
-                [0.20, 0.52, 0.28], y,
-                { bold: true, fontSize: 10, minHeight: 34, fill: '#f0f0f0' }
+                ['SAKTHI AUTO', 'TOOL CHANGE RECORD', effectiveQf],
+                [0.20, 0.45, 0.35], y,
+                { bold: true, fontSize: 9, minHeight: 34, fill: '#f0f0f0' }
             );
             y = drawCells(
                 [`LINE CODE: ${lineCode}`, `PART NO: ${first.partNo || '-'}`, `PART NAME: ${first.partName || '-'}`],

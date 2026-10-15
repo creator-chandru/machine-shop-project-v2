@@ -9,7 +9,8 @@ const FORM_QF_TABLES = {
   "four-m-change-monitoring": "FourMChangeMonitoringQFvalues",
   "significant-event-record": "SignificantEventQFvalues",
   "daily-production-report": "DailyProductionReportQFvalues",
-  "daily-production-idle-time": "DailyProductionIdleTimeQFvalues"
+  "daily-production-idle-time": "DailyProductionIdleTimeQFvalues",
+  "tool-change-record": "ToolChangeRecordQFvalues"
   // Add upcoming forms here: 'form-name': 'TableName'
 };
 

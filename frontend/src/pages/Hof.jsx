@@ -236,6 +236,8 @@ const Hof = () => {
         params.append("partName", report.partName || "");
         params.append("date", isoDate);
         params.append("shopId", String(report.machineShop || shopId || 3));
+        params.append("shift", report.shift || "");
+        params.append("operationNo", report.operationNo || "");
         reportPath = `${process.env.REACT_APP_API_URL || ""}/api/job-setup-verification/report?${params.toString()}`;
       } else if (activeFormType === "operator-observation") {
         params.append("machineShop", String(report.machineShop || shopId || 3));

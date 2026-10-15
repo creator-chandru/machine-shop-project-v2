@@ -20,42 +20,46 @@ const safeParse = (raw, fallback) => {
 };
 
 // Keep only rows that have something in them and renumber Sl.No
+const MAX_IMAGE_CHARS = 3_000_000;
+const cleanImage = (v) => {
+  const s = typeof v === "string" ? v : "";
+  return /^data:image\/(png|jpe?g|webp);base64,/i.test(s) && s.length <= MAX_IMAGE_CHARS ? s : "";
+};
+
 const cleanSpecs = (specs) =>
   (Array.isArray(specs) ? specs : [])
     .map((s) => ({
       controlName: String(s?.controlName || "").trim(),
       specification: String(s?.specification || "").trim(),
+      image: cleanImage(s?.image),
     }))
-    .filter((s) => s.controlName || s.specification)
+    .filter((s) => s.controlName || s.specification || s.image)
     .map((s, i) => ({ slNo: i + 1, ...s }));
 
 // ============================================================
 // 1. GET MASTER CONTROL SPECIFICATIONS (BY PART NAME ONLY)
 // ============================================================
 const getControlSpecifications = async (req, res) => {
-  const { partName } = req.query;
-
-  if (!partName) {
-    return res.status(400).json({ error: "partName is required" });
+  const { partName, operationNo } = req.query;
+  if (!partName || !operationNo) {
+    return res.status(400).json({ error: "partName and operationNo are required" });
   }
-
   try {
     const request = new sql.Request();
     request.input("partName", sql.NVarChar(255), String(partName).trim());
-
+    request.input("operationNo", sql.NVarChar(100), String(operationNo).trim());
     const result = await request.query(`
       SELECT TOP 1 PartNo, ControlSpecifications, UpdatedBy, UpdatedAt
       FROM dbo.JobSetupControlMaster
-      WHERE PartName = @partName
+      WHERE PartName = @partName AND OperationNo = @operationNo
     `);
-
     if (!result.recordset.length) {
-      return res.status(200).json({ partName, partNo: "", specifications: [] });
+      return res.status(200).json({ partName, operationNo, partNo: "", specifications: [] });
     }
-
     const row = result.recordset[0];
     return res.status(200).json({
       partName,
+      operationNo,
       partNo: row.PartNo || "",
       specifications: safeParse(row.ControlSpecifications, []),
       updatedBy: row.UpdatedBy || "",
@@ -73,20 +77,21 @@ const getControlSpecifications = async (req, res) => {
 const listMasterSpecifications = async (req, res) => {
   try {
     const result = await new sql.Request().query(`
-      SELECT PartName, PartNo, ControlSpecifications, UpdatedBy, UpdatedAt
+      SELECT PartName, PartNo, OperationNo, ControlSpecifications, UpdatedBy, UpdatedAt
       FROM dbo.JobSetupControlMaster
-      ORDER BY PartName ASC
+      WHERE OperationNo <> ''
+      ORDER BY PartName ASC, OperationNo ASC
     `);
-
-    const list = result.recordset.map((r) => ({
-      partName: r.PartName,
-      partNo: r.PartNo || "",
-      controlCount: safeParse(r.ControlSpecifications, []).length,
-      updatedBy: r.UpdatedBy || "",
-      updatedAt: r.UpdatedAt,
-    }));
-
-    return res.status(200).json(list);
+    return res.status(200).json(
+      result.recordset.map((r) => ({
+        partName: r.PartName,
+        partNo: r.PartNo || "",
+        operationNo: r.OperationNo,
+        controlCount: safeParse(r.ControlSpecifications, []).length,
+        updatedBy: r.UpdatedBy || "",
+        updatedAt: r.UpdatedAt,
+      }))
+    );
   } catch (err) {
     console.error("List master specs error:", err);
     return res.status(500).json({ error: "Failed to list master specifications" });
@@ -97,12 +102,13 @@ const listMasterSpecifications = async (req, res) => {
 // 3. SAVE / UPDATE MASTER CONTROL SPECIFICATIONS (BY PART NAME ONLY)
 // ============================================================
 const saveControlSpecifications = async (req, res) => {
-  const { partName, partNo, specifications, username } = req.body;
-
+  const { partName, partNo, operationNo, specifications, username } = req.body;
   if (!partName || !String(partName).trim()) {
     return res.status(400).json({ error: "partName is required" });
   }
-
+  if (!operationNo || !String(operationNo).trim()) {
+    return res.status(400).json({ error: "operationNo is required" });
+  }
   const cleaned = cleanSpecs(specifications);
   if (cleaned.length === 0) {
     return res.status(400).json({ error: "At least one control / specification row is required" });
@@ -115,13 +121,15 @@ const saveControlSpecifications = async (req, res) => {
 
     const checkReq = transaction.request();
     checkReq.input("partName", sql.NVarChar(255), String(partName).trim());
+    checkReq.input("operationNo", sql.NVarChar(100), String(operationNo).trim());
     const checkRes = await checkReq.query(`
       SELECT Id FROM dbo.JobSetupControlMaster WITH (UPDLOCK, HOLDLOCK)
-      WHERE PartName = @partName
+      WHERE PartName = @partName AND OperationNo = @operationNo
     `);
 
     const request = transaction.request();
     request.input("partName", sql.NVarChar(255), String(partName).trim());
+    request.input("operationNo", sql.NVarChar(100), String(operationNo).trim());
     request.input("partNo", sql.NVarChar(100), partNo || "");
     request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(cleaned));
     request.input("updatedBy", sql.NVarChar(100), username || "");
@@ -138,17 +146,13 @@ const saveControlSpecifications = async (req, res) => {
       `);
     } else {
       await request.query(`
-        INSERT INTO dbo.JobSetupControlMaster (PartName, PartNo, ControlSpecifications, UpdatedBy)
-        VALUES (@partName, @partNo, @controlSpecifications, @updatedBy)
+        INSERT INTO dbo.JobSetupControlMaster (PartName, OperationNo, PartNo, ControlSpecifications, UpdatedBy)
+        VALUES (@partName, @operationNo, @partNo, @controlSpecifications, @updatedBy)
       `);
     }
 
     await transaction.commit();
-    return res.status(200).json({
-      success: true,
-      count: cleaned.length,
-      message: "Control specifications saved successfully",
-    });
+    return res.status(200).json({ success: true, count: cleaned.length, message: "Control specifications saved successfully" });
   } catch (err) {
     if (transaction) try { await transaction.rollback(); } catch (e) {}
     console.error("Save specs error:", err);
@@ -296,31 +300,37 @@ const saveJobSetupVerification = async (req, res) => {
     }
 
     // Sync specs to master (strictly keyed by PartName)
+        // Sync specs to master (keyed by PartName + OperationNo)
     const cleanedIncoming = cleanSpecs(controlSpecifications);
+    const opKey = String(operationNo).trim();
     if (cleanedIncoming.length > 0) {
       const masterCheckReq = transaction.request();
       masterCheckReq.input("partName", sql.NVarChar(255), String(partName).trim());
+      masterCheckReq.input("operationNo", sql.NVarChar(100), opKey);
       const masterCheckRes = await masterCheckReq.query(`
         SELECT Id, ControlSpecifications FROM dbo.JobSetupControlMaster WITH (UPDLOCK, HOLDLOCK)
-        WHERE PartName = @partName
+        WHERE PartName = @partName AND OperationNo = @operationNo
       `);
 
       if (masterCheckRes.recordset.length > 0) {
         const existingMasterSpecs = safeParse(masterCheckRes.recordset[0].ControlSpecifications, []);
         const merged = [...existingMasterSpecs];
+        const norm = (v) => String(v || "").toLowerCase().trim();
 
         cleanedIncoming.forEach((inc) => {
           const exists = merged.some(
             (m) =>
-              m.controlName.toLowerCase().trim() === inc.controlName.toLowerCase().trim() &&
-              m.specification.toLowerCase().trim() === inc.specification.toLowerCase().trim()
+              norm(m.controlName) === norm(inc.controlName) &&
+              norm(m.specification) === norm(inc.specification) &&
+              String(m.image || "") === String(inc.image || "")
           );
           if (!exists) {
-            merged.push({ controlName: inc.controlName, specification: inc.specification });
+            merged.push({ controlName: inc.controlName, specification: inc.specification, image: inc.image || "" });
           }
         });
 
-        const reindexed = merged.map((m, i) => ({ slNo: i + 1, ...m }));
+        // slNo AFTER the spread, otherwise old slNo values win
+        const reindexed = merged.map((m, i) => ({ ...m, slNo: i + 1 }));
 
         const updateMasterReq = transaction.request();
         updateMasterReq.input("id", sql.Int, masterCheckRes.recordset[0].Id);
@@ -338,12 +348,13 @@ const saveJobSetupVerification = async (req, res) => {
       } else {
         const insertMasterReq = transaction.request();
         insertMasterReq.input("partName", sql.NVarChar(255), String(partName).trim());
+        insertMasterReq.input("operationNo", sql.NVarChar(100), opKey);
         insertMasterReq.input("partNo", sql.NVarChar(100), partNo || "");
         insertMasterReq.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(cleanedIncoming));
         insertMasterReq.input("updatedBy", sql.NVarChar(100), username || setterName || "Shift Incharge");
         await insertMasterReq.query(`
-          INSERT INTO dbo.JobSetupControlMaster (PartName, PartNo, ControlSpecifications, UpdatedBy)
-          VALUES (@partName, @partNo, @controlSpecifications, @updatedBy)
+          INSERT INTO dbo.JobSetupControlMaster (PartName, OperationNo, PartNo, ControlSpecifications, UpdatedBy)
+          VALUES (@partName, @operationNo, @partNo, @controlSpecifications, @updatedBy)
         `);
       }
     }
@@ -382,7 +393,7 @@ const saveJobSetupVerification = async (req, res) => {
     request.input("changeToOperationChange", sql.NVarChar(255), changeToOperationChange || "");
     request.input("changeToSignificantBreakdown", sql.NVarChar(255), changeToSignificantBreakdown || "");
 
-    request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(controlSpecifications || []));
+    request.input("controlSpecifications", sql.NVarChar(sql.MAX), JSON.stringify(cleanedIncoming));
     request.input("actualInspectionData", sql.NVarChar(sql.MAX), JSON.stringify(actualInspectionData || []));
 
     request.input("signInspector", sql.NVarChar(100), "Pending");
@@ -695,27 +706,40 @@ const generatePdfReport = async (req, res) => {
     tableY = drawHeader(tableY);
 
     const actualRows = safeParse(record.ActualInspectionData, []);
+    const specX = startX + colWidths[0] + colWidths[1];
+    const IMG_MAX_W = colWidths[2] - 8;
+    const IMG_MAX_H = 70;
+
     actualRows.forEach((r, idx) => {
-      if (tableY + 16 > doc.page.height - 70) {
+      let imgBuf = null, imgW = 0, imgH = 0;
+      if (typeof r.image === "string" && r.image.startsWith("data:image/")) {
+        try {
+          imgBuf = Buffer.from(r.image.split(",")[1], "base64");
+          const o = doc.openImage(imgBuf);
+          const scale = Math.min(IMG_MAX_W / o.width, IMG_MAX_H / o.height, 1);
+          imgW = o.width * scale;
+          imgH = o.height * scale;
+        } catch (e) {
+          imgBuf = null;
+        }
+      }
+      const rowH = imgBuf ? 16 + imgH + 4 : 16;
+
+      if (tableY + rowH > doc.page.height - 70) {
         doc.addPage();
         tableY = drawHeader(20);
       }
 
       doc.lineWidth(0.5).strokeColor("black");
-      doc.rect(startX, tableY, totalWidth, 16).stroke();
+      doc.rect(startX, tableY, totalWidth, rowH).stroke();
       let x = startX;
       doc.fillColor("black").font("Helvetica").fontSize(6.5);
 
       const values = [
         String(r.slNo || idx + 1),
         r.controlName || "-",
-        r.specification || "-",
-        r.LH1 || "-",
-        r.RH1 || "-",
-        r.LH2 || "-",
-        r.RH2 || "-",
-        r.LH3 || "-",
-        r.RH3 || "-",
+        r.specification || (imgBuf ? "" : "-"),
+        r.LH1 || "-", r.RH1 || "-", r.LH2 || "-", r.RH2 || "-", r.LH3 || "-", r.RH3 || "-",
         r.status || "OK",
         r.remarks || "-",
       ];
@@ -725,7 +749,11 @@ const generatePdfReport = async (req, res) => {
         x += colWidths[i];
       });
 
-      tableY += 16;
+      if (imgBuf) {
+        try { doc.image(imgBuf, specX + 4, tableY + 14, { width: imgW, height: imgH }); } catch (e) {}
+      }
+
+      tableY += rowH;
     });
 
     // Signatures

@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, Save, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Save, RefreshCw, ImagePlus, X } from "lucide-react";
 import { toast } from "react-toastify";
+import {
+  OPERATION_OPTIONS,
+  blobToCompressedDataUrl,
+  imageFromPasteEvent,
+  imageFromClipboardApi,
+} from "../components/specImage";
 
 const API = process.env.REACT_APP_API_URL || "";
 
 const SPECIAL_CHARS = ["Ø", "±", "°", "×", "≤", "≥", "⌀", "⊥", "∥", "√", "Ra", "~", "'", '"', "µm", "R", "C"];
 
 const DEFAULT_ROWS = 5;
-const emptyRow = () => ({ controlName: "", specification: "" });
+const emptyRow = () => ({ controlName: "", specification: "", image: "" });
 const blankRows = () => Array.from({ length: DEFAULT_ROWS }, emptyRow);
 
 export default function JobSetupMasterConfigurator({ shopId }) {
@@ -20,6 +26,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
   const [lineMappings, setLineMappings] = useState([]);
   const [masters, setMasters] = useState([]);
   const [partName, setPartName] = useState("");
+  const [operationNo, setOperationNo] = useState("");
   const [rows, setRows] = useState([]);
   const [hasMaster, setHasMaster] = useState(false);
   const [loadingSpecs, setLoadingSpecs] = useState(false);
@@ -30,7 +37,6 @@ export default function JobSetupMasterConfigurator({ shopId }) {
 
   const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 
-  // Derive distinct Part Names from M{shopId}PartSets (fallback to machineDetails / lineMappings)
   const partOptions = Array.from(
     new Set(
       partSets.length > 0
@@ -87,18 +93,19 @@ export default function JobSetupMasterConfigurator({ shopId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shopId]);
 
-  const loadSpecs = async (name) => {
+  const loadSpecs = async (name, op) => {
     const seq = ++loadSeqRef.current;
     activeRef.current = { idx: null, field: null, element: null };
-    if (!name) {
+    if (!name || !op) {
       setRows([]);
       setHasMaster(false);
+      setLoadingSpecs(false);
       return;
     }
     setLoadingSpecs(true);
     try {
       const res = await fetch(
-        `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(name)}&shopId=${shopId || 3}`,
+        `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(name)}&operationNo=${encodeURIComponent(op)}&shopId=${shopId || 3}`,
         { headers: authHeaders() }
       );
       if (seq !== loadSeqRef.current) return;
@@ -106,7 +113,13 @@ export default function JobSetupMasterConfigurator({ shopId }) {
       const data = await res.json();
       const specs = Array.isArray(data.specifications) ? data.specifications : [];
       if (specs.length > 0) {
-        setRows(specs.map((s) => ({ controlName: s.controlName || "", specification: s.specification || "" })));
+        setRows(
+          specs.map((s) => ({
+            controlName: s.controlName || "",
+            specification: s.specification || "",
+            image: s.image || "",
+          }))
+        );
         setHasMaster(true);
       } else {
         setRows(blankRows());
@@ -124,7 +137,12 @@ export default function JobSetupMasterConfigurator({ shopId }) {
 
   const handlePartChange = (val) => {
     setPartName(val);
-    loadSpecs(val);
+    loadSpecs(val, operationNo);
+  };
+
+  const handleOperationChange = (val) => {
+    setOperationNo(val);
+    loadSpecs(partName, val);
   };
 
   const updateRow = (idx, field, val) =>
@@ -150,6 +168,36 @@ export default function JobSetupMasterConfigurator({ shopId }) {
     }, 0);
   };
 
+  // ---- image paste ----
+  const attachImage = async (idx, blob) => {
+    try {
+      updateRow(idx, "image", await blobToCompressedDataUrl(blob));
+    } catch (e) {
+      toast.error("Could not read the pasted image.");
+    }
+  };
+
+  const handleCellPaste = (e, idx) => {
+    const file = imageFromPasteEvent(e);
+    if (file) {
+      e.preventDefault();
+      attachImage(idx, file);
+    }
+  };
+
+  const handlePasteButton = async (idx) => {
+    try {
+      const blob = await imageFromClipboardApi();
+      if (!blob) {
+        toast.info("No image found in the clipboard.");
+        return;
+      }
+      attachImage(idx, blob);
+    } catch (e) {
+      toast.error("Clipboard access blocked. Click the Specification box and press Ctrl+V instead.");
+    }
+  };
+
   const handleDeleteRow = (idx) => {
     setRows((prev) => prev.filter((_, i) => i !== idx));
   };
@@ -159,9 +207,17 @@ export default function JobSetupMasterConfigurator({ shopId }) {
       toast.error("Please select a Part Name first.");
       return;
     }
+    if (!operationNo) {
+      toast.error("Please select an Operation No first.");
+      return;
+    }
     const cleaned = rows
-      .map((r) => ({ controlName: r.controlName.trim(), specification: r.specification.trim() }))
-      .filter((r) => r.controlName || r.specification);
+      .map((r) => ({
+        controlName: r.controlName.trim(),
+        specification: r.specification.trim(),
+        image: r.image || "",
+      }))
+      .filter((r) => r.controlName || r.specification || r.image);
 
     if (cleaned.length === 0) {
       toast.error("Enter at least one Control / Specification row.");
@@ -180,6 +236,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           partName,
+          operationNo,
           partNo,
           specifications: cleaned,
           username: currentUsername,
@@ -200,7 +257,8 @@ export default function JobSetupMasterConfigurator({ shopId }) {
     setIsSaving(false);
   };
 
-  const configuredNames = new Set(masters.map((m) => m.partName));
+  const configuredParts = new Set(masters.map((m) => m.partName));
+  const configuredOps = new Set(masters.filter((m) => m.partName === partName).map((m) => m.operationNo));
 
   return (
     <div className="space-y-4">
@@ -215,14 +273,30 @@ export default function JobSetupMasterConfigurator({ shopId }) {
             <option value="">{loadingParts ? "-- Loading Parts... --" : "-- Select Part Name --"}</option>
             {partOptions.map((p) => (
               <option key={p} value={p}>
-                {configuredNames.has(p) ? `✓ ${p}` : p}
+                {configuredParts.has(p) ? `✓ ${p}` : p}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <label className="font-bold text-gray-800 text-sm md:w-40">Operation No:</label>
+          <select
+            className="flex-1 border border-gray-300 p-2 rounded font-bold text-orange-700 bg-white outline-none uppercase text-sm cursor-pointer"
+            value={operationNo}
+            onChange={(e) => handleOperationChange(e.target.value)}
+          >
+            <option value="">-- Select Operation No --</option>
+            {OPERATION_OPTIONS.map((op) => (
+              <option key={op} value={op}>
+                {configuredOps.has(op) ? `✓ ${op}` : op}
               </option>
             ))}
           </select>
           <button
             type="button"
-            onClick={() => loadSpecs(partName)}
-            disabled={!partName}
+            onClick={() => loadSpecs(partName, operationNo)}
+            disabled={!partName || !operationNo}
             className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 border border-gray-300 px-3 py-2 rounded font-bold text-xs cursor-pointer"
             title="Reload saved specifications"
           >
@@ -230,45 +304,53 @@ export default function JobSetupMasterConfigurator({ shopId }) {
           </button>
         </div>
 
-        {partName && (
+        {partName && !operationNo && (
+          <p className="text-xs font-semibold text-gray-600">
+            Select an Operation No. Control specifications are maintained separately for each Part + Operation.
+          </p>
+        )}
+
+        {partName && operationNo && (
           <p className="text-xs font-semibold text-gray-600">
             {loadingSpecs
               ? "Loading..."
               : hasMaster
               ? "Existing specifications loaded (from master/supervisor submissions). You can edit, delete, or add new rows."
-              : "No specifications saved for this part yet. Fill in the rows below and save to set up."}
+              : "No specifications saved for this part & operation yet. Fill in the rows below and save to set up."}
           </p>
         )}
 
         {masters.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <span className="text-[11px] font-bold uppercase text-gray-600">Configured parts:</span>
+            <span className="text-[11px] font-bold uppercase text-gray-600">Configured:</span>
             {masters.map((m) => (
               <button
-                key={m.partName}
+                key={`${m.partName}|${m.operationNo}`}
                 type="button"
-                onClick={() => handlePartChange(m.partName)}
+                onClick={() => {
+                  setPartName(m.partName);
+                  setOperationNo(m.operationNo);
+                  loadSpecs(m.partName, m.operationNo);
+                }}
                 className={`text-[11px] font-bold px-2.5 py-1 rounded-full border transition-colors cursor-pointer ${
-                  m.partName === partName
+                  m.partName === partName && m.operationNo === operationNo
                     ? "bg-orange-500 text-white border-orange-500"
                     : "bg-white text-gray-700 border-gray-300 hover:border-orange-400"
                 }`}
                 title={`${m.controlCount} controls`}
               >
-                {m.partName} ({m.controlCount})
+                {m.partName} · {m.operationNo} ({m.controlCount})
               </button>
             ))}
           </div>
         )}
       </div>
 
-      {partName && !loadingSpecs && (
+      {partName && operationNo && !loadingSpecs && (
         <>
           {/* SPECIAL SYMBOLS TOOLBAR */}
           <div className="bg-orange-50 border border-orange-200 p-2.5 rounded flex flex-wrap items-center gap-1.5 text-xs shadow-inner">
-            <span className="font-bold text-gray-800 mr-2 uppercase text-[11px]">
-              Insert Symbol:
-            </span>
+            <span className="font-bold text-gray-800 mr-2 uppercase text-[11px]">Insert Symbol:</span>
             {SPECIAL_CHARS.map((char) => (
               <button
                 key={char}
@@ -286,8 +368,8 @@ export default function JobSetupMasterConfigurator({ shopId }) {
               <thead className="bg-gray-100 font-bold sticky top-0 z-10 border-b border-gray-400">
                 <tr>
                   <th className="border border-gray-400 p-2 w-[8%]">Sl.No</th>
-                  <th className="border border-gray-400 p-2 w-[42%]">Control</th>
-                  <th className="border border-gray-400 p-2 w-[42%]">Control Specification (Refer W.I)</th>
+                  <th className="border border-gray-400 p-2 w-[36%]">Control</th>
+                  <th className="border border-gray-400 p-2 w-[48%]">Control Specification (Refer W.I)</th>
                   <th className="border border-gray-400 p-2 w-[8%]">Action</th>
                 </tr>
               </thead>
@@ -300,7 +382,7 @@ export default function JobSetupMasterConfigurator({ shopId }) {
                   </tr>
                 )}
                 {rows.map((r, idx) => (
-                  <tr key={`spec-${idx}`} className="bg-white hover:bg-orange-50/20">
+                  <tr key={`spec-${idx}`} className="bg-white hover:bg-orange-50/20 align-top">
                     <td className="border border-gray-400 p-1 font-bold bg-gray-50">{idx + 1}</td>
                     <td className="border border-gray-400 p-1">
                       <input
@@ -314,17 +396,43 @@ export default function JobSetupMasterConfigurator({ shopId }) {
                         onChange={(e) => updateRow(idx, "controlName", e.target.value)}
                       />
                     </td>
-                    <td className="border border-gray-400 p-1">
+                    <td className="border border-gray-400 p-1 text-left" onPaste={(e) => handleCellPaste(e, idx)}>
                       <input
                         type="text"
                         className="w-full p-1.5 font-semibold outline-none text-gray-900 border border-gray-200 rounded focus:border-orange-500"
                         value={r.specification}
-                        placeholder="e.g. Ø77 +0.030 / +0.076"
+                        placeholder="e.g. Ø77 +0.030 / +0.076  (or Ctrl+V an image)"
                         onFocus={(e) => {
                           activeRef.current = { idx, field: "specification", element: e.target };
                         }}
                         onChange={(e) => updateRow(idx, "specification", e.target.value)}
                       />
+                      {r.image ? (
+                        <div className="relative inline-block mt-1">
+                          <img
+                            src={r.image}
+                            alt="Specification"
+                            className="max-h-32 max-w-full object-contain border border-gray-300 rounded bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => updateRow(idx, "image", "")}
+                            className="absolute -top-2 -right-2 bg-red-600 hover:bg-red-700 text-white rounded-full p-0.5 shadow cursor-pointer"
+                            title="Remove image"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handlePasteButton(idx)}
+                          className="mt-1 flex items-center gap-1 bg-white hover:bg-orange-500 hover:text-white border border-gray-300 rounded px-2 py-1 font-bold text-[10px] text-gray-700 uppercase shadow-sm transition-all cursor-pointer"
+                          title="Paste copied image from clipboard"
+                        >
+                          <ImagePlus className="w-3 h-3" /> Paste Image
+                        </button>
+                      )}
                     </td>
                     <td className="border border-gray-400 p-1">
                       <button

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
-import { ArrowLeft, FileDown, Save, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FileDown, Save, Plus, Trash2, ImagePlus, X } from "lucide-react";
 import Header from "../components/Header";
-
+import {OPERATION_OPTIONS, blobToCompressedDataUrl, imageFromPasteEvent, imageFromClipboardApi,} from "../components/specImage.jsx";
 const API = process.env.REACT_APP_API_URL || "";
 
 const formMeta = {
@@ -40,18 +40,9 @@ const lockedTextCls =
 const emptySignatures = { inspector: "", shiftIncharge: "", hofInspection: "", hofProduction: "" };
 
 const createEmptyInspectionRow = (slNo = 1) => ({
-  slNo,
-  controlName: "",
-  specification: "",
-  LH1: "",
-  RH1: "",
-  LH2: "",
-  RH2: "",
-  LH3: "",
-  RH3: "",
-  status: "OK",
-  remarks: "",
-  isExisting: false,
+  slNo, controlName: "", specification: "", image: "",
+  LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
+  status: "OK", remarks: "", isExisting: false,
 });
 
 const Toast = ({ message, type, onClose }) => {
@@ -88,6 +79,7 @@ export default function JobSetupVerification() {
   const [isSavedRecord, setIsSavedRecord] = useState(false);
   const [specsMissing, setSpecsMissing] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "" });
+  const [previewImage, setPreviewImage] = useState(null);
 
   // Master Data Dropdowns
   const [partSets, setPartSets] = useState([]);
@@ -238,20 +230,6 @@ export default function JobSetupVerification() {
     )
   );
 
-  const operationOptions = [
-    "OP-010",
-    "OP-020",
-    "OP-020 A & OP-20B",
-    "OP-030",
-    "OP-030A",
-    "OP-040",
-    "OP-050",
-    "OP-060",
-    "OP-070",
-    "OP-080",
-    "OP-090",
-  ];
-
   // Automatic calculation of Setting Time & Total Time
   useEffect(() => {
     if (isSavedRecord) return;
@@ -340,57 +318,62 @@ export default function JobSetupVerification() {
   };
 
   // Load the master Control + Specification rows for a part (strictly by part name)
-  const fetchControlSpecifications = async (partName, seq) => {
-    if (!partName) {
-      setRows([]);
-      setSpecsMissing(false);
-      return;
-    }
-    try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(
-        `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(partName)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (seq !== undefined && seq !== lookupSeqRef.current) return;
-      if (res.ok) {
-        const data = await res.json();
-        const specs = Array.isArray(data.specifications) ? data.specifications : [];
-        if (specs.length > 0) {
-          setRows(
-            specs.map((spec, idx) => ({
-              slNo: idx + 1,
-              controlName: spec.controlName || "",
-              specification: spec.specification || "",
-              LH1: "",
-              RH1: "",
-              LH2: "",
-              RH2: "",
-              LH3: "",
-              RH3: "",
-              status: "OK",
-              remarks: "",
-              isExisting: true,
-            }))
-          );
-          setSpecsMissing(false);
-          triggerToast(`Loaded ${specs.length} Control Specifications.`, "success");
-        } else {
-          setRows([createEmptyInspectionRow(1)]);
-          setSpecsMissing(true);
-          triggerToast("No pre-configured specifications. You can add them below.", "info");
-        }
+const fetchControlSpecifications = async (partName, operationNo, seq) => {
+  if (!partName || !operationNo) {
+    setRows([]);
+    setSpecsMissing(false);
+    return;
+  }
+  try {
+    const token = localStorage.getItem("token");
+    const res = await fetch(
+      `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(partName)}&operationNo=${encodeURIComponent(operationNo)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (seq !== undefined && seq !== lookupSeqRef.current) return;
+    if (res.ok) {
+      const data = await res.json();
+      const specs = Array.isArray(data.specifications) ? data.specifications : [];
+      if (specs.length > 0) {
+        setRows(
+          specs.map((spec, idx) => ({
+            slNo: idx + 1,
+            controlName: spec.controlName || "",
+            specification: spec.specification || "",
+            image: spec.image || "",
+            LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
+            status: "OK",
+            remarks: "",
+            isExisting: true,
+          }))
+        );
+        setSpecsMissing(false);
+        triggerToast(`Loaded ${specs.length} Control Specifications.`, "success");
+      } else {
+        setRows([createEmptyInspectionRow(1)]);
+        setSpecsMissing(true);
+        triggerToast("No pre-configured specifications for this part & operation. You can add them below.", "info");
       }
-    } catch (err) {
-      console.error("Fetch specs error:", err);
     }
-  };
+  } catch (err) {
+    console.error("Fetch specs error:", err);
+  }
+};
 
   // Look for a filled record for part + date + shift + operationNo.
   // Specifications for the Part Name remain loaded when switching forms.
   const loadSelection = async (partName, partNo, date, shift, operationNo, forceSpecs = false) => {
     if (!partName || !date) return;
     const seq = ++lookupSeqRef.current;
+    if (!operationNo) {
+    setForm(buildFreshForm({ partName, partNo, date, shift, operationNo: "" }));
+    setSignatures(emptySignatures);
+    setIsSavedRecord(false);
+    setSaveSuccess(false);
+    setRows([]);
+    setSpecsMissing(false);
+    return;
+  }
     let record = null;
     try {
       const token = localStorage.getItem("token");
@@ -426,7 +409,7 @@ export default function JobSetupVerification() {
     setSaveSuccess(false);
 
     if (forceSpecs || isSavedRef.current || rowsRef.current.length === 0) {
-      await fetchControlSpecifications(partName, seq);
+      await fetchControlSpecifications(partName, operationNo, seq);
     } else {
       // Clear inspection measurements while preserving control specs
       setRows((prev) =>
@@ -489,10 +472,9 @@ export default function JobSetupVerification() {
   const handleOperationNoChange = (val) => {
     setForm((prev) => ({ ...prev, operationNo: val }));
     if (form.partName && form.date) {
-      loadSelection(form.partName, form.partNo, form.date, form.shift, val, false);
+      loadSelection(form.partName, form.partNo, form.date, form.shift, val, true);
     }
   };
-
   useEffect(() => {
     if (lineSet?.partName && !form.partName) {
       setForm((prev) => ({
@@ -550,6 +532,32 @@ export default function JobSetupVerification() {
   const handleAddRow = () => {
     if (isSavedRecord) return;
     setRows((prev) => [...prev, createEmptyInspectionRow(prev.length + 1)]);
+  };
+  const attachImage = async (idx, blob) => {
+    try {
+      updateRow(idx, "image", await blobToCompressedDataUrl(blob));
+    } catch (e) {
+      triggerToast("Could not read the pasted image.", "error");
+    }
+  };
+
+  const handleCellPaste = (e, idx) => {
+    if (isSavedRecord || rows[idx]?.isExisting) return;
+    const file = imageFromPasteEvent(e);
+    if (file) {
+      e.preventDefault();
+      attachImage(idx, file);
+    }
+  };
+
+  const handlePasteButton = async (idx) => {
+    try {
+      const blob = await imageFromClipboardApi();
+      if (!blob) return triggerToast("No image found in the clipboard.", "info");
+      attachImage(idx, blob);
+    } catch (e) {
+      triggerToast("Clipboard access blocked. Click the Specification box and press Ctrl+V instead.", "error");
+    }
   };
 
   const handleDeleteRow = (idx) => {
@@ -657,7 +665,7 @@ export default function JobSetupVerification() {
       return;
     }
 
-    const validRows = rows.filter((r) => r.controlName.trim() || r.specification.trim());
+    const validRows = rows.filter((r) => r.controlName.trim() || r.specification.trim() || r.image);
     if (validRows.length === 0) {
       triggerToast("Please add at least one Control Specification.", "error");
       return;
@@ -697,6 +705,12 @@ export default function JobSetupVerification() {
       signatures: {
         shiftIncharge: signatures.shiftIncharge,
       },
+      controlSpecifications: validRows.map((r, i) => ({
+        slNo: i + 1,
+        controlName: r.controlName.trim(),
+        specification: r.specification.trim(),
+        image: r.image || "",
+      })),
     };
 
     try {
@@ -790,6 +804,15 @@ export default function JobSetupVerification() {
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-start p-3 sm:p-5 md:p-8 pb-20 w-full">
       <Header />
       <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "" })} />
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+          onClick={() => setPreviewImage(null)}
+        >
+          <img src={previewImage} alt="Specification" className="max-h-full max-w-full object-contain bg-white rounded shadow-2xl" />
+        </div>
+      )}
 
       {/* SAVING OVERLAY */}
       {isSaving && (
@@ -920,7 +943,7 @@ export default function JobSetupVerification() {
                   onChange={(e) => handleOperationNoChange(e.target.value)}
                 >
                   <option value="">-- Select Operation No --</option>
-                  {operationOptions.map((op) => (
+                  {OPERATION_OPTIONS.map((op) => (
                     <option key={op} value={op}>
                       {op}
                     </option>
@@ -1215,7 +1238,7 @@ export default function JobSetupVerification() {
                   {rows.length === 0 && (
                     <tr>
                       <td colSpan={isSavedRecord ? 11 : 12} className="border border-gray-800 p-6 text-gray-500 italic font-semibold">
-                        {!form.partName ? "Select a Part Name to load its control specifications." : "No rows yet. Click 'Add Control Row' above to begin."}
+                        {!form.partName ? "Select a Part Name to continue." : !form.operationNo ? "Select an Operation No to load its control specifications." : "No rows yet. Click 'Add Control Row' above to begin."}
                       </td>
                     </tr>
                   )}
@@ -1242,7 +1265,10 @@ export default function JobSetupVerification() {
                         </td>
 
                         {/* Control Specification */}
-                        <td className={`border border-gray-800 p-0 text-left px-1.5 font-bold text-gray-900 ${isControlLocked ? "bg-gray-50/80" : "bg-white"}`}>
+                        <td
+                          className={`border border-gray-800 p-1 text-left px-1.5 font-bold text-gray-900 ${isControlLocked ? "bg-gray-50/80" : "bg-white"}`}
+                          onPaste={(e) => handleCellPaste(e, idx)}
+                        >
                           <input
                             type="text"
                             readOnly={isControlLocked}
@@ -1254,6 +1280,36 @@ export default function JobSetupVerification() {
                             }}
                             onChange={(e) => updateRow(idx, "specification", e.target.value)}
                           />
+                          {r.image && (
+                            <div className="relative inline-block mt-1">
+                              <img
+                                src={r.image}
+                                alt="Specification"
+                                onClick={() => setPreviewImage(r.image)}
+                                className="max-h-24 max-w-full object-contain border border-gray-300 rounded bg-white cursor-zoom-in"
+                              />
+                              {!isControlLocked && (
+                                <button
+                                  type="button"
+                                  onClick={() => updateRow(idx, "image", "")}
+                                  className="absolute -top-2 -right-2 bg-red-600 hover:bg-red-700 text-white rounded-full p-0.5 shadow cursor-pointer"
+                                  title="Remove image"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {!isControlLocked && !r.image && (
+                            <button
+                              type="button"
+                              onClick={() => handlePasteButton(idx)}
+                              className="mt-1 flex items-center gap-1 bg-white hover:bg-orange-500 hover:text-white border border-gray-300 rounded px-2 py-1 font-bold text-[10px] text-gray-700 uppercase shadow-sm transition-all cursor-pointer"
+                              title="Paste copied image from clipboard"
+                            >
+                              <ImagePlus className="w-3 h-3" /> Paste Image
+                            </button>
+                          )}
                         </td>
 
                         {/* Actual Values LH1 to RH3 */}

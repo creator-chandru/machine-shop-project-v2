@@ -68,6 +68,7 @@ app.use('/api', qfRoutes); // ✅ Registered QF Routes
 app.use('/api', Level1Routes); // ✅ Registered Level 1 Routes
 app.use('/api', breakDownReportRoutes);
 app.use('/api', operatorObservationPlanRoutes);
+app.use(express.json({ limit: "25mb"}));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {

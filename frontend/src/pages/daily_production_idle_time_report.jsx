@@ -70,8 +70,8 @@ const createEmptyLineColumn = (lineCode = "", partName = "", capacity = null) =>
   }, {}),
 
   signatures: emptyShifts(),
-  assignedPe: "",
-  peSign: "",
+  assignedPe: emptyShifts(),
+  peSign: emptyShifts(),
 });
 
 const hasVal = (v) => v !== "" && v != null;
@@ -142,9 +142,6 @@ export default function DailyProductionIdleTimeReport() {
   const currentUser = getCurrentUser();
   const chunkSize = useChunkSize();
 
-  // Dynamic QF States
-  const [qfHistory, setQfHistory] = useState([]);
-  const [qfValue, setQfValue] = useState("QF/07/MPD-10, Rev.No: 00 dt 01.07.2021");
   const [machineShopDetails, setMachineShopDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [peUsers, setPeUsers] = useState([]);
@@ -234,51 +231,6 @@ export default function DailyProductionIdleTimeReport() {
     }
   }, [lineSet]);
 
-  // Fetch QF History on Mount
-  useEffect(() => {
-    const fetchQfHistory = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(
-          `${API}/api/qf-values/history/daily-production-idle-time`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (res.ok) {
-          const historyData = await res.json();
-          setQfHistory(historyData);
-        }
-      } catch (err) {
-        console.error("Failed to load QF history", err);
-      }
-    };
-    fetchQfHistory();
-  }, []);
-
-  // Calculate QF based on selected Date
-  useEffect(() => {
-    let currentQf = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021"; // Fallback
-
-    if (reportDate && qfHistory.length > 0) {
-      const selectedDate = new Date(reportDate);
-      selectedDate.setHours(0, 0, 0, 0);
-
-      for (let qf of qfHistory) {
-        if (!qf.date) continue;
-        const qfDate = new Date(qf.date);
-        qfDate.setHours(0, 0, 0, 0);
-
-        if (qfDate <= selectedDate) {
-          currentQf = qf.qfValue;
-          break;
-        }
-      }
-    } else if (qfHistory.length > 0) {
-      currentQf = qfHistory[0].qfValue;
-    }
-
-    setQfValue(currentQf);
-  }, [reportDate, qfHistory]);
-
   const lineCodes = [
     ...new Set(
       lineMappings.length > 0
@@ -341,7 +293,12 @@ export default function DailyProductionIdleTimeReport() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.exists && data.lineColumns?.[0]) saved = data.lineColumns[0];
+        if (data.exists && data.lineColumns?.[0]) {
+          saved = data.lineColumns[0];
+          // Ensure structure handles missing shift level assignedPe / peSign from old records
+          if (!saved.assignedPe || typeof saved.assignedPe === 'string') saved.assignedPe = emptyShifts();
+          if (!saved.peSign || typeof saved.peSign === 'string') saved.peSign = emptyShifts();
+        }
       }
     } catch (err) {
       console.error("Saved idle time fetch error:", err);
@@ -426,6 +383,21 @@ export default function DailyProductionIdleTimeReport() {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
 
+    // Validation: Block values below 0 or above specific shift's Capacity Limit
+    if (val !== "") {
+      const numVal = parseFloat(val);
+      const capLimit = parseFloat(col.capacity[shift]) || 0;
+      
+      if (numVal < 0) {
+        triggerToast("Actual production cannot be less than 0.", "error");
+        return;
+      }
+      if (numVal > capLimit) {
+        triggerToast(`Actual production cannot exceed the Capacity Qty in Sets (${capLimit}).`, "error");
+        return;
+      }
+    }
+
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = {
@@ -457,6 +429,21 @@ export default function DailyProductionIdleTimeReport() {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
 
+    // Validation: Block values below 0 or above specific shift's Capacity Limit
+    if (val !== "") {
+      const numVal = parseFloat(val);
+      const capLimit = parseFloat(col.capacity[shift]) || 0;
+      
+      if (numVal < 0) {
+        triggerToast("Loss value cannot be less than 0.", "error");
+        return;
+      }
+      if (numVal > capLimit) {
+        triggerToast(`Loss value cannot exceed the Capacity Qty in Sets (${capLimit}).`, "error");
+        return;
+      }
+    }
+
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = {
@@ -487,6 +474,11 @@ export default function DailyProductionIdleTimeReport() {
       return;
     }
 
+    if (!col.assignedPe?.[shift]) {
+      triggerToast(`Select Shift Officer (PE) for Shift ${SHIFT_LABEL[shift]} before approving.`, "error");
+      return;
+    }
+
     setLineColumns((prev) => {
       const next = [...prev];
       next[colIdx] = {
@@ -509,11 +501,14 @@ export default function DailyProductionIdleTimeReport() {
     });
   };
 
-  const handlePeChange = (colIdx, val) => {
+  const handlePeChange = (colIdx, shift, val) => {
     setLineColumns((prev) => {
       if (prev[colIdx]?.locked) return prev;
       const next = [...prev];
-      next[colIdx] = { ...next[colIdx], assignedPe: val };
+      next[colIdx] = { 
+        ...next[colIdx], 
+        assignedPe: { ...next[colIdx].assignedPe, [shift]: val } 
+      };
       return next;
     });
   };
@@ -598,13 +593,12 @@ export default function DailyProductionIdleTimeReport() {
       const name = SHIFT_LABEL[shift];
       if (shiftHasData(col, shift)) {
         anyData = true;
-        if (!col.signatures[shift]) return `${label} (Shift ${name}): approve the shift (Shift Officer Sign) before submitting.`;
+        if (!col.signatures[shift]) return `${label} (Shift ${name}): approve the shift (Section Incharge Sign) before submitting.`;
+        if (!col.assignedPe[shift]) return `${label} (Shift ${name}): select the Shift Officer (PE) to send this report for approval.`;
       }
     }
 
     if (!anyData) return `${label}: enter production / loss data for at least one shift.`;
-    if (!col.assignedPe) return `${label}: select the Section Incharge (PE) to send this report for approval.`;
-
     return null;
   };
 
@@ -642,6 +636,7 @@ export default function DailyProductionIdleTimeReport() {
         losses: c.losses,
         signatures: c.signatures,
         assignedPe: c.assignedPe,
+        peSign: c.peSign
       })),
     };
 
@@ -772,7 +767,7 @@ export default function DailyProductionIdleTimeReport() {
             ) : (
               <>
                 <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
-                <p className="text-gray-500 mt-2">Sent to Product Engineer. Returning to Operator Menu...</p>
+                <p className="text-gray-500 mt-2">Sent to Shift Officer. Returning to Menu...</p>
               </>
             )}
           </div>
@@ -795,10 +790,6 @@ export default function DailyProductionIdleTimeReport() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               DAILY PRODUCTION & IDLE TIME REPORT
             </h2>
-            {/* Dynamic QF Display */}
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
-              <span>{qfValue}</span>
-            </div>
           </div>
 
           <button
@@ -1016,6 +1007,7 @@ export default function DailyProductionIdleTimeReport() {
                                 type="number"
                                 inputMode="numeric"
                                 min="0"
+                                max={col.capacity[shift] || 0}
                                 placeholder="0"
                                 className={`${INPUT_BASE} font-medium`}
                                 value={col.actualProd.lh[shift]}
@@ -1049,6 +1041,7 @@ export default function DailyProductionIdleTimeReport() {
                                 type="number"
                                 inputMode="numeric"
                                 min="0"
+                                max={col.capacity[shift] || 0}
                                 placeholder="0"
                                 className={`${INPUT_BASE} font-medium`}
                                 value={col.actualProd.rh[shift]}
@@ -1127,6 +1120,7 @@ export default function DailyProductionIdleTimeReport() {
                                   type="number"
                                   inputMode="decimal"
                                   min="0"
+                                  max={col.capacity[shift] || 0}
                                   className={INPUT_BASE}
                                   value={col.losses[`loss_${loss.id}`]?.[shift]}
                                   disabled={!isEditableShift(col, shift)}
@@ -1152,7 +1146,7 @@ export default function DailyProductionIdleTimeReport() {
                     {/* Total loss */}
                     <tr className="bg-gray-200 font-extrabold text-gray-900">
                       <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2">
-                        Total Loss (mins)
+                        Total Loss
                       </td>
 
                       {chunk.map(({ col, globalIdx }) => (
@@ -1171,12 +1165,12 @@ export default function DailyProductionIdleTimeReport() {
                       ))}
                     </tr>
 
-                    {/* Shift Officer Sign */}
+                    {/* Section Incharge Sign */}
                     <tr className="bg-gray-50">
                       <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2 font-bold">
-                        SHIFT OFFICER SIGN
+                        SECTION INCHARGE SIGN
                         <span className="block text-[9px] font-semibold text-gray-500">
-                          (approved by shift incharge)
+                          (approved by section incharge)
                         </span>
                       </td>
 
@@ -1192,15 +1186,6 @@ export default function DailyProductionIdleTimeReport() {
                                     <span className="text-[10px] font-black uppercase break-all leading-tight">
                                       {sign}
                                     </span>
-                                    {!col.locked && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRevokeShift(globalIdx, shift)}
-                                        className="text-[9px] underline text-gray-500 mt-0.5 cursor-pointer"
-                                      >
-                                        Undo
-                                      </button>
-                                    )}
                                   </div>
                                 ) : col.locked ? (
                                   <span className="text-gray-400">-</span>
@@ -1221,57 +1206,60 @@ export default function DailyProductionIdleTimeReport() {
                       ))}
                     </tr>
 
-                    {/* Section Incharge (PE) */}
+                    {/* Shift Officer (PE) */}
                     <tr className="bg-gray-50">
                       <td colSpan={3} className="border border-gray-800 p-1.5 text-left px-2 font-bold">
-                        SECTION INCHARGE (PE)
+                        SHIFT OFFICER SIGN (PE)
                         <span className="block text-[9px] font-semibold text-gray-500">
                           (sent to PE for approval)
                         </span>
                       </td>
 
                       {chunk.map(({ col, globalIdx }) => {
-                        const peApproved = /^Approved/i.test(col.peSign || "");
-                        const peName = (col.peSign || "").replace(/^Approved \(/i, "").replace(/\)$/, "");
-
                         return (
-                          <td
-                            key={`pe-${globalIdx}`}
-                            colSpan={4}
-                            className="border border-gray-800 p-0 align-middle"
-                          >
-                            {col.locked ? (
-                              peApproved ? (
-                                <div className="flex flex-col items-center py-1.5">
-                                  <span className="text-[10px] font-bold text-green-600">Verified ✓</span>
-                                  <span className="text-xs font-black uppercase text-gray-800">{peName}</span>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-center py-1.5">
-                                  <span className="text-[10px] font-bold text-red-600">Pending PE Approval</span>
-                                  <span className="text-xs font-black uppercase text-gray-800">
-                                    {col.assignedPe}
-                                  </span>
-                                </div>
-                              )
-                            ) : (
-                              <select
-                                className="w-full h-full text-center px-1 outline-none bg-transparent font-semibold cursor-pointer text-sm py-2.5"
-                                value={col.assignedPe}
-                                onChange={(e) => handlePeChange(globalIdx, e.target.value)}
-                              >
-                                <option value="">-- Select Product Engineer --</option>
-                                {peUsers.map((pe, idx) => {
-                                  const uname = pe.username || pe.employeeId || pe.name;
-                                  return (
-                                    <option key={idx} value={uname}>
-                                      {String(uname).toUpperCase()}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                            )}
-                          </td>
+                          <React.Fragment key={`pe-${globalIdx}`}>
+                            {SHIFT_KEYS.map((shift) => {
+                              const peApproved = /^Approved/i.test(col.peSign?.[shift] || "");
+                              const peName = (col.peSign?.[shift] || "").replace(/^Approved \(/i, "").replace(/\)$/, "");
+                              const shiftSigned = !!col.signatures?.[shift];
+
+                              return (
+                                <td key={shift} className="border border-gray-800 p-0 align-middle">
+                                  {shiftSigned && peApproved ? (
+                                    <div className="flex flex-col items-center py-1">
+                                      <span className="text-[9px] font-bold text-green-600">Verified ✓</span>
+                                      <span className="text-[9px] font-black uppercase text-gray-800 break-all px-1 leading-tight">{peName}</span>
+                                    </div>
+                                  ) : shiftSigned && col.assignedPe?.[shift] ? (
+                                    <div className="flex flex-col items-center py-1">
+                                      <span className="text-[9px] font-bold text-red-600">Pending PE</span>
+                                      <span className="text-[9px] font-black uppercase text-gray-800 break-all px-1 leading-tight">
+                                        {col.assignedPe[shift]}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <select
+                                      className="w-full h-full text-center px-0 outline-none bg-transparent font-semibold cursor-pointer text-[10px] sm:text-[11px] py-2"
+                                      value={col.assignedPe?.[shift] || ""}
+                                      disabled={shiftSigned} 
+                                      onChange={(e) => handlePeChange(globalIdx, shift, e.target.value)}
+                                    >
+                                      <option value="">-- PE --</option>
+                                      {peUsers.map((pe, idx) => {
+                                        const uname = pe.username || pe.employeeId || pe.name;
+                                        return (
+                                          <option key={idx} value={uname}>
+                                            {String(uname).toUpperCase()}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="border border-gray-800 p-1 bg-gray-100"></td>
+                          </React.Fragment>
                         );
                       })}
                     </tr>

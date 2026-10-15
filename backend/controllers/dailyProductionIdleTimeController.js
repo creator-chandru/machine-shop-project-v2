@@ -293,9 +293,16 @@ const rowToColumn = (r) => {
       shift2: r.ShiftInchargeSign_Shift2 || '',
       shift3: r.ShiftInchargeSign_Shift3 || ''
     },
-    assignedPe: r.assignedPe || '',
-    peSign: r.Sign_ProductionEngineer || 'Pending',
-    status: isPendingSign(r.Sign_ProductionEngineer) ? 'Pending' : 'Completed'
+    assignedPe: {
+      shift1: r.assignedPe_Shift1 || '',
+      shift2: r.assignedPe_Shift2 || '',
+      shift3: r.assignedPe_Shift3 || ''
+    },
+    peSign: {
+      shift1: r.SignPE_Shift1 || '',
+      shift2: r.SignPE_Shift2 || '',
+      shift3: r.SignPE_Shift3 || ''
+    }
   };
 };
 
@@ -374,24 +381,16 @@ const saveDailyProductionIdleTime = async (req, res) => {
     for (const col of lineColumns) {
       const lineCode = String(col.lineCode || '').trim();
       const partName = String(col.partName || '').trim();
-      const assignedPe = String(col.assignedPe || '').trim();
 
       if (!lineCode) throw httpError(400, 'Line code is required');
       if (!partName) throw httpError(400, `Part name could not be resolved for line ${lineCode}`);
-      if (!assignedPe) throw httpError(400, `Select a Product Engineer for line ${lineCode}`);
 
-      const existReq = new sql.Request(transaction);
-      existReq.input('m', sql.Int, shopId);
-      existReq.input('d', sql.NVarChar(50), reportDate);
-      existReq.input('l', sql.NVarChar(50), lineCode);
-      const exist = await existReq.query(`
-        SELECT COUNT(*) AS cnt FROM ${TABLE}
-        WHERE MachineShop = @m AND ReportDate = CONVERT(date, @d) AND LineCode = @l
-      `);
-      if (exist.recordset[0].cnt > 0) {
-        skippedLines.push(lineCode);
-        continue;
-      }
+      // Allow multiple edits: PURGE old record before inserting updated column
+      await transaction.request()
+        .input('m', sql.Int, shopId)
+        .input('d', sql.NVarChar(50), reportDate)
+        .input('l', sql.NVarChar(50), lineCode)
+        .query(`DELETE FROM ${TABLE} WHERE MachineShop = @m AND ReportDate = CONVERT(date, @d) AND LineCode = @l`);
 
       const capacity = {
         shift1: toInt(col.capacity?.shift1),
@@ -406,10 +405,12 @@ const saveDailyProductionIdleTime = async (req, res) => {
         const k = `shift${n}`;
         const has = shiftHasData(col, n);
         const sign = String(signatures[k] || '').trim();
+        const pe = String(col.assignedPe?.[k] || '').trim();
 
         if (has) {
           anyData = true;
-          if (!sign) throw httpError(400, `Line ${lineCode} Shift ${n}: shift officer approval is required`);
+          if (!sign) throw httpError(400, `Line ${lineCode} Shift ${n}: Section Incharge approval is required`);
+          if (!pe) throw httpError(400, `Line ${lineCode} Shift ${n}: Select a Shift Officer (PE)`);
         }
       }
       if (!anyData) throw httpError(400, `Line ${lineCode}: no production / loss data entered`);
@@ -443,11 +444,11 @@ const saveDailyProductionIdleTime = async (req, res) => {
       });
 
       SHIFT_NUMS.forEach((n) => {
-        add(`ShiftInchargeSign_Shift${n}`, sql.NVarChar(100), String(signatures[`shift${n}`] || '').trim());
+        const k = `shift${n}`;
+        add(`ShiftInchargeSign_Shift${n}`, sql.NVarChar(100), String(signatures[k] || '').trim());
+        add(`assignedPe_Shift${n}`, sql.NVarChar(100), String(col.assignedPe?.[k] || '').trim());
+        add(`SignPE_Shift${n}`, sql.NVarChar(100), String(col.peSign?.[k] || '').trim());
       });
-
-      add('assignedPe', sql.NVarChar(100), assignedPe);
-      add('Sign_ProductionEngineer', sql.NVarChar(100), 'Pending');
 
       const insReq = new sql.Request(transaction);
       f.forEach((x) => insReq.input(x.name, x.type, x.val));
@@ -458,14 +459,6 @@ const saveDailyProductionIdleTime = async (req, res) => {
       `);
 
       savedLines.push(lineCode);
-    }
-
-    if (savedLines.length === 0) {
-      await transaction.rollback();
-      return res.status(409).json({
-        error: 'Data already exists for the selected date and line code and cannot be changed.',
-        skippedLines
-      });
     }
 
     await transaction.commit();
@@ -517,13 +510,12 @@ const getPendingPEIdleTimeData = async (req, res) => {
         ) AS submittedBy,
         'Pending' AS status
       FROM ${TABLE}
-      WHERE LOWER(assignedPe) = LOWER(@peName)
-        AND (
-          Sign_ProductionEngineer IS NULL
-          OR Sign_ProductionEngineer = ''
-          OR Sign_ProductionEngineer LIKE 'Pending%'
-        )
-        ${shopFilter}
+      WHERE (
+          (LOWER(assignedPe_Shift1) = LOWER(@peName) AND (SignPE_Shift1 IS NULL OR SignPE_Shift1 = '' OR SignPE_Shift1 LIKE 'Pending%'))
+       OR (LOWER(assignedPe_Shift2) = LOWER(@peName) AND (SignPE_Shift2 IS NULL OR SignPE_Shift2 = '' OR SignPE_Shift2 LIKE 'Pending%'))
+       OR (LOWER(assignedPe_Shift3) = LOWER(@peName) AND (SignPE_Shift3 IS NULL OR SignPE_Shift3 = '' OR SignPE_Shift3 LIKE 'Pending%'))
+      )
+      ${shopFilter}
       ORDER BY ReportDate DESC, Id DESC
     `);
 
@@ -561,15 +553,12 @@ const signPEApproval = async (req, res) => {
 
     const result = await request.query(`
       UPDATE ${TABLE}
-      SET Sign_ProductionEngineer = @approvedStr
+      SET 
+        SignPE_Shift1 = CASE WHEN LOWER(assignedPe_Shift1) = LOWER(@signature) AND (SignPE_Shift1 IS NULL OR SignPE_Shift1 = '' OR SignPE_Shift1 LIKE 'Pending%') THEN @approvedStr ELSE SignPE_Shift1 END,
+        SignPE_Shift2 = CASE WHEN LOWER(assignedPe_Shift2) = LOWER(@signature) AND (SignPE_Shift2 IS NULL OR SignPE_Shift2 = '' OR SignPE_Shift2 LIKE 'Pending%') THEN @approvedStr ELSE SignPE_Shift2 END,
+        SignPE_Shift3 = CASE WHEN LOWER(assignedPe_Shift3) = LOWER(@signature) AND (SignPE_Shift3 IS NULL OR SignPE_Shift3 = '' OR SignPE_Shift3 LIKE 'Pending%') THEN @approvedStr ELSE SignPE_Shift3 END
       WHERE ReportDate = CONVERT(date, @checkDate)
         AND LineCode = @lineCode
-        AND LOWER(assignedPe) = LOWER(@signature)
-        AND (
-          Sign_ProductionEngineer IS NULL
-          OR Sign_ProductionEngineer = ''
-          OR Sign_ProductionEngineer LIKE 'Pending%'
-        )
         ${shopFilter}
     `);
 
@@ -592,13 +581,18 @@ const signPEApproval = async (req, res) => {
 // ============================================================
 const generateIdleTimeReport = async (req, res) => {
   try {
-    const { shopId, fromDate, toDate, lineCode } = req.query;
-    if (!fromDate || !toDate) {
-      return res.status(400).send('fromDate and toDate are required.');
+    const { shopId, fromDate, toDate, lineCode, date } = req.query;
+    
+    // Fix: Allow EITHER date OR (fromDate + toDate)
+    const queryFrom = fromDate || date;
+    const queryTo = toDate || date;
+
+    if (!queryFrom || !queryTo) {
+      return res.status(400).send('fromDate and toDate (or date) are required.');
     }
 
-    const cleanFrom = cleanDateStr(fromDate);
-    const cleanTo = cleanDateStr(toDate);
+    const cleanFrom = cleanDateStr(queryFrom);
+    const cleanTo = cleanDateStr(queryTo);
 
     const request = new sql.Request();
     request.input('fromDate', sql.NVarChar(50), cleanFrom);
@@ -693,8 +687,8 @@ const generateIdleTimeReport = async (req, res) => {
     };
 
     const computeGroupHeight = () => {
-      // Header 32pt + Table Headers (3 rows + 1 partRow) + Data Rows (18 rows) + Signatures (5 rows) + Notes (20pt)
-      return 32 + (3 * rowH + 14) + (18 * rowH) + (5 * rowH) + 24 + 10;
+      // Header 32pt + Table Headers (3 rows + 1 partRow) + Data Rows (18 rows) + Signatures (5 rows) + Notes (20pt) + QF Value (15pt)
+      return 32 + (3 * rowH + 14) + (18 * rowH) + (5 * rowH) + 35;
     };
 
     const renderDateGroup = (dateKey, dateRecords, groupY) => {
@@ -717,12 +711,7 @@ const generateIdleTimeReport = async (req, res) => {
       const titleW = totalWidth - 90 - 180;
       doc.rect(startX + 90, groupY, titleW, 32).stroke();
       doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
-        .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, groupY + 7, {
-          width: titleW,
-          align: 'center'
-        });
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
-        .text(effectiveQf, startX + 90, groupY + 20, {
+        .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, groupY + 11, {
           width: titleW,
           align: 'center'
         });
@@ -823,7 +812,7 @@ const generateIdleTimeReport = async (req, res) => {
 
       // Signatures
       const signH = rowH * 3;
-      drawCell(startX, curY, descW, signH, 'SHIFT OFFICER SIGN (APPROVED BY SHIFT INCHARGE)', true, '#f3f4f6', 'left');
+      drawCell(startX, curY, descW, signH, 'SECTION INCHARGE SIGN (APPROVED BY SECTION INCHARGE)', true, '#f3f4f6', 'left');
       dateRecords.forEach((rec, idx) => {
         const x = colX(idx);
         doc.rect(x, curY, colW, signH).stroke();
@@ -843,39 +832,50 @@ const generateIdleTimeReport = async (req, res) => {
       });
       curY += signH;
 
-      const peH = rowH * 2;
-      drawCell(startX, curY, descW, peH, 'SECTION INCHARGE (PE) SIGN', true, '#f3f4f6', 'left');
+      const peH = rowH * 3;
+      drawCell(startX, curY, descW, peH, 'SHIFT OFFICER SIGN (PE)', true, '#f3f4f6', 'left');
       dateRecords.forEach((rec, idx) => {
         const x = colX(idx);
         doc.rect(x, curY, colW, peH).stroke();
 
-        const sig = rec.Sign_ProductionEngineer || '';
-        if (sig && !isPendingSign(sig)) {
-          const name = String(sig).replace('Approved (', '').replace(')', '').trim();
-          doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(6)
-            .text('APPROVED', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
-          doc.fillColor('black').font('Helvetica-Bold').fontSize(6)
-            .text(name.toUpperCase(), x + 2, curY + 11, { width: colW - 4, align: 'center', lineBreak: false });
-        } else {
-          doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(6)
-            .text('PENDING', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
-          doc.fillColor('black').font('Helvetica').fontSize(6)
-            .text(rec.assignedPe ? `[${String(rec.assignedPe).toUpperCase()}]` : '', x + 2, curY + 11, {
-              width: colW - 4,
-              align: 'center',
-              lineBreak: false
-            });
-        }
+        [
+          ['I', rec.SignPE_Shift1, rec.assignedPe_Shift1],
+          ['II', rec.SignPE_Shift2, rec.assignedPe_Shift2],
+          ['III', rec.SignPE_Shift3, rec.assignedPe_Shift3]
+        ].forEach(([label, sig, assigned], i) => {
+          let statusText = '-';
+          let color = '#6b7280';
+
+          if (sig && !isPendingSign(sig)) {
+            const name = String(sig).replace('Approved (', '').replace(')', '').trim();
+            statusText = `${label}: Approved. ${name.toUpperCase()}`;
+            color = '#16a34a';
+          } else if (assigned) {
+            statusText = `${label}: PEND [${String(assigned).toUpperCase()}]`;
+            color = '#dc2626';
+          } else {
+            statusText = `${label}: -`;
+          }
+
+          doc.fillColor(color)
+            .font('Helvetica-Bold')
+            .fontSize(5.2)
+            .text(statusText, x + 2, curY + 2.5 + i * rowH, { width: colW - 4, lineBreak: false });
+        });
       });
-      curY += peH + 4;
+      curY += peH;
 
       // Notes
       doc.lineWidth(0.5).strokeColor('black');
       doc.rect(startX, curY, totalWidth, 20).stroke();
       doc.fillColor('black').font('Helvetica-Bold').fontSize(6.5)
         .text('Notes: 1. Tool change losses above 20 mins only. 2. Verify and record parameters during set-up change.', startX + 4, curY + 6);
+      
+      curY += 20;
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+        .text(effectiveQf, startX, curY + 4, { align: 'left' });
 
-      return curY + 24;
+      return curY + 16;
     };
 
     // Render entries sequentially, fitting dynamic groups onto landscape pages
@@ -1011,8 +1011,8 @@ const generateIdleTimeDayReport = async (req, res) => {
         });
     };
 
-    const displayDate = formatDisplayDate(cleanDate);
     const first = records[0];
+    const displayDate = formatDisplayDate(first.ReportDate);
 
     // Header Box (32pt)
     doc.lineWidth(0.8).strokeColor('black');
@@ -1029,12 +1029,7 @@ const generateIdleTimeDayReport = async (req, res) => {
     const titleW = totalWidth - 90 - 180;
     doc.rect(startX + 90, topMargin, titleW, 32).stroke();
     doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
-      .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, topMargin + 7, {
-        width: titleW,
-        align: 'center'
-      });
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
-      .text(effectiveQf, startX + 90, topMargin + 20, {
+      .text('DAILY PRODUCTION & IDLE TIME REPORT (MACHINE SHOP)', startX + 90, topMargin + 11, {
         width: titleW,
         align: 'center'
       });
@@ -1127,7 +1122,7 @@ const generateIdleTimeDayReport = async (req, res) => {
       LOSS_IDS.reduce((sum, i) => sum + (r[`Loss${i}_Shift${shift}`] || 0), 0);
 
     drawShiftDataRow(
-      'TOTAL LOSS (MINS)',
+      'TOTAL LOSS',
       (r) => [calcTotalLossRec(r, 1), calcTotalLossRec(r, 2), calcTotalLossRec(r, 3)],
       true,
       '#e5e7eb'
@@ -1135,7 +1130,7 @@ const generateIdleTimeDayReport = async (req, res) => {
 
     // Signatures
     const signH = rowH * 3;
-    drawCell(startX, curY, descW, signH, 'SHIFT OFFICER SIGN (APPROVED BY SHIFT INCHARGE)', true, '#f3f4f6', 'left');
+    drawCell(startX, curY, descW, signH, 'SECTION INCHARGE SIGN (APPROVED BY SECTION INCHARGE)', true, '#f3f4f6', 'left');
     records.forEach((rec, idx) => {
       const x = colX(idx);
       doc.rect(x, curY, colW, signH).stroke();
@@ -1155,37 +1150,48 @@ const generateIdleTimeDayReport = async (req, res) => {
     });
     curY += signH;
 
-    const peH = rowH * 2;
-    drawCell(startX, curY, descW, peH, 'SECTION INCHARGE (PE) SIGN', true, '#f3f4f6', 'left');
+    const peH = rowH * 3;
+    drawCell(startX, curY, descW, peH, 'SHIFT OFFICER SIGN (PE)', true, '#f3f4f6', 'left');
     records.forEach((rec, idx) => {
       const x = colX(idx);
       doc.rect(x, curY, colW, peH).stroke();
 
-      const sig = rec.Sign_ProductionEngineer || '';
-      if (sig && !isPendingSign(sig)) {
-        const name = String(sig).replace('Approved (', '').replace(')', '').trim();
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(6)
-          .text('APPROVED', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
-        doc.fillColor('black').font('Helvetica-Bold').fontSize(6)
-          .text(name.toUpperCase(), x + 2, curY + 11, { width: colW - 4, align: 'center', lineBreak: false });
-      } else {
-        doc.fillColor('#dc2626').font('Helvetica-Bold').fontSize(6)
-          .text('PENDING', x + 2, curY + 2.5, { width: colW - 4, align: 'center', lineBreak: false });
-        doc.fillColor('black').font('Helvetica').fontSize(6)
-          .text(rec.assignedPe ? `[${String(rec.assignedPe).toUpperCase()}]` : '', x + 2, curY + 11, {
-            width: colW - 4,
-            align: 'center',
-            lineBreak: false
-          });
-      }
+      [
+        ['I', rec.SignPE_Shift1, rec.assignedPe_Shift1],
+        ['II', rec.SignPE_Shift2, rec.assignedPe_Shift2],
+        ['III', rec.SignPE_Shift3, rec.assignedPe_Shift3]
+      ].forEach(([label, sig, assigned], i) => {
+        let statusText = '-';
+        let color = '#6b7280';
+
+        if (sig && !isPendingSign(sig)) {
+          const name = String(sig).replace('Approved (', '').replace(')', '').trim();
+          statusText = `${label}: APP. ${name.toUpperCase()}`;
+          color = '#16a34a';
+        } else if (assigned) {
+          statusText = `${label}: PEND [${String(assigned).toUpperCase()}]`;
+          color = '#dc2626';
+        } else {
+          statusText = `${label}: -`;
+        }
+
+        doc.fillColor(color)
+          .font('Helvetica-Bold')
+          .fontSize(5.2)
+          .text(statusText, x + 2, curY + 2.5 + i * rowH, { width: colW - 4, lineBreak: false });
+      });
     });
-    curY += peH + 4;
+    curY += peH;
 
     // Notes
     doc.lineWidth(0.5).strokeColor('black');
     doc.rect(startX, curY, totalWidth, 20).stroke();
     doc.fillColor('black').font('Helvetica-Bold').fontSize(6.5)
       .text('Notes: 1. Tool change losses above 20 mins only. 2. Verify and record parameters during set-up change.', startX + 4, curY + 6);
+    
+    curY += 20;
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+      .text(effectiveQf, startX, curY + 4, { align: 'left' });
 
     doc.end();
   } catch (err) {

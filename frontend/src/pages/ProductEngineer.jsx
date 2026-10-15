@@ -21,7 +21,10 @@ import "react-toastify/dist/ReactToastify.css";
 // API CONFIGURATION
 // ============================================================
 
-const API_BASE = "http://localhost:5000/api";
+// FIXED: Ensures "/api" is correctly appended to prevent the 404 errors!
+const API_BASE = process.env.REACT_APP_API_URL 
+  ? `${process.env.REACT_APP_API_URL}/api` 
+  : "http://localhost:5000/api";
 
 // ============================================================
 // PRODUCT ENGINEER DASHBOARD
@@ -439,14 +442,16 @@ const ProductEngineer = () => {
 
       // IDLE TIME
       else if (type === "idletime") {
+        // FIXED: Using fromDate and toDate to prevent 400 Bad Request error
         const params = new URLSearchParams({
           lineCode: report.lineCode,
+          fromDate: isoDate,
+          toDate: isoDate,
           date: isoDate,
           shopId: String(report.machineShop || currentShop),
         });
 
-        apiUrl =
-          `${API_BASE}/daily-production-idle-time/report?` + params.toString();
+        apiUrl = `${API_BASE}/daily-production-idle-time/report?` + params.toString();
       }
 
       // SIGNIFICANT EVENT
@@ -1448,11 +1453,11 @@ const ProductEngineer = () => {
                       reviewReportType !== "eightd" && (
                         <p>
                           <span className="font-extrabold">
-                            Shift Incharge:
+                            {reviewReportType === "idletime" ? "Section Incharge:" : "Shift Incharge:"}
                           </span>{" "}
                           {selectedReport.shiftInchargeName ||
                             selectedReport.shiftInchargeSignature ||
-                            "Shift Incharge"}
+                            (reviewReportType === "idletime" ? "Section Incharge" : "Shift Incharge")}
                         </p>
                       )}
                   </div>

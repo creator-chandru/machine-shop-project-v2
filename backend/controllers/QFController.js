@@ -10,8 +10,8 @@ const FORM_QF_TABLES = {
   "significant-event-record": "SignificantEventQFvalues",
   "daily-production-report": "DailyProductionReportQFvalues",
   "daily-production-idle-time": "DailyProductionIdleTimeQFvalues",
-  "tool-change-record": "ToolChangeRecordQFvalues"
-  // Add upcoming forms here: 'form-name': 'TableName'
+  "breakdown-intimation-report": "BreakdownIntimationQFvalues",
+  "operator-observation-sheet": "OperatorObservationQFvalues" // <-- ADDED
 };
 
 // GET /api/qf-values: Returns the latest QF setting for each configured form
@@ -30,7 +30,6 @@ exports.getFormSettings = async (req, res) => {
       if (result.recordset.length > 0) {
         results.push(result.recordset[0]);
       } else {
-        // Fallback placeholder if table exists but has no records yet
         results.push({
           id: null,
           formName,

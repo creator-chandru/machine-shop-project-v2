@@ -10,6 +10,13 @@ const {
     getHofUsers                   // NEW: Fetch HOF users for dropdown
 } = require('../controllers/operatorObservationSheetController.js');
 
+// --- ADDED: QF Values Controller Imports ---
+const {
+  getFormSettings,
+  updateFormSettings,
+  getFormQfHistory,
+} = require('../controllers/qfController.js');
+
 // ============================================================
 // SAVE OPERATOR OBSERVATION SHEET
 // ============================================================
@@ -57,5 +64,10 @@ router.get(
     '/users/hof',
     getHofUsers
 );
+
+// --- ADDED: QF Values Routes ---
+router.get('/qf-values', getFormSettings);
+router.put('/qf-values', updateFormSettings);
+router.get('/qf-values/history/:formName', getFormQfHistory);
 
 module.exports = router;

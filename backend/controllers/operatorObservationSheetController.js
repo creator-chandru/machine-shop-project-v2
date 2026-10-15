@@ -179,6 +179,43 @@ const generateOperatorObservationPDF = async (req, res) => {
             }
         }
 
+        // --- ADDED: Fetch QF History for Effective Date Resolution ---
+        let qfHistory = [];
+        try {
+            const qfRes = await sql.query(`
+                SELECT id, formName, qfValue, date 
+                FROM OperatorObservationQFvalues 
+                ORDER BY date DESC, id DESC
+            `);
+            qfHistory = qfRes.recordset || [];
+        } catch (qfErr) {
+            console.error("Warning: Could not fetch OperatorObservationQFvalues:", qfErr.message);
+        }
+
+        const getEffectiveQfValue = (recordDateStr) => {
+            const fallback = "QF / 07 / MPD - 15, Rev. Date: 06-06-2018";
+            if (!qfHistory || qfHistory.length === 0) return fallback;
+
+            if (recordDateStr) {
+                const targetDate = new Date(recordDateStr);
+                targetDate.setHours(0, 0, 0, 0);
+
+                for (let qf of qfHistory) {
+                    if (!qf.date) continue;
+                    const qfDate = new Date(qf.date);
+                    qfDate.setHours(0, 0, 0, 0);
+
+                    if (qfDate <= targetDate) {
+                        return qf.qfValue;
+                    }
+                }
+            }
+            return qfHistory[0]?.qfValue || fallback;
+        };
+
+        const effectiveQf = getEffectiveQfValue(header.testDate);
+        // -------------------------------------------------------------
+
         const doc = new PDFDocument({ margin: 20, size: "A4", layout: "portrait", bufferPages: true });
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `inline; filename=OperatorObservation_${employeeCode}_${displayDate.replace(/\//g, '-')}.pdf`);
@@ -321,6 +358,9 @@ const generateOperatorObservationPDF = async (req, res) => {
         doc.rect(startX, currentY, fullW, 40).stroke();
         doc.text("Operator feed back :", startX + 5, currentY + 5);
         doc.font("Helvetica").text(header.operatorFeedback || "", startX + 5, currentY + 18, { width: fullW - 10 });
+
+        // Render dynamic QF value in PDF footer
+        doc.font("Helvetica").fontSize(7).fillColor("#4b5563").text(effectiveQf, startX, currentY + 45);
 
         doc.end();
     } catch (err) {

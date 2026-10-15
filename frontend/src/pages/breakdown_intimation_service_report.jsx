@@ -4,7 +4,6 @@ import { ArrowLeft, FileDown, Calendar, X } from "lucide-react";
 import Header from "../components/Header";
 
 const formMeta = {
-  formCode: "QF/07/MRO-10",
   revision: "01",
   revisionDate: "01.04.2022",
   title: "BREAKDOWN INTIMATION / SERVICE REPORT",
@@ -80,6 +79,10 @@ export default function BreakdownIntimationServiceReport() {
   const [pdfFromDate, setPdfFromDate] = useState("");
   const [pdfToDate, setPdfToDate] = useState("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  // --- ADDED: Dynamic QF States ---
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MRO-10, Rev. No.:01 dt 01.04.2022");
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -169,6 +172,52 @@ export default function BreakdownIntimationServiceReport() {
     };
     fetchPeUsers();
   }, []);
+
+  // --- ADDED: Fetch QF History on Mount ---[cite: 3]
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/breakdown-intimation-report`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // --- ADDED: Calculate QF based on selected Date ---[cite: 3]
+  useEffect(() => {
+    let currentQf = "QF/07/MRO-10, Rev. No.:01 dt 01.04.2022";
+
+    if (basicInfo.date && qfHistory.length > 0) {
+      const selectedDate = new Date(basicInfo.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [basicInfo.date, qfHistory]);
 
   const handleBasicInfoChange = (field, val) => {
     setBasicInfo((prev) => ({
@@ -471,6 +520,10 @@ export default function BreakdownIntimationServiceReport() {
               <h1 className="text-base sm:text-lg font-black text-gray-800 uppercase tracking-wide">
                 {formMeta.title}
               </h1>
+              {/* Dynamic QF Value Display */}
+              <div className="text-xs text-gray-500 mt-1 font-bold">
+                <span>{qfValue}</span>
+              </div>
             </div>
           </div>
 
@@ -1105,7 +1158,7 @@ export default function BreakdownIntimationServiceReport() {
         {/* 10. FOOTER & SUBMIT BUTTON */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pt-4 border-t border-gray-300 gap-4">
           <div className="text-xs text-gray-600 font-semibold">
-            {formMeta.formCode}, Rev. No.:{formMeta.revision} dt {formMeta.revisionDate}
+            {qfValue}
           </div>
 
           <button

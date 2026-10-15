@@ -312,6 +312,41 @@ const generateBreakdownPdfReport = async (req, res) => {
       return res.status(404).send("No records found for the selected parameters.");
     }
 
+    // --- ADDED: Fetch QF History for Breakdown Intimation Report ---[cite: 3]
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date 
+        FROM BreakdownIntimationQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch BreakdownIntimationQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/07/MRO-10, Rev. No.:01 dt 01.04.2022";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
+    // -------------------------------------------------------------
+
     // A4 Portrait layout to replicate the physical hard copy
     const doc = new PDFDocument({ margin: 25, size: "A4", layout: "portrait", bufferPages: true });
     res.setHeader("Content-Type", "application/pdf");
@@ -329,6 +364,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       if (idx > 0) doc.addPage();
 
       let currY = 25;
+      const effectiveQf = getEffectiveQfValue(r.reportDate); // <-- Get dynamic QF value for record date
 
       // ----------------------------------------------------
       // TOP HEADER: Company Logo / Title
@@ -574,7 +610,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // Work Rows (Displaying rows recorded or empty grid minimum)
+      // Work Rows
       workersParsed.slice(0, 3).forEach((w) => {
         curWX = startX;
         const vals = [w.empNo || "-", w.employeeName || "-", w.from || "-", w.to || "-", w.time || "-"];
@@ -638,21 +674,18 @@ const generateBreakdownPdfReport = async (req, res) => {
       doc.font("Helvetica-Bold").fontSize(7).text("LEGEND FOR ABBREVIATIONS :", startX + 6, currY + 4);
 
       doc.font("Helvetica").fontSize(6.5);
-      // Col 1
       doc.text("TD  - TRANSITION DELAY", startX + 12, currY + 16);
       doc.text("WM - MANPOWER SHORTAGE", startX + 12, currY + 26);
       doc.text("SS   - DELAY IN STORES SERVICES", startX + 12, currY + 36);
 
-      // Col 2
       doc.text("SP  - DOWN FOR SPARES", startX + 190, currY + 16);
       doc.text("OT  - OTHERS", startX + 190, currY + 26);
 
-      // Col 3
       doc.text("AT  - ACTUAL TIME (WORKED)", startX + 350, currY + 16);
       doc.text("TT  - TOTAL DOWN TIME", startX + 350, currY + 26);
 
-      // Document Code Meta Footer
-      doc.font("Helvetica").fontSize(6.5).fillColor("#4b5563").text("QF/07/MRO-10, Rev. No.:01 dt 01.04.2022", startX, currY + legH + 4);
+      // Render dynamic QF Value in PDF Footer
+      doc.font("Helvetica").fontSize(6.5).fillColor("#4b5563").text(effectiveQf, startX, currY + legH + 4);
     });
 
     doc.end();

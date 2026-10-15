@@ -143,7 +143,6 @@ export default function OperatorObservationSheet() {
   const { shopId } = useParams();
   const navigate = useNavigate();
 
-  // Get current user for approval
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const loggedInName = currentUser.username || currentUser.employeeId || "Authorized User";
 
@@ -169,9 +168,53 @@ export default function OperatorObservationSheet() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: '', type: '' });
-
-  // State for HOF Users
   const [hofUsers, setHofUsers] = useState([]);
+
+  // --- ADDED: Dynamic QF Value State & Fetching ---
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF / 07 / MPD - 15, Rev. Date: 06-06-2018");
+
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL}/api/qf-values/history/operator-observation-sheet`,
+          { headers }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setQfHistory(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch operator observation QF history:", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  useEffect(() => {
+    let currentQf = "QF / 07 / MPD - 15, Rev. Date: 06-06-2018";
+    if (headerInfo.testDate && qfHistory.length > 0) {
+      const selectedDate = new Date(headerInfo.testDate);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+    setQfValue(currentQf);
+  }, [headerInfo.testDate, qfHistory]);
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
@@ -197,8 +240,6 @@ export default function OperatorObservationSheet() {
     setFooterInfo((prev) => ({ ...prev, [field]: val }));
   };
 
-  // Helper to calculate totals once all questions are answered
-  // UPDATED: Now adds the points (defaultPoints) instead of just 1 to the column totals
   const recalculateTotals = (updatedSections) => {
     let allQuestionsAnswered = true;
     let totalObtainedMarks = 0;
@@ -217,7 +258,6 @@ export default function OperatorObservationSheet() {
 
         RATING_COLUMNS.forEach((col) => {
           if (item[col.key] === "✓") {
-            // Adds points instead of 1 (Followed: 5, Partially Followed: 3, Not Followed: 1, Not Aware: 0)
             colTotals[col.key] += col.defaultPoints;
             secMarks += col.defaultPoints;
           }
@@ -252,12 +292,10 @@ export default function OperatorObservationSheet() {
     return computedSections;
   };
 
-  // Cell Change: Radio behavior (clears other columns in the same row)
   const handleCellChange = (secIdx, itemIdx, colKey, val) => {
     const nextSections = JSON.parse(JSON.stringify(sections));
     const targetItem = nextSections[secIdx].items[itemIdx];
 
-    // If selecting a new value (✓ or X), clear all other columns in this row first
     if (val !== "") {
       RATING_COLUMNS.forEach((col) => {
         if (col.key !== colKey) {
@@ -267,8 +305,6 @@ export default function OperatorObservationSheet() {
     }
 
     targetItem[colKey] = val;
-
-    // Automatically recalculate marks and column totals
     const updated = recalculateTotals(nextSections);
     setSections(updated);
   };
@@ -297,7 +333,6 @@ export default function OperatorObservationSheet() {
     triggerToast("Reviewed By signed successfully.", "success");
   };
 
-  // Helper to map DB flat records to nested UI state
   const populateFrontendData = (records) => {
     const first = records[0];
     
@@ -331,7 +366,6 @@ export default function OperatorObservationSheet() {
     setSections(recalculated);
   };
 
-  // AUTO-FETCH Existing Data Logic
   useEffect(() => {
     if (!headerInfo.employeeCode || !headerInfo.testDate) return;
 
@@ -372,7 +406,6 @@ export default function OperatorObservationSheet() {
     return () => clearTimeout(delayDebounceFn);
   }, [headerInfo.employeeCode, headerInfo.testDate, shopId]);
 
-  // Fetch HOF users on mount
   useEffect(() => {
     const fetchHofUsers = async () => {
       try {
@@ -397,7 +430,6 @@ export default function OperatorObservationSheet() {
     fetchHofUsers();
   }, []);
 
-  // Download PDF Logic
   const handleDownloadPDF = async () => {
     if (!headerInfo.employeeCode || !headerInfo.testDate) {
       triggerToast("Please enter Employee Code and Test Date to download PDF.", "error");
@@ -528,7 +560,6 @@ export default function OperatorObservationSheet() {
 
       <div className="bg-white w-full max-w-[92rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
         
-        {/* Header Title Section */}
         <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
           <div>
             <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
@@ -537,16 +568,12 @@ export default function OperatorObservationSheet() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {initialFormData.title}
             </h2>
+            <div className="text-xs text-gray-500 mt-1 font-bold">
+              <span>{qfValue}</span>
+            </div>
           </div>
           
           <div className="flex items-center gap-4">
-            <div className="text-xs text-gray-500 text-right">
-              <span>Form Code: {initialFormData.formCode}</span>
-              <span className="mx-2">|</span>
-              <span>Date: {initialFormData.revisionDate}</span>
-            </div>
-
-            {/* PREVIEW PDF BUTTON */}
             <button
               onClick={handleDownloadPDF}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs shadow-md transition-colors"
@@ -556,11 +583,9 @@ export default function OperatorObservationSheet() {
           </div>
         </div>
 
-        {/* Top Information Box */}
         <div className="border-2 border-gray-800 mb-6 bg-white">
           <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800">
             
-            {/* Left Header Box */}
             <div className="p-3 space-y-2 text-sm font-semibold">
               <div className="flex items-center">
                 <label className="w-36 text-gray-700">Employee Code</label>
@@ -599,7 +624,6 @@ export default function OperatorObservationSheet() {
               </div>
             </div>
 
-            {/* Right Header Box */}
             <div className="p-3 space-y-2 text-sm font-semibold">
               <div className="flex items-center">
                 <label className="w-32 text-gray-700">Test Date</label>
@@ -612,7 +636,6 @@ export default function OperatorObservationSheet() {
                 />
               </div>
 
-              {/* User Editable Marks % Input (0 - 100 with decimals) */}
               <div className="flex items-center">
                 <label className="w-32 text-gray-700">Marks</label>
                 <span className="mr-2">:</span>
@@ -645,11 +668,9 @@ export default function OperatorObservationSheet() {
           </div>
         </div>
 
-        {/* Observation Table */}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse border-2 border-gray-800 text-sm">
             
-            {/* Main Headers */}
             <thead className="bg-gray-100 text-gray-900 font-bold text-center">
               <tr>
                 <th className="border border-gray-800 p-2 w-16">S.NO.</th>
@@ -666,7 +687,6 @@ export default function OperatorObservationSheet() {
               {sections.map((sec, secIdx) => {
                 return (
                   <React.Fragment key={`sec-${sec.id}`}>
-                    {/* Section Header Row with 5, 3, 1, 0 in dark black */}
                     <tr className="bg-gray-100 font-extrabold text-gray-900 text-sm">
                       <td colSpan={2} className="border border-gray-800 px-3 py-1.5 uppercase tracking-wide">
                         {sec.title}
@@ -678,7 +698,6 @@ export default function OperatorObservationSheet() {
                       ))}
                     </tr>
 
-                    {/* Section Items with Dropdown Cells (Empty default, ✓, X in grey/black) */}
                     {sec.items.map((item, itemIdx) => (
                       <tr key={`item-${sec.id}-${item.slNo}`} className="hover:bg-gray-50">
                         <td className="border border-gray-800 p-2 text-center font-medium">
@@ -703,7 +722,6 @@ export default function OperatorObservationSheet() {
                       </tr>
                     ))}
 
-                    {/* User Entry / Auto Computed Marks and Column Totals */}
                     <tr className="bg-gray-50 font-bold text-xs text-gray-800">
                       <td className="border border-gray-800 px-2 py-1.5 text-center font-bold">
                         Marks :
@@ -737,7 +755,6 @@ export default function OperatorObservationSheet() {
           </table>
         </div>
 
-        {/* Footer Remarks / Feedback / Signatures */}
         <div className="mt-6 border-2 border-gray-800 bg-white relative">
           
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800 p-3 text-sm font-semibold">
@@ -750,7 +767,7 @@ export default function OperatorObservationSheet() {
                 onChange={(e) => handleFooterChange('reviewDate', e.target.value)}
               />
             </div>
-            {/* Reviewed By with Approve Button */}
+            
             <div className="flex items-center gap-2 px-2">
               <label className="text-gray-700">Reviewed By:</label>
               {footerInfo.reviewedBy ? (
@@ -770,7 +787,7 @@ export default function OperatorObservationSheet() {
                 </button>
               )}
             </div>
-            {/* Approved By Dropdown with Pending Status Check */}
+            
             <div className="flex items-center gap-2 px-2">
               <label className="text-gray-700">Approved By:</label>
               {footerInfo.approvedBy && footerInfo.approvedBy.includes('(Verified)') ? (
@@ -795,7 +812,6 @@ export default function OperatorObservationSheet() {
                     ))}
                   </select>
                   
-                  {/* Show Pending Badge if an HOF is selected but not yet verified */}
                   {footerInfo.approvedBy && isSavedRecord && (
                     <span className="bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded font-bold whitespace-nowrap shadow-sm">
                       Pending
@@ -824,10 +840,9 @@ export default function OperatorObservationSheet() {
           </div>
         </div>
 
-        {/* Action Button & Meta */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 pt-4 border-t border-gray-300">
           <span className="text-xs text-gray-500 font-semibold">
-            {initialFormData.formCode}, {initialFormData.revisionDate}
+            {qfValue}
           </span>
 
           <button

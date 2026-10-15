@@ -5,12 +5,12 @@ const {
     saveOperatorObservationSheet,
     getOperatorObservationSheet,
     generateOperatorObservationPDF,
-    getPendingObservationsForHof, // NEW: Fetch pending approvals for HOF
-    signOperatorObservationHof,   // NEW: HOF signature submission
-    getHofUsers                   // NEW: Fetch HOF users for dropdown
+    getPendingObservationsForHof,
+    signOperatorObservationHof,
+    getHofUsers
 } = require('../controllers/operatorObservationSheetController.js');
 
-// --- ADDED: QF Values Controller Imports ---
+// --- QF Values Controller Imports ---
 const {
   getFormSettings,
   updateFormSettings,
@@ -65,7 +65,7 @@ router.get(
     getHofUsers
 );
 
-// --- ADDED: QF Values Routes ---
+// --- QF Values Routes ---
 router.get('/qf-values', getFormSettings);
 router.put('/qf-values', updateFormSettings);
 router.get('/qf-values/history/:formName', getFormQfHistory);

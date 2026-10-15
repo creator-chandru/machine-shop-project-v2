@@ -170,7 +170,7 @@ export default function OperatorObservationSheet() {
   const [toast, setToast] = useState({ message: '', type: '' });
   const [hofUsers, setHofUsers] = useState([]);
 
-  // --- ADDED: Dynamic QF Value State & Fetching ---
+  // --- Dynamic QF Value State & Fetching ---
   const [qfHistory, setQfHistory] = useState([]);
   const [qfValue, setQfValue] = useState("QF / 07 / MPD - 15, Rev. Date: 06-06-2018");
 

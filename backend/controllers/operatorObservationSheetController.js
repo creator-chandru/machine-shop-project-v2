@@ -141,7 +141,7 @@ const getOperatorObservationSheet = async (req, res) => {
 };
 
 // ============================================================
-// PDF GENERATOR
+// PDF GENERATOR (WITH HISTORICAL QF EFFECTIVE DATES FIX)
 // ============================================================
 const generateOperatorObservationPDF = async (req, res) => {
     try {
@@ -179,38 +179,43 @@ const generateOperatorObservationPDF = async (req, res) => {
             }
         }
 
-        // --- ADDED: Fetch QF History for Effective Date Resolution ---
+        // --- Fetch QF History for Effective Date Resolution (Sorted Ascending) ---
         let qfHistory = [];
         try {
             const qfRes = await sql.query(`
                 SELECT id, formName, qfValue, date 
                 FROM OperatorObservationQFvalues 
-                ORDER BY date DESC, id DESC
+                ORDER BY date ASC, id ASC
             `);
             qfHistory = qfRes.recordset || [];
         } catch (qfErr) {
             console.error("Warning: Could not fetch OperatorObservationQFvalues:", qfErr.message);
         }
 
+        // --- Effective QF Value Resolver (Chronological Historical Lookup) ---
         const getEffectiveQfValue = (recordDateStr) => {
             const fallback = "QF / 07 / MPD - 15, Rev. Date: 06-06-2018";
             if (!qfHistory || qfHistory.length === 0) return fallback;
 
-            if (recordDateStr) {
-                const targetDate = new Date(recordDateStr);
-                targetDate.setHours(0, 0, 0, 0);
+            if (!recordDateStr) return qfHistory[qfHistory.length - 1]?.qfValue || fallback;
 
-                for (let qf of qfHistory) {
-                    if (!qf.date) continue;
-                    const qfDate = new Date(qf.date);
-                    qfDate.setHours(0, 0, 0, 0);
+            const targetDate = new Date(recordDateStr);
+            targetDate.setHours(0, 0, 0, 0);
 
-                    if (qfDate <= targetDate) {
-                        return qf.qfValue;
-                    }
+            let matchedQf = qfHistory[0]?.qfValue || fallback;
+
+            for (let qf of qfHistory) {
+                if (!qf.date) continue;
+                const qfDate = new Date(qf.date);
+                qfDate.setHours(0, 0, 0, 0);
+
+                if (qfDate <= targetDate) {
+                    matchedQf = qf.qfValue;
+                } else {
+                    break;
                 }
             }
-            return qfHistory[0]?.qfValue || fallback;
+            return matchedQf;
         };
 
         const effectiveQf = getEffectiveQfValue(header.testDate);
@@ -304,21 +309,17 @@ const generateOperatorObservationPDF = async (req, res) => {
                         const cellX = startX + wSno + wParam + (i * wR);
                         const cellY = currentY;
 
-                        // Center of the rating cell
                         const centerX = cellX + (wR / 2);
                         const centerY = cellY + (itemRowH / 2);
 
-                        // Green tick mark
                         doc.save();
                         doc.strokeColor('green');
                         doc.lineWidth(1.8);
 
-                        // First stroke: lower-left to center
                         doc.moveTo(centerX - 7, centerY)
                             .lineTo(centerX - 2, centerY + 5)
                             .stroke();
 
-                        // Second stroke: center to upper-right
                         doc.moveTo(centerX - 2, centerY + 5)
                             .lineTo(centerX + 8, centerY - 6)
                             .stroke();
@@ -338,13 +339,12 @@ const generateOperatorObservationPDF = async (req, res) => {
         doc.rect(startX + (fullW / 2), currentY, fullW / 4, 20).stroke();
         doc.text(`Reviewed By: ${header.reviewedBy || ''}`, startX + (fullW / 2) + 5, currentY + 6);
 
-        // --- NEW LOGIC FOR APPROVED BY DISPLAY ---
         let approvedDisplay = "";
         if (header.approvedBy) {
             if (header.approvedBy.includes('(Verified)')) {
-                approvedDisplay = header.approvedBy.replace(' (Verified)', ''); // Show name if verified
+                approvedDisplay = header.approvedBy.replace(' (Verified)', '');
             } else {
-                approvedDisplay = "Pending"; // Show pending if HOF is selected but hasn't signed
+                approvedDisplay = "Pending";
             }
         }
         doc.rect(startX + (fullW * 0.75), currentY, fullW / 4, 20).stroke();
@@ -359,7 +359,7 @@ const generateOperatorObservationPDF = async (req, res) => {
         doc.text("Operator feed back :", startX + 5, currentY + 5);
         doc.font("Helvetica").text(header.operatorFeedback || "", startX + 5, currentY + 18, { width: fullW - 10 });
 
-        // Render dynamic QF value in PDF footer
+        // Render dynamically resolved historical QF value in PDF footer
         doc.font("Helvetica").fontSize(7).fillColor("#4b5563").text(effectiveQf, startX, currentY + 45);
 
         doc.end();
@@ -431,7 +431,6 @@ const signOperatorObservationHof = async (req, res) => {
                .input('testDate', sql.Date, date)
                .input('signature', sql.NVarChar(100), signature + ' (Verified)');
 
-        // We append '(Verified)' so it no longer shows as pending for the exact username
         await request.query(`
             UPDATE OperatorObservationSheet
             SET approvedBy = @signature

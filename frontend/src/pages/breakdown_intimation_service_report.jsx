@@ -80,7 +80,7 @@ export default function BreakdownIntimationServiceReport() {
   const [pdfToDate, setPdfToDate] = useState("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  // --- ADDED: Dynamic QF States ---
+  // --- Dynamic QF States ---
   const [qfHistory, setQfHistory] = useState([]);
   const [qfValue, setQfValue] = useState("QF/07/MRO-10, Rev. No.:01 dt 01.04.2022");
 
@@ -173,7 +173,7 @@ export default function BreakdownIntimationServiceReport() {
     fetchPeUsers();
   }, []);
 
-  // --- ADDED: Fetch QF History on Mount ---[cite: 3]
+  // --- Fetch QF History on Mount ---
   useEffect(() => {
     const fetchQfHistory = async () => {
       try {
@@ -194,7 +194,7 @@ export default function BreakdownIntimationServiceReport() {
     fetchQfHistory();
   }, []);
 
-  // --- ADDED: Calculate QF based on selected Date ---[cite: 3]
+  // --- Calculate QF based on selected Date (Effective Date Logic) ---
   useEffect(() => {
     let currentQf = "QF/07/MRO-10, Rev. No.:01 dt 01.04.2022";
 
@@ -635,7 +635,7 @@ export default function BreakdownIntimationServiceReport() {
           <span className="font-bold text-gray-900 text-sm block">Nature of Failure :</span>
           <textarea
             rows={2}
-            placeholder="Describe the nature of failure (e.g. Spindle motor lock alarm)..."
+            placeholder="Describe the nature of failure..."
             className="w-full border border-gray-300 p-2 rounded text-sm outline-none focus:border-orange-500 bg-gray-50/50 resize-y"
             value={natureOfFailure.description}
             onChange={(e) => setNatureOfFailure((prev) => ({ ...prev, description: e.target.value }))}
@@ -686,7 +686,7 @@ export default function BreakdownIntimationServiceReport() {
           </div>
           <textarea
             rows={2}
-            placeholder="Record team observations (e.g. Checking time spindle motor lock alarm)..."
+            placeholder="Record team observations..."
             className="w-full border border-gray-300 p-2 rounded text-sm outline-none focus:border-orange-500 bg-gray-50/50 resize-y"
             value={observation.description}
             onChange={(e) => setObservation((prev) => ({ ...prev, description: e.target.value }))}
@@ -774,15 +774,6 @@ export default function BreakdownIntimationServiceReport() {
                       </span>
                     )}
                   </div>
-                ) : isSavedRecord ? (
-                  <div className="text-center">
-                    <span className="text-red-600 text-xs font-bold uppercase">pending</span>
-                    {workCompleted.assignedPe && (
-                      <span className="text-[10px] font-bold text-gray-500 uppercase block">
-                        (Assigned: {workCompleted.assignedPe})
-                      </span>
-                    )}
-                  </div>
                 ) : (
                   <select
                     className="w-full bg-white border border-gray-300 p-1.5 rounded font-bold text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-orange-500 text-center cursor-pointer"
@@ -849,15 +840,6 @@ export default function BreakdownIntimationServiceReport() {
                     </button>
                     {performanceReport.assignedPe && (
                       <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                        (Assigned: {performanceReport.assignedPe})
-                      </span>
-                    )}
-                  </div>
-                ) : isSavedRecord ? (
-                  <div className="text-center">
-                    <span className="text-red-600 text-xs font-bold uppercase">pending</span>
-                    {performanceReport.assignedPe && (
-                      <span className="text-[10px] font-bold text-gray-500 uppercase block">
                         (Assigned: {performanceReport.assignedPe})
                       </span>
                     )}
@@ -1045,7 +1027,7 @@ export default function BreakdownIntimationServiceReport() {
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
-                        placeholder="e.g. 10 mins"
+                        placeholder="Time"
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium"
                         value={w.time}
                         onChange={(e) => handleWorkerChange(idx, "time", e.target.value)}

@@ -255,7 +255,7 @@ const signPeBreakdownReport = async (req, res) => {
 };
 
 // ============================================================
-// 5. GENERATE PDF REPORT (EXACT FORM LAYOUT MATCHING PHYSICAL SHEET)
+// 5. GENERATE PDF REPORT (WITH HISTORICAL QF EFFECTIVE DATES)
 // ============================================================
 const generateBreakdownPdfReport = async (req, res) => {
   try {
@@ -312,7 +312,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       return res.status(404).send("No records found for the selected parameters.");
     }
 
-    // --- ADDED: Fetch QF History for Breakdown Intimation Report ---[cite: 3]
+    // --- Fetch QF History for Breakdown Intimation Report ---
     let qfHistory = [];
     try {
       const qfRes = await sql.query(`
@@ -325,6 +325,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       console.error("Warning: Could not fetch BreakdownIntimationQFvalues:", qfErr.message);
     }
 
+    // --- Effective QF Value Resolver (Historical Lookup Logic) ---
     const getEffectiveQfValue = (recordDateStr) => {
       const fallback = "QF/07/MRO-10, Rev. No.:01 dt 01.04.2022";
       if (!qfHistory || qfHistory.length === 0) return fallback;
@@ -345,9 +346,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       }
       return qfHistory[0]?.qfValue || fallback;
     };
-    // -------------------------------------------------------------
 
-    // A4 Portrait layout to replicate the physical hard copy
     const doc = new PDFDocument({ margin: 25, size: "A4", layout: "portrait", bufferPages: true });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
@@ -357,18 +356,15 @@ const generateBreakdownPdfReport = async (req, res) => {
     doc.pipe(res);
 
     const startX = 25;
-    const pageWidth = doc.page.width - 50; // ~545pt
+    const pageWidth = doc.page.width - 50; 
     const pad = 3;
 
     records.forEach((r, idx) => {
       if (idx > 0) doc.addPage();
 
       let currY = 25;
-      const effectiveQf = getEffectiveQfValue(r.reportDate); // <-- Get dynamic QF value for record date
+      const effectiveQf = getEffectiveQfValue(r.reportDate); // <-- Dynamically resolves past or present QF version based on record date
 
-      // ----------------------------------------------------
-      // TOP HEADER: Company Logo / Title
-      // ----------------------------------------------------
       doc.font("Helvetica-Bold").fontSize(15).fillColor("black").text("SAKTHI", startX, currY);
       doc.fontSize(13).text("AUTO", startX, currY + 15);
 
@@ -379,9 +375,6 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += 38;
 
-      // ----------------------------------------------------
-      // 1. BASIC INFORMATION & CATEGORY OF COMPLAINT
-      // ----------------------------------------------------
       const infoBoxH = 60;
       doc.lineWidth(0.8).rect(startX, currY, pageWidth, infoBoxH).stroke();
 
@@ -389,7 +382,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       const displayDate = dd && mm && yy ? `${dd}/${mm}/${yy}` : (r.reportDate || '-');
 
       doc.font("Helvetica-Bold").fontSize(8);
-      // Left Column
       doc.text("Plant Name :", startX + 6, currY + 6);
       doc.font("Helvetica").text(r.plantName || "-", startX + 65, currY + 6);
 
@@ -399,7 +391,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       doc.font("Helvetica-Bold").text("Machine No :", startX + 6, currY + 34);
       doc.font("Helvetica").text(r.machineNo || "-", startX + 65, currY + 34);
 
-      // Right Column
       const col2X = startX + 310;
       doc.font("Helvetica-Bold").text("Date :", col2X, currY + 6);
       doc.font("Helvetica").text(displayDate, col2X + 38, currY + 6);
@@ -410,7 +401,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       doc.font("Helvetica-Bold").text("Time :", col2X, currY + 34);
       doc.font("Helvetica").text(r.reportTime || "-", col2X + 38, currY + 34);
 
-      // Category of Complaint Checkboxes
       doc.font("Helvetica-Bold").text("Category of Complaint :", startX + 6, currY + 47);
       
       const mechBoxX = startX + 115;
@@ -425,9 +415,6 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += infoBoxH + 4;
 
-      // ----------------------------------------------------
-      // 2. NATURE OF FAILURE & INCHARGE SIGNATURE
-      // ----------------------------------------------------
       const nofH = 46;
       doc.lineWidth(0.8).rect(startX, currY, pageWidth, nofH).stroke();
       doc.font("Helvetica-Bold").fontSize(8).text("Nature of Failure :", startX + 6, currY + 4);
@@ -444,9 +431,6 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += nofH + 4;
 
-      // ----------------------------------------------------
-      // 3. MAINTENANCE TEAM OBSERVATION
-      // ----------------------------------------------------
       const obsH = 46;
       doc.lineWidth(0.8).rect(startX, currY, pageWidth, obsH).stroke();
       doc.font("Helvetica-Bold").fontSize(8).text("Maintenance Team Observation :", startX + 6, currY + 4);
@@ -455,14 +439,10 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += obsH + 4;
 
-      // ----------------------------------------------------
-      // 4. CORRECTIVE ACTION
-      // ----------------------------------------------------
       const caH = 54;
       doc.lineWidth(0.8).rect(startX, currY, pageWidth, caH).stroke();
       doc.font("Helvetica-Bold").fontSize(8).text("Corrective action :", startX + 6, currY + 4);
 
-      // Category Selector Box in Table Header
       const actionTypes = ["Electrical", "Mechanical", "Service"];
       const actBtnW = 60;
       let actBtnX = startX + 220;
@@ -482,13 +462,9 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += caH + 4;
 
-      // ----------------------------------------------------
-      // 5. WORK COMPLETED STATUS & MACHINE PERFORMANCE REPORT
-      // ----------------------------------------------------
       const dualH = 46;
       const halfW = (pageWidth - 4) / 2;
 
-      // Work Completed Box
       doc.lineWidth(0.8).rect(startX, currY, halfW, dualH).stroke();
       doc.font("Helvetica-Bold").fontSize(8).text("Work Completed status :", startX + 6, currY + 4);
       doc.font("Helvetica").fontSize(7.5).text(`Date : ${r.workCompletedDate || '-'}`, startX + 10, currY + 16);
@@ -503,7 +479,6 @@ const generateBreakdownPdfReport = async (req, res) => {
         doc.fillColor("red").font("Helvetica").fontSize(6.5).text("Pending", startX + halfW - 75, currY + 22, { width: 70, align: "center" }).fillColor("black");
       }
 
-      // Machine Performance Box
       const rightBoxX = startX + halfW + 4;
       doc.lineWidth(0.8).rect(rightBoxX, currY, halfW, dualH).stroke();
       doc.font("Helvetica-Bold").fontSize(8).text("Machine Performance Report :", rightBoxX + 6, currY + 4);
@@ -521,9 +496,6 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += dualH + 4;
 
-      // ----------------------------------------------------
-      // 6. TIME LOSS IN MINUTES TABLE
-      // ----------------------------------------------------
       doc.font("Helvetica-Bold").fontSize(8).text("Time Loss in Minutes :", startX, currY);
       currY += 10;
 
@@ -535,7 +507,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       const dataColW = (pageWidth - metricColW) / tlCols.length;
       const cellH = 13;
 
-      // Table Header Row
       doc.rect(startX, currY, metricColW, cellH).fillAndStroke("#f3f4f6", "black");
       doc.fillColor("black").font("Helvetica-Bold").fontSize(7.5).text("", startX, currY + 3);
 
@@ -546,7 +517,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // From Row
       doc.rect(startX, currY, metricColW, cellH).stroke();
       doc.font("Helvetica-Bold").fontSize(7.5).text("From", startX + pad, currY + 3);
       tlCols.forEach((col, i) => {
@@ -556,7 +526,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // To Row
       doc.rect(startX, currY, metricColW, cellH).stroke();
       doc.font("Helvetica-Bold").fontSize(7.5).text("To", startX + pad, currY + 3);
       tlCols.forEach((col, i) => {
@@ -566,7 +535,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // Time Loss Row
       doc.rect(startX, currY, metricColW, cellH).stroke();
       doc.font("Helvetica-Bold").fontSize(7.5).text("Time Loss (Mins)", startX + pad, currY + 3);
       tlCols.forEach((col, i) => {
@@ -576,14 +544,10 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // Details of OT Line
       doc.font("Helvetica-Bold").fontSize(7.5).text("Details of OT :", startX, currY + 3);
       doc.font("Helvetica").text(r.timeLossDetailsOt || tlParsed.detailsOfOt || "-", startX + 65, currY + 3);
       currY += 13;
 
-      // ----------------------------------------------------
-      // 7. WORK ATTENDED BY TABLE
-      // ----------------------------------------------------
       doc.font("Helvetica-Bold").fontSize(8).text("Work attended by :", startX, currY);
       currY += 10;
 
@@ -601,7 +565,6 @@ const generateBreakdownPdfReport = async (req, res) => {
         { title: "TIME", width: 80, align: "center" }
       ];
 
-      // Work Header
       let curWX = startX;
       wCols.forEach((c) => {
         doc.rect(curWX, currY, c.width, cellH).fillAndStroke("#f3f4f6", "black");
@@ -610,7 +573,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // Work Rows
       workersParsed.slice(0, 3).forEach((w) => {
         curWX = startX;
         const vals = [w.empNo || "-", w.employeeName || "-", w.from || "-", w.to || "-", w.time || "-"];
@@ -624,9 +586,6 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += 4;
 
-      // ----------------------------------------------------
-      // 8. SPARES CONSUMED TABLE
-      // ----------------------------------------------------
       doc.font("Helvetica-Bold").fontSize(8).text("Spares Consumed :", startX, currY);
       currY += 10;
 
@@ -643,7 +602,6 @@ const generateBreakdownPdfReport = async (req, res) => {
         { title: "QUANTITY", width: 90, align: "center" }
       ];
 
-      // Spares Header
       let curSX = startX;
       sCols.forEach((c) => {
         doc.rect(curSX, currY, c.width, cellH).fillAndStroke("#f3f4f6", "black");
@@ -652,7 +610,6 @@ const generateBreakdownPdfReport = async (req, res) => {
       });
       currY += cellH;
 
-      // Spares Rows
       sparesParsed.slice(0, 3).forEach((s, sIdx) => {
         curSX = startX;
         const vals = [String(s.slNo || sIdx + 1), s.itemCode || "-", s.description || "-", String(s.quantity || "-")];
@@ -666,9 +623,6 @@ const generateBreakdownPdfReport = async (req, res) => {
 
       currY += 4;
 
-      // ----------------------------------------------------
-      // 9. LEGEND FOR ABBREVIATIONS & FOOTER
-      // ----------------------------------------------------
       const legH = 46;
       doc.lineWidth(0.8).rect(startX, currY, pageWidth, legH).stroke();
       doc.font("Helvetica-Bold").fontSize(7).text("LEGEND FOR ABBREVIATIONS :", startX + 6, currY + 4);
@@ -684,7 +638,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       doc.text("AT  - ACTUAL TIME (WORKED)", startX + 350, currY + 16);
       doc.text("TT  - TOTAL DOWN TIME", startX + 350, currY + 26);
 
-      // Render dynamic QF Value in PDF Footer
+      // Render the dynamically resolved effective QF value in the PDF footer
       doc.font("Helvetica").fontSize(6.5).fillColor("#4b5563").text(effectiveQf, startX, currY + legH + 4);
     });
 

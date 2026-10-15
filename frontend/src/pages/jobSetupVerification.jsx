@@ -42,7 +42,7 @@ const emptySignatures = { inspector: "", shiftIncharge: "", hofInspection: "", h
 const createEmptyInspectionRow = (slNo = 1) => ({
   slNo, controlName: "", specification: "", image: "",
   LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
-  status: "OK", remarks: "", isExisting: false,
+  status: "", remarks: "", isExisting: false,
 });
 
 const Toast = ({ message, type, onClose }) => {
@@ -342,7 +342,7 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
             specification: spec.specification || "",
             image: spec.image || "",
             LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
-            status: "OK",
+            status: "",
             remarks: "",
             isExisting: true,
           }))
@@ -422,7 +422,7 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           RH2: "",
           LH3: "",
           RH3: "",
-          status: "OK",
+          status: "",
           remarks: "",
         }))
       );
@@ -1331,12 +1331,11 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                         {/* OK / NOT OK Status */}
                         <td className="border border-gray-800 p-1">
                           <select
-                            className={`w-full text-center font-bold text-xs p-1 rounded outline-none ${
-                              r.status === "OK" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                            }`}
-                            value={r.status || "OK"}
+                            className="w-full text-center font-bold text-xs p-1 rounded outline-none bg-white text-gray-800 border border-gray-300"
+                            value={r.status || ""}
                             onChange={(e) => updateRow(idx, "status", e.target.value)}
                           >
+                            <option value="">--</option>
                             <option value="OK">OK</option>
                             <option value="NOT OK">NOT OK</option>
                           </select>
@@ -1385,7 +1384,8 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
         {/* SECTION 5: NOTES SECTION */}
         <div className="border border-gray-800 p-3 bg-gray-50 text-[11px] space-y-1 rounded">
           <span className="font-bold text-gray-900 block">Note:</span>
-          <p>1. For setting trial prefer rejected components should be marked with pink paint identification. If pink colour component is not available, put red paint mark on the line part with proper higher authority approval so as to use it. The same should be verified and disposed.</p>
+1.           <p>For setting trial prefer rejected components should be marked with pink paint identification. If pink colour component is not available, put red paint mark on the line part with proper higher authority approval so as to use it. The same should be verified and disposed.
+</p>
           <p>2. To identify control specification refer JSV parameter in relevant work instruction (process sheet). Do statistical approval for special characteristics for 3 subgroups.</p>
           <p>3. Keep the set up part with proper traceability, and if found any deviation reactivity is applied.</p>
           <p>4. After Regular holiday product conformance will done by inprocess gauges and final inspection gauges.</p>

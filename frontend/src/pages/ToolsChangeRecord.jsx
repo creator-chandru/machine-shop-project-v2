@@ -46,6 +46,8 @@ const createEmptySection = (
     operatorSymbol: "±",
     toleranceValue: "",
     controlSpec: "",
+    units: "",
+    unitType: "",
     before: "",
     after: "",
   })),
@@ -92,9 +94,15 @@ export default function ToolChangeRecord() {
   // Role extraction
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
-  const currentUserRole = (currentUser?.role || "").toLowerCase();
+  const currentUserRole = String(currentUser?.role || "")
+    .toLowerCase()
+    .replace(/[\s_-]/g, "");
 
-  const isShiftIncharge = currentUserRole === "shiftincharge" || currentUserRole === "supervisor" || currentUserRole === "operator" || currentUserRole === "";
+  const isShiftIncharge =
+    currentUserRole === "shiftincharge" ||
+    currentUserRole === "supervisor" ||
+    currentUserRole === "operator" ||
+    currentUserRole === "";
   const isQC = currentUserRole === "qc" || currentUserRole === "qualitycontroller";
 
   const [headerInfo, setHeaderInfo] = useState({
@@ -136,7 +144,15 @@ export default function ToolChangeRecord() {
   const loadRecordData = (record) => {
     if (!record) return;
     setRecordId(record._id || record.id || null);
-    setIsSavedRecord(true);
+
+    // Pending records remain editable by the shift incharge. Lock only after QC approval.
+    const hasQcApproval = (record.sections || []).some((section) => {
+      const signature = typeof section.verifiedByQc === "object"
+        ? section.verifiedByQc?.signature
+        : section.verifiedByQc;
+      return Boolean(signature && signature !== "Pending");
+    });
+    setIsSavedRecord(hasQcApproval);
 
     if (record.header) {
       setHeaderInfo((prev) => ({
@@ -256,6 +272,18 @@ export default function ToolChangeRecord() {
 
         const found = Array.isArray(data) && data.length > 0 ? data[0] : null;
         if (found && found.sections && found.sections.length > 0) {
+          const hasQcApproval = found.sections.some((section) => {
+            const signature = typeof section.verifiedByQc === "object"
+              ? section.verifiedByQc?.signature
+              : section.verifiedByQc;
+            return Boolean(signature && signature !== "Pending");
+          });
+
+          // A supervisor selecting an already-approved machine/date starts a fresh pending submission.
+          if (isShiftIncharge && (found.status === "Completed" || hasQcApproval)) {
+            resetToEmptyForm(lineCode, date, machineNo, shift);
+            return;
+          }
           loadRecordData(found);
           triggerToast("Existing record loaded for this combo.", "success");
         } else {
@@ -449,7 +477,11 @@ export default function ToolChangeRecord() {
       if (field === "date") {
         setHeaderInfo((prev) => ({ ...prev, date: val }));
       }
-      checkExistingRecord(headerInfo.lineCode, targetDate, targetMc, targetShift);
+
+      // Lookup can reload/reset form state, so run it only when the record key changes.
+      if (field === "mcNo" || field === "date" || field === "shift") {
+        checkExistingRecord(headerInfo.lineCode, targetDate, targetMc, targetShift);
+      }
     }
 
     if (field === "date" || field === "shift") {
@@ -547,6 +579,8 @@ export default function ToolChangeRecord() {
             operatorSymbol: "±",
             toleranceValue: "",
             controlSpec: "",
+            units: "",
+            unitType: "",
             before: "",
             after: "",
           },
@@ -568,8 +602,23 @@ export default function ToolChangeRecord() {
 
   // PDF Download / Preview
   const handleDownloadPdf = async () => {
-    if (!isSavedRecord) {
+    if (!recordId && !isSavedRecord) {
       triggerToast("No saved record found for this date. Submit the form first to preview.", "error");
+      return;
+    }
+
+    const selectedMachineNos = [...new Set(
+      sections.map((section) => section.mcNo || section.machineNo).filter(Boolean)
+    )];
+    if (!selectedMachineNos.length) {
+      triggerToast("Please select at least one machine before previewing the PDF.", "error");
+      return;
+    }
+
+    // Open synchronously from the click handler so the browser allows the PDF tab.
+    const previewWindow = window.open("about:blank", "_blank");
+    if (!previewWindow) {
+      triggerToast("Allow pop-ups to preview the PDF.", "error");
       return;
     }
 
@@ -579,30 +628,26 @@ export default function ToolChangeRecord() {
         lineCode: headerInfo.lineCode,
         date: headerInfo.date,
         shopId: String(shopId || 3),
+        machineNos: selectedMachineNos.join(","),
       });
-      if (headerInfo.machineNo) params.append("machineNo", headerInfo.machineNo);
 
       const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/tool-change-record/report?${params.toString()}`,
+        `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record/report?${params.toString()}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(message || "Report request failed");
+      }
 
-      if (!res.ok) throw new Error("Report request failed");
-
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `Tool_Change_Record_${headerInfo.lineCode}_${headerInfo.date}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-
-      triggerToast("PDF generated and downloaded!", "success");
+      const blobUrl = URL.createObjectURL(await res.blob());
+      previewWindow.location.href = blobUrl;
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      triggerToast("PDF preview opened.", "success");
     } catch (err) {
+      previewWindow.close();
       console.error("PDF generation failed:", err);
-      triggerToast("Failed to generate PDF", "error");
+      triggerToast(err.message || "Failed to generate PDF", "error");
     }
   };
 
@@ -905,7 +950,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-traceability-${globalIdx}`}
-                          colSpan={3}
+                          colSpan={5}
                           className="border border-gray-800 p-1.5 text-left font-normal bg-white"
                         >
                           <div className="flex items-center gap-1">
@@ -936,7 +981,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-desc-${globalIdx}`}
-                          colSpan={3}
+                          colSpan={5}
                           className="border border-gray-800 p-1.5 text-left font-normal bg-white"
                         >
                           <div className="flex items-center gap-1">
@@ -967,7 +1012,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-mcop-${globalIdx}`}
-                          colSpan={3}
+                          colSpan={5}
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
@@ -981,7 +1026,7 @@ export default function ToolChangeRecord() {
                                 onChange={(e) =>
                                   handleSectionMetaChange(globalIdx, "mcNo", e.target.value)
                                 }
-                                disabled={!headerInfo.lineCode || isQC || isSavedRecord}
+                                disabled={!headerInfo.lineCode || isQC}
                               >
                                 <option value="">Select M/C</option>
                                 {machineOptions.map((m, index) => (
@@ -1022,7 +1067,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-dateshift-${globalIdx}`}
-                          colSpan={3}
+                          colSpan={5}
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
@@ -1067,7 +1112,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-fromto-${globalIdx}`}
-                          colSpan={3}
+                          colSpan={5}
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
@@ -1110,6 +1155,12 @@ export default function ToolChangeRecord() {
                         <React.Fragment key={`subcols-${globalIdx}`}>
                           <th className="border border-gray-800 p-1.5 w-[14%]">
                             CONTROL SPEC
+                          </th>
+                          <th className="border border-gray-800 p-1.5 w-[9%]">
+                            UNITS
+                          </th>
+                          <th className="border border-gray-800 p-1.5 w-[12%]">
+                            UNIT TYPE
                           </th>
                           <th className="border border-gray-800 p-1.5 w-[5.5%]">
                             BEFORE
@@ -1181,6 +1232,29 @@ export default function ToolChangeRecord() {
                                   />
                                 </div>
                               </td>
+                              <td className="border border-gray-800 p-0.5">
+                                <select
+                                  disabled={isQC || isSavedRecord}
+                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
+                                  value={rowData.units || ""}
+                                  onChange={(e) => handleCellChange(globalIdx, rIdx, "units", e.target.value)}
+                                >
+                                  <option value="">Select</option>
+                                  <option value="mm">mm</option>
+                                  <option value="cm">cm</option>
+                                  <option value="radians">radians</option>
+                                </select>
+                              </td>
+                              <td className="border border-gray-800 p-0">
+                                <input
+                                  type="text"
+                                  disabled={isQC || isSavedRecord}
+                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
+                                  placeholder="Unit type"
+                                  value={rowData.unitType ?? ""}
+                                  onChange={(e) => handleCellChange(globalIdx, rIdx, "unitType", e.target.value)}
+                                />
+                              </td>
                               <td className="border border-gray-800 p-0">
                                 <input
                                   type="text"
@@ -1198,6 +1272,7 @@ export default function ToolChangeRecord() {
                                   }
                                 />
                               </td>
+
                               <td className="border border-gray-800 p-0">
                                 <input
                                   type="text"
@@ -1229,7 +1304,7 @@ export default function ToolChangeRecord() {
                             TOOL CHANGED BY
                           </td>
                           <td
-                            colSpan={2}
+                            colSpan={4}
                             className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
                           >
                             {sec.toolChangedBy?.signature ? (
@@ -1275,7 +1350,7 @@ export default function ToolChangeRecord() {
                               VERIFIED BY QC
                             </td>
                             <td
-                              colSpan={2}
+                              colSpan={4}
                               className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
                             >
                               {isQcApproved ? (

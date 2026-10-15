@@ -141,41 +141,33 @@ const saveToolChangeRecord = async (req, res) => {
 
         const cleanDate = String(headerDate).split('T')[0];
 
-        // Clear previous draft rows for this lineCode + date if re-submitting
-        await transaction.request()
+        // Replace the same line/date records only for machines included in this submission.
+        const targetMachineNumbers = [...new Set(
+            sections
+                .map((sec) => String(sec.mcNo || sec.machineNo || header?.machineNo || '').trim())
+                .filter(Boolean)
+        )];
+        const machineParams = targetMachineNumbers.map((_, idx) => `@targetMachine${idx}`);
+        const machineFilter = machineParams.length
+            ? `AND machineNo IN (${machineParams.join(', ')})`
+            : 'AND 1 = 0';
+
+        const deleteRequest = transaction.request()
             .input('lineCode', sql.NVarChar(100), lineCode)
             .input('checkDate', sql.NVarChar(50), cleanDate)
-            .input('machineShop', sql.Int, machineShop)
-            .query(`
-                DELETE FROM ToolChangeRecord 
-                WHERE lineCode = @lineCode 
-                  AND (CONVERT(date, checkDate) = CONVERT(date, @checkDate) OR FORMAT(checkDate, 'yyyy-MM-dd') = @checkDate)
-                  AND machineShop = @machineShop 
-                  AND (verifiedByQcSignature IS NULL OR verifiedByQcSignature = '' OR verifiedByQcSignature = 'Pending')
-            `);
+            .input('machineShop', sql.Int, machineShop);
+        targetMachineNumbers.forEach((machineNo, idx) => {
+            deleteRequest.input(`targetMachine${idx}`, sql.NVarChar(100), machineNo);
+        });
+        await deleteRequest.query(`
+            DELETE FROM ToolChangeRecord
+            WHERE lineCode = @lineCode
+              AND (CONVERT(date, checkDate) = CONVERT(date, @checkDate) OR FORMAT(checkDate, 'yyyy-MM-dd') = @checkDate)
+              AND machineShop = @machineShop
+              ${machineFilter}
+        `);
 
-        const verifiedRes = await transaction.request()
-            .input('lineCode', sql.NVarChar(100), lineCode)
-            .input('checkDate', sql.NVarChar(50), cleanDate)
-            .input('machineShop', sql.Int, machineShop)
-            .query(`
-                SELECT DISTINCT
-                    ISNULL(machineNo, '') AS machineNo,
-                    ISNULL(shift, '') AS shift,
-                    ISNULL(toolDescription, '') AS toolDescription
-                FROM ToolChangeRecord
-                WHERE lineCode = @lineCode
-                  AND machineShop = @machineShop
-                  AND CONVERT(date, checkDate) = CONVERT(date, @checkDate)
-                  AND verifiedByQcSignature IS NOT NULL
-                  AND verifiedByQcSignature <> ''
-                  AND verifiedByQcSignature <> 'Pending'
-            `);
-        const verifiedKeys = new Set(
-            verifiedRes.recordset.map((r) => `${r.machineNo}|${r.shift}|${r.toolDescription}`)
-        );
-
-        for (let secIdx = 0; secIdx < sections.length; secIdx++) {
+for (let secIdx = 0; secIdx < sections.length; secIdx++) {
             const sec = sections[secIdx];
 
             const toolDescription = sec.toolDescription || '';
@@ -186,9 +178,6 @@ const saveToolChangeRecord = async (req, res) => {
             const fromTime = sanitizeTime(sec.from || sec.fromTime);
             const toTime = sanitizeTime(sec.to || sec.toTime);
             const assignedQc = sec.assignedQc || '';
-            if (verifiedKeys.has(`${machineNo}|${shift}|${toolDescription}`)) {
-                continue;
-            }
             let partTraceability = sec.partTraceability || '';
             if (!partTraceability.trim()) {
                 partTraceability = await generatePartTraceability(transaction, lineCode, checkDate, shift);
@@ -200,13 +189,16 @@ const saveToolChangeRecord = async (req, res) => {
 
             const rows = sec.rows && Array.isArray(sec.rows) && sec.rows.length > 0
                 ? sec.rows
-                : [{ controlSpec: '', before: '', after: '' }];
+                : [{ controlSpec: '', units: '', unitType: '', before: '', after: '' }];
 
             for (let rIdx = 0; rIdx < rows.length; rIdx++) {
                 const row = rows[rIdx];
                 const controlSpec = row.controlSpec || (row.nominalValue && row.toleranceValue ? `${row.nominalValue} ${row.operatorSymbol || '±'} ${row.toleranceValue}` : row.nominalValue || '');
                 const beforeValue = row.before || row.beforeValue || '';
                 const afterValue = row.after || row.afterValue || '';
+                const units = row.units || '';
+                const unitType = row.unitType || '';
+
 
                 await transaction.request()
                     .input('machineShop', sql.Int, machineShop)
@@ -223,6 +215,8 @@ const saveToolChangeRecord = async (req, res) => {
                     .input('toTime', sql.VarChar(10), toTime)
                     .input('slNo', sql.Int, rIdx + 1)
                     .input('controlSpec', sql.NVarChar(255), controlSpec)
+                    .input('units', sql.NVarChar(20), units)
+                    .input('unitType', sql.NVarChar(100), unitType)
                     .input('beforeValue', sql.NVarChar(255), beforeValue)
                     .input('afterValue', sql.NVarChar(255), afterValue)
                     .input('toolChangedBySignature', sql.NVarChar(100), toolChangedBySignature)
@@ -233,13 +227,13 @@ const saveToolChangeRecord = async (req, res) => {
                         INSERT INTO ToolChangeRecord (
                             machineShop, lineCode, partName, partNo, partTraceability, toolDescription,
                             machineNo, opNo, checkDate, shift, fromTime, toTime,
-                            slNo, controlSpec, beforeValue, afterValue,
+                            slNo, controlSpec, units, unitType, beforeValue, afterValue,
                             toolChangedBySignature, verifiedByQcSignature, assignedQc, status
                         )
                         VALUES (
                             @machineShop, @lineCode, @partName, @partNo, @partTraceability, @toolDescription,
                             @machineNo, @opNo, @checkDate, @shift, @fromTime, @toTime,
-                            @slNo, @controlSpec, @beforeValue, @afterValue,
+                            @slNo, @controlSpec, @units, @unitType, @beforeValue, @afterValue,
                             @toolChangedBySignature, @verifiedByQcSignature, @assignedQc, @status
                         )
                     `);
@@ -279,7 +273,7 @@ const getQcReports = async (req, res) => {
                 lineCode,
                 MAX(partName) AS partName,
                 MAX(partNo) AS partNo,
-                MAX(machineNo) AS machineNo,
+                machineNo,
                 FORMAT(checkDate, 'yyyy-MM-dd') AS reportDate,
                 MAX(assignedQc) AS assignedQc,
                 MAX(toolChangedBySignature) AS toolChangedBySignature,
@@ -289,7 +283,7 @@ const getQcReports = async (req, res) => {
             WHERE (verifiedByQcSignature IS NULL OR verifiedByQcSignature = '' OR verifiedByQcSignature = 'Pending')
               AND LOWER(LTRIM(RTRIM(assignedQc))) = LOWER(@qcName)
               ${shopFilter}
-            GROUP BY machineShop, lineCode, checkDate
+            GROUP BY machineShop, lineCode, checkDate, machineNo
             ORDER BY checkDate DESC, MIN(id) DESC
         `);
         return res.status(200).json(result.recordset);
@@ -304,10 +298,10 @@ const getQcReports = async (req, res) => {
 // ============================================================
 const signQcApproval = async (req, res) => {
     try {
-        const { lineCode, date, signature, qcUsername } = req.body;
+        const { lineCode, date, machineNo, signature, qcUsername } = req.body;
 
-        if (!lineCode || !date || !qcUsername) {
-            return res.status(400).json({ message: 'Missing lineCode, date or qcUsername' });
+        if (!lineCode || !date || !machineNo || !qcUsername) {
+            return res.status(400).json({ message: 'Missing lineCode, date, machineNo or qcUsername' });
         }
 
         const signVal = signature || qcUsername;
@@ -319,6 +313,7 @@ const signQcApproval = async (req, res) => {
 
         const request = new sql.Request();
         request.input('lineCode', sql.NVarChar(100), lineCode);
+        request.input('machineNo', sql.NVarChar(100), machineNo);
         request.input('checkDate', sql.NVarChar(50), cleanDate);
         request.input('signature', sql.NVarChar(100), signVal);
         request.input('qcName', sql.NVarChar(100), String(qcUsername).trim());
@@ -327,6 +322,7 @@ const signQcApproval = async (req, res) => {
             UPDATE ToolChangeRecord 
             SET verifiedByQcSignature = @signature, status = 'Completed', updatedAt = GETDATE()
             WHERE lineCode = @lineCode 
+              AND machineNo = @machineNo
               AND CONVERT(date, checkDate) = CONVERT(date, @checkDate)
               AND (verifiedByQcSignature IS NULL OR verifiedByQcSignature = '' OR verifiedByQcSignature = 'Pending')
               AND LOWER(LTRIM(RTRIM(assignedQc))) = LOWER(@qcName)
@@ -381,6 +377,8 @@ const getToolChangeRecords = async (req, res) => {
                 CONVERT(VARCHAR(5), toTime, 108) AS toTime,
                 slNo,
                 controlSpec,
+                units,
+                unitType,
                 beforeValue,
                 afterValue,
                 toolChangedBySignature,
@@ -414,10 +412,6 @@ const getToolChangeRecords = async (req, res) => {
             }
             request.input('checkDate', sql.NVarChar(50), cleanDate);
             query += ` AND (CONVERT(date, checkDate) = CONVERT(date, @checkDate) OR FORMAT(checkDate, 'yyyy-MM-dd') = @checkDate)`;
-        }
-        if (machineNo) {
-            request.input('machineNo', sql.NVarChar(100), machineNo);
-            query += ` AND machineNo = @machineNo`;
         }
         if (shift) {
             request.input('shift', sql.NVarChar(20), shift);
@@ -457,6 +451,8 @@ const getToolChangeRecords = async (req, res) => {
             current.rows.push({
                 ...parseControlSpec(r.controlSpec),
                 controlSpec: r.controlSpec || '',
+                units: r.units || '',
+                unitType: r.unitType || '',
                 before: r.beforeValue || '',
                 after: r.afterValue || ''
             });
@@ -486,188 +482,216 @@ const getToolChangeRecords = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET: PDF Generator Endpoint (Untouched)
+// 7. GET: PDF Generator Endpoint
 // ============================================================
 const generateReport = async (req, res) => {
     try {
-        const { lineCode, date, machineNo, shopId } = req.query;
+        const { lineCode, date, shopId } = req.query;
+        const machineNos = String(req.query.machineNos || req.query.machineNo || '')
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
 
         if (!lineCode || !date) {
-            return res.status(400).send("lineCode and date are required.");
+            return res.status(400).send('lineCode and date are required.');
         }
 
         let cleanDate = String(date).split('T')[0];
         if (cleanDate.includes('/')) {
-            const p = cleanDate.split('/');
-            cleanDate = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+            const parts = cleanDate.split('/');
+            cleanDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
         }
 
         const request = new sql.Request();
         request.input('lineCode', sql.NVarChar(100), lineCode);
         request.input('checkDate', sql.NVarChar(50), cleanDate);
+        const machineParams = machineNos.map((machineNo, index) => {
+            const paramName = `reportMachine${index}`;
+            request.input(paramName, sql.NVarChar(100), machineNo);
+            return `@${paramName}`;
+        });
 
         let query = `
             SELECT
                 id, machineShop, lineCode, partName, partNo, partTraceability, toolDescription,
-                machineNo, opNo,
-                FORMAT(checkDate, 'yyyy-MM-dd') AS checkDate,
-                shift,
-                CONVERT(VARCHAR(5), fromTime, 108) AS fromTime,
+                machineNo, opNo, FORMAT(checkDate, 'yyyy-MM-dd') AS checkDate,
+                shift, CONVERT(VARCHAR(5), fromTime, 108) AS fromTime,
                 CONVERT(VARCHAR(5), toTime, 108) AS toTime,
-                slNo, controlSpec, beforeValue, afterValue,
+                slNo, controlSpec, units, unitType, beforeValue, afterValue,
                 toolChangedBySignature, verifiedByQcSignature, assignedQc
             FROM ToolChangeRecord
             WHERE lineCode = @lineCode
               AND CONVERT(date, checkDate) = CONVERT(date, @checkDate)
-        `;
 
-        if (machineNo) {
-            request.input('machineNo', sql.NVarChar(100), machineNo);
-            query += ` AND machineNo = @machineNo`;
+        `;
+        if (machineParams.length) {
+            query += ` AND machineNo IN (${machineParams.join(', ')})`;
         }
         if (shopId && !isNaN(parseInt(shopId, 10))) {
             request.input('machineShop', sql.Int, parseInt(shopId, 10));
-            query += ` AND machineShop = @machineShop`;
+            query += ' AND machineShop = @machineShop';
         }
-
-        query += ` ORDER BY id ASC`;
+        query += ' ORDER BY id ASC';
 
         const result = await request.query(query);
         const records = result.recordset;
-
         if (records.length === 0) {
-            return res.status(404).send("No records found for the selected parameters.");
+            return res.status(404).send('No records found for the selected line, date and machine(s).');
+        }
+
+        // Each group corresponds to one frontend machine column; slNo restarts at 1 per column.
+        const sections = [];
+        let current = null;
+        for (const row of records) {
+            if (!current || Number(row.slNo) === 1) {
+                current = {
+                    partTraceability: row.partTraceability || '',
+                    toolDescription: row.toolDescription || '',
+                    machineNo: row.machineNo || '',
+                    opNo: row.opNo || '',
+                    date: row.checkDate || cleanDate,
+                    shift: row.shift || 'I',
+                    from: row.fromTime || '',
+                    to: row.toTime || '',
+                    assignedQc: row.assignedQc || '',
+                    toolChangedBy: row.toolChangedBySignature || '',
+                    rows: [],
+                };
+                sections.push(current);
+            }
+            current.rows.push({
+                controlSpec: row.controlSpec || '',
+                units: row.units || '',
+                unitType: row.unitType || '',
+                before: row.beforeValue || '',
+                after: row.afterValue || '',
+                verifiedByQc: row.verifiedByQcSignature || '',
+            });
         }
 
         const first = records[0];
-        const [yy, mm, dd] = String(first.checkDate).split('-');
-        const displayDate = `${dd}/${mm}/${yy}`;
-
-        const doc = new PDFDocument({ margin: 25, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", "inline; filename=Tool_Change_Record.pdf");
+        const doc = new PDFDocument({ margin: 22, size: 'A4', layout: 'landscape', bufferPages: true });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline; filename=Tool_Change_Record.pdf');
         doc.pipe(res);
 
-        const startX = 25;
-        const headerY = 25;
-        const totalWidth = doc.page.width - 50;
-        const pageBottom = doc.page.height - 25;
+        const left = 22;
+        const tableWidth = doc.page.width - 44;
+        const pageBottom = doc.page.height - 22;
+        const cellPad = 4;
+        let y = 22;
 
-        // ---------- Header ----------
-        doc.lineWidth(1).strokeColor('black');
-        doc.rect(startX, headerY, 100, 35).stroke();
-        
-        const logoPath = path.join(__dirname, 'logo.jpg');
-        if (fs.existsSync(logoPath)) {
-            doc.image(logoPath, startX + 10, headerY + 5, { width: 80, height: 25 });
-        } else {
-            doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI\nAUTO", startX, headerY + 8, { width: 100, align: "center" });
-        }
-
-        doc.rect(startX + 100, headerY, totalWidth - 250, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(13).text("TOOL CHANGE RECORD", startX + 100, headerY + 12, { width: totalWidth - 250, align: "center" });
-
-        doc.rect(startX + totalWidth - 150, headerY, 150, 35).stroke();
-        doc.font("Helvetica-Bold").fontSize(9).text(lineCode, startX + totalWidth - 150, headerY + 6, { width: 150, align: "center" });
-        doc.font("Helvetica").fontSize(8).text(`DATE: ${displayDate}`, startX + totalWidth - 150, headerY + 20, { width: 150, align: "center" });
-
-        // ---------- Table ----------
-        const headers = ["Line Code", "Part Name", "Traceability", "Tool Description", "M/C No", "Shift", "Time", "Control Spec", "Before", "After"];
-        const fractions = [0.07, 0.11, 0.10, 0.15, 0.07, 0.04, 0.09, 0.13, 0.12, 0.12];
-        const colWidths = fractions.map((f) => f * totalWidth);
-        const pad = 4;
-        const fontSize = 7;
-
-        const drawRow = (cells, y, isHeader) => {
-            doc.font(isHeader ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize);
-
-            let rowH = 0;
-            cells.forEach((c, i) => {
-                const h = doc.heightOfString(String(c), { width: colWidths[i] - pad * 2 });
-                if (h > rowH) rowH = h;
+        const drawCells = (values, ratios, top, options = {}) => {
+            const fontSize = options.fontSize || 8;
+            const widths = ratios.map((ratio) => ratio * tableWidth);
+            let rowHeight = options.minHeight || 20;
+            values.forEach((value, index) => {
+                const bold = options.bold || (options.boldFirst && index === 0);
+                doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize);
+                const textHeight = doc.heightOfString(String(value ?? '-'), {
+                    width: Math.max(1, widths[index] - cellPad * 2),
+                    align: options.align || (index === 0 && options.labelLeft ? 'left' : 'center'),
+                });
+                rowHeight = Math.max(rowHeight, textHeight + cellPad * 2);
             });
-            rowH += pad * 2;
-
-            if (!isHeader && y + rowH > pageBottom) {
+            if (top + rowHeight > pageBottom) {
                 doc.addPage();
-                y = 25;
-                y = drawRow(headers, y, true);
-                doc.font("Helvetica").fontSize(fontSize);
+                top = 22;
             }
 
-            let x = startX;
-            cells.forEach((c, i) => {
-                if (isHeader) {
-                    doc.rect(x, y, colWidths[i], rowH).fillAndStroke('#f0f0f0', 'black');
-                } else {
-                    doc.rect(x, y, colWidths[i], rowH).stroke();
-                }
-                doc.fillColor('black').font(isHeader ? "Helvetica-Bold" : "Helvetica").fontSize(fontSize)
-                    .text(String(c), x + pad, y + pad, { width: colWidths[i] - pad * 2, align: "center" });
-                x += colWidths[i];
+            let x = left;
+            values.forEach((value, index) => {
+                const bold = options.bold || (options.boldFirst && index === 0);
+                doc.rect(x, top, widths[index], rowHeight)
+                    .fillAndStroke(options.fill || '#ffffff', '#222222');
+                doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize).fillColor('#111111');
+                doc.text(String(value ?? '-'), x + cellPad, top + cellPad, {
+                    width: Math.max(1, widths[index] - cellPad * 2),
+                    height: rowHeight - cellPad * 2,
+                    align: options.align || (index === 0 && options.labelLeft ? 'left' : 'center'),
+                    valign: 'center',
+                });
+                x += widths[index];
             });
-
-            return y + rowH;
+            return top + rowHeight;
         };
 
-        doc.lineWidth(0.5).strokeColor('black');
-        let y = drawRow(headers, headerY + 35 + 10, true);
+        const drawPageHeading = () => {
+            y = drawCells(
+                ['SAKTHI AUTO', 'TOOL CHANGE RECORD', 'FORM: QF/07/MPD-32  |  REV: 02  |  10.01.2023'],
+                [0.20, 0.52, 0.28], y,
+                { bold: true, fontSize: 10, minHeight: 34, fill: '#f0f0f0' }
+            );
+            y = drawCells(
+                [`LINE CODE: ${lineCode}`, `PART NO: ${first.partNo || '-'}`, `PART NAME: ${first.partName || '-'}`],
+                [0.24, 0.26, 0.50], y,
+                { boldFirst: true, fontSize: 8, minHeight: 22 }
+            );
+            y = drawCells([`DATE: ${cleanDate}`], [1], y, { bold: true, fontSize: 8, minHeight: 20, fill: '#f7f7f7' });
+        };
 
-        records.forEach((r) => {
-            const controlSpec = r.controlSpec || "-";
-            const time = (r.fromTime || r.toTime) ? `${r.fromTime || ""}\n${r.toTime || ""}` : "-";
-            y = drawRow([
-                r.lineCode || "-",
-                r.partName || "-",
-                r.partTraceability || "-",
-                r.toolDescription || "-",
-                r.machineNo || "-",
-                r.shift || "I",
-                time,
-                controlSpec,
-                r.beforeValue || "-",
-                r.afterValue || "-"
-            ], y, false);
+        const labelValue = (label, value) => {
+            y = drawCells([label, value || '-'], [0.22, 0.78], y, {
+                boldFirst: true, labelLeft: true, fontSize: 8, minHeight: 20,
+            });
+        };
+
+        drawPageHeading();
+        const measurementWidths = [0.34, 0.12, 0.18, 0.18, 0.18];
+        sections.forEach((section, sectionIndex) => {
+            if (y + 95 + section.rows.length * 20 > pageBottom) {
+                doc.addPage();
+                y = 22;
+                drawPageHeading();
+            }
+
+            y = drawCells([`MACHINE COLUMN ${sectionIndex + 1}`], [1], y, {
+                bold: true, fontSize: 8, minHeight: 21, fill: '#e8e8e8',
+            });
+            labelValue('PART TRACEABILITY:', section.partTraceability);
+            labelValue('TOOL DESCRIPTION:', section.toolDescription);
+            y = drawCells([`M/C NO: ${section.machineNo || '-'}`, `OP NO: ${section.opNo || '-'}`], [0.5, 0.5], y, { boldFirst: true, fontSize: 8 });
+            y = drawCells([`DATE: ${section.date || cleanDate}`, `SHIFT: ${section.shift || 'I'}`], [0.5, 0.5], y, { boldFirst: true, fontSize: 8 });
+            y = drawCells([`FROM: ${section.from || '-'}`, `TO: ${section.to || '-'}`], [0.5, 0.5], y, { boldFirst: true, fontSize: 8 });
+            y = drawCells(['CONTROL SPEC', 'UNITS', 'UNIT TYPE', 'BEFORE', 'AFTER'], measurementWidths, y, {
+                bold: true, fontSize: 7, minHeight: 22, fill: '#eeeeee',
+            });
+            section.rows.forEach((row) => {
+                y = drawCells([
+                    row.controlSpec || '-',
+                    row.units || '-',
+                    row.unitType || '-',
+                    row.before || '-',
+                    row.after || '-',
+                ], measurementWidths, y, { fontSize: 7, minHeight: 20 });
+            });
+
+            y = drawCells(['TOOL CHANGED BY:', section.toolChangedBy || 'Pending'], [0.22, 0.78], y, {
+                boldFirst: true, labelLeft: true, fontSize: 8,
+            });
+            const allRowsQcApproved = section.rows.length > 0 && section.rows.every((row) => {
+                const signature = String(row.verifiedByQc || '').trim();
+                return signature !== '' && signature.toLowerCase() !== 'pending';
+            });
+            const qcSignature = allRowsQcApproved ? section.rows[0].verifiedByQc : '';
+            y = drawCells(
+                ['VERIFIED BY QC:', qcSignature || `Pending${section.assignedQc ? ` (${section.assignedQc})` : ''}`],
+                [0.22, 0.78], y,
+                { boldFirst: true, labelLeft: true, fontSize: 8 }
+            );
         });
 
-        // ---------- Signatures ----------
-        let sigY = y + 18;
-        if (sigY + 50 > pageBottom) {
-            doc.addPage();
-            sigY = 30;
-        }
-
-        doc.lineWidth(0.5).strokeColor('black');
-        doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Tool Changed By (Shift Incharge)", startX + 20, sigY, { lineBreak: false });
-        doc.rect(startX + 20, sigY + 12, 180, 30).stroke();
-
-        const opSig = first.toolChangedBySignature;
-        if (opSig && !String(opSig).includes('Pending')) {
-            doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(startX + 40, sigY + 28).lineTo(startX + 44, sigY + 33).lineTo(startX + 52, sigY + 21).stroke();
-            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(9).text(`APPROVED (${opSig})`, startX + 58, sigY + 23, { lineBreak: false });
-        } else {
-            doc.fillColor('red').font('Helvetica').fontSize(9).text("Pending", startX + 60, sigY + 23, { lineBreak: false });
-        }
-
-        const qcX = startX + totalWidth - 220;
-        doc.strokeColor('black').lineWidth(0.5);
-        doc.fillColor('black').font("Helvetica-Bold").fontSize(9).text("Verified By QC", qcX, sigY, { lineBreak: false });
-        doc.rect(qcX, sigY + 12, 180, 30).stroke();
-
-        const qcSig = first.verifiedByQcSignature;
-        const assignedQc = first.assignedQc || 'QC';
-        if (qcSig && !String(qcSig).includes('Pending')) {
-            doc.lineWidth(1.5).strokeColor('#16a34a').moveTo(qcX + 20, sigY + 28).lineTo(qcX + 24, sigY + 33).lineTo(qcX + 32, sigY + 21).stroke();
-            doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(9).text(`APPROVED BY ${String(qcSig).toUpperCase()}`, qcX + 38, sigY + 23, { lineBreak: false });
-        } else {
-            doc.fillColor('red').font('Helvetica-Bold').fontSize(9).text(`Pending [${String(assignedQc).toUpperCase()}]`, qcX + 40, sigY + 23, { lineBreak: false });
-        }
+        y = drawCells(
+            ['APPLICABLE EVENTS:', 'New cutting tool (Tool holder, Drill, Reamer, Tap, Milling cutters, Milling inserts, Spot facing cutter etc.), Tool change after tool regrinding / tool repair.'],
+            [0.22, 0.78], y,
+            { boldFirst: true, labelLeft: true, fontSize: 7, minHeight: 28 }
+        );
 
         doc.end();
     } catch (err) {
-        console.error("PDF generation error:", err);
+        console.error('PDF generation error:', err);
         if (!res.headersSent) {
-            res.status(500).json({ message: "PDF generation failed" });
+            res.status(500).json({ message: 'PDF generation failed' });
         } else {
             res.end();
         }

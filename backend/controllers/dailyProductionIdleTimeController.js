@@ -804,7 +804,7 @@ const generateIdleTimeReport = async (req, res) => {
         LOSS_IDS.reduce((sum, i) => sum + (r[`Loss${i}_Shift${shift}`] || 0), 0);
 
       drawShiftDataRow(
-        'TOTAL LOSS (MINS)',
+        'TOTAL LOSS',
         (r) => [calcTotalLossRec(r, 1), calcTotalLossRec(r, 2), calcTotalLossRec(r, 3)],
         true,
         '#e5e7eb'

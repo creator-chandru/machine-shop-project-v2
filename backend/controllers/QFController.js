@@ -1,6 +1,6 @@
 const sql = require("../db");
 
-// Configuration: Map each form name to its dedicated SQL table
+// Configuration: Map each form name to its dedicated SQL table[cite: 1]
 const FORM_QF_TABLES = {
   "pre-operation-checklist": "PreOperationQFvalues",
   "error-proofing-checksheet": "ErrorProofingQFvalues",
@@ -11,25 +11,38 @@ const FORM_QF_TABLES = {
   "daily-production-report": "DailyProductionReportQFvalues",
   "daily-production-idle-time": "DailyProductionIdleTimeQFvalues",
   "breakdown-intimation-report": "BreakdownIntimationQFvalues",
-  "operator-observation-sheet": "OperatorObservationQFvalues" // <-- ADDED
+  "operator-observation-sheet": "OperatorObservationQFvalues",
+  "competency-evaluation-form": "CompetencyEvaluationQFvalues",
+  "corrective-action-register": "CorrectiveActionQFvalues",
+  "eight-d-report": "EightDReportQFvalues",
+  "job-setup-verification": "JobSetupVerificationQFvalues" // <-- Added
 };
 
-// GET /api/qf-values: Returns the latest QF setting for each configured form
-exports.getFormSettings = async (req, res) => {
+// GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]
+const getFormSettings = async (req, res) => {
   try {
     const results = [];
 
     for (const [formName, tableName] of Object.entries(FORM_QF_TABLES)) {
-      const query = `
-        SELECT TOP 1 id, '${formName}' as formName, qfValue, date 
-        FROM ${tableName} 
-        ORDER BY date DESC, id DESC
-      `;
-      const result = await sql.query(query);
+      try {
+        const query = `
+          SELECT TOP 1 id, '${formName}' as formName, qfValue, date 
+          FROM ${tableName} 
+          ORDER BY date DESC, id DESC
+        `;
+        const result = await sql.query(query);
 
-      if (result.recordset.length > 0) {
-        results.push(result.recordset[0]);
-      } else {
+        if (result.recordset.length > 0) {
+          results.push(result.recordset[0]);
+        } else {
+          results.push({
+            id: null,
+            formName,
+            qfValue: "Not Set",
+            date: null
+          });
+        }
+      } catch (tableErr) {
         results.push({
           id: null,
           formName,
@@ -46,8 +59,8 @@ exports.getFormSettings = async (req, res) => {
   }
 };
 
-// PUT /api/qf-values: Inserts new QF version record into the respective table
-exports.updateFormSettings = async (req, res) => {
+// PUT /api/qf-values: Inserts new QF version record into the respective table[cite: 1]
+const updateFormSettings = async (req, res) => {
   const { setting } = req.body;
 
   if (!setting || !setting.formName) {
@@ -79,8 +92,8 @@ exports.updateFormSettings = async (req, res) => {
   }
 };
 
-// GET /api/qf-values/history/:formName: Returns history for the form to calculate QF by effective date
-exports.getFormQfHistory = async (req, res) => {
+// GET /api/qf-values/history/:formName: Returns history for the form to calculate QF by effective date[cite: 1]
+const getFormQfHistory = async (req, res) => {
   const { formName } = req.params;
   const tableName = FORM_QF_TABLES[formName];
 
@@ -100,4 +113,10 @@ exports.getFormQfHistory = async (req, res) => {
     console.error("getFormQfHistory error:", err);
     res.status(500).json({ error: "Failed to fetch QF history", details: err.message });
   }
+};
+
+module.exports = {
+  getFormSettings,
+  updateFormSettings,
+  getFormQfHistory
 };

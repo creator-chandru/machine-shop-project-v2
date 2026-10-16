@@ -71,9 +71,8 @@ export default function CompetencyEvaluationForm() {
   const { shopId } = useParams();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState("front"); // 'front' | 'back'
+  const [activeTab, setActiveTab] = useState("front");
 
-  // User & Role extraction
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
   const currentUserRole = (currentUser?.role || "").toLowerCase();
@@ -89,7 +88,6 @@ export default function CompetencyEvaluationForm() {
     currentUserRole === "headofproduction" ||
     currentUserRole === "hof";
 
-  // Header State (manual entries)
   const [headerInfo, setHeaderInfo] = useState({
     name: "",
     employeeNo: "",
@@ -101,15 +99,11 @@ export default function CompetencyEvaluationForm() {
     assignedHod: ""
   });
 
-  // Questions State
   const [questions, setQuestions] = useState(INITIAL_QUESTIONS);
-
-  // Manual Marks & Pass/Fail Status (Back Page)
   const [writtenExamMark, setWrittenExamMark] = useState("");
   const [practicalExamMark, setPracticalExamMark] = useState("");
-  const [status, setStatus] = useState(""); // "" | "PASS" | "FAIL"
+  const [status, setStatus] = useState("");
 
-  // Signatures State
   const [signatures, setSignatures] = useState({
     inchargeSign: "",
     hodSign: ""
@@ -118,7 +112,6 @@ export default function CompetencyEvaluationForm() {
   const [hodUsers, setHodUsers] = useState([]);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
 
-  // PDF Date Range Modal States
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfFromDate, setPdfFromDate] = useState("");
   const [pdfToDate, setPdfToDate] = useState("");
@@ -128,6 +121,9 @@ export default function CompetencyEvaluationForm() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "" });
 
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/06/ADM - 04, Rev. Date: 01.11.2018");
+
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
     setTimeout(() => {
@@ -135,7 +131,6 @@ export default function CompetencyEvaluationForm() {
     }, 4000);
   };
 
-  // Fetch HOD List for dropdown
   useEffect(() => {
     const fetchHodList = async () => {
       try {
@@ -151,7 +146,6 @@ export default function CompetencyEvaluationForm() {
           const data = await res.json();
           setHodUsers(data.hodList || []);
         } else {
-          // Fallback check against generic HOF/HOD endpoint
           const fallbackRes = await fetch(
             `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/hof-incharges`,
             { headers }
@@ -170,11 +164,54 @@ export default function CompetencyEvaluationForm() {
     fetchHodList();
   }, []);
 
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/competency-evaluation-form`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  useEffect(() => {
+    let currentQf = "QF/06/ADM - 04, Rev. Date: 01.11.2018";
+
+    if (headerInfo.date && qfHistory.length > 0) {
+      const selectedDate = new Date(headerInfo.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [headerInfo.date, qfHistory]);
+
   const handleHeaderChange = (field, val) => {
     setHeaderInfo((prev) => ({ ...prev, [field]: val }));
   };
 
-  // Dropdown Single-Select Handler per Question
   const handleDropdownChange = (qIndex, selectedCol, value) => {
     if (isHOD) return;
 
@@ -196,7 +233,6 @@ export default function CompetencyEvaluationForm() {
     });
   };
 
-  // Marks entry: whole numbers only, never above the maximum (100%)
   const handleMarkChange = (setter, max, label) => (e) => {
     const raw = e.target.value;
     if (raw === "") {
@@ -216,7 +252,6 @@ export default function CompetencyEvaluationForm() {
     if (["e", "E", "+", "-", "."].includes(e.key)) e.preventDefault();
   };
 
-  // Percentages calculated from manually entered marks
   const writtenPercentage =
     writtenExamMark !== "" && !isNaN(writtenExamMark)
       ? `${((parseFloat(writtenExamMark) / 100) * 100).toFixed(0)}%`
@@ -227,7 +262,6 @@ export default function CompetencyEvaluationForm() {
       ? `${((parseFloat(practicalExamMark) / 40) * 100).toFixed(0)}%`
       : "";
 
-  // Shift Incharge Approves "INCHARGE SIGN (EVALUATED BY)"
   const handleApproveIncharge = () => {
     if (!headerInfo.name.trim() || !headerInfo.employeeNo.trim()) {
       triggerToast("Please enter Employee Name and Employee No before approving.", "error");
@@ -241,7 +275,6 @@ export default function CompetencyEvaluationForm() {
     triggerToast("Incharge approved successfully.", "success");
   };
 
-  // HOD Approves "HOD SIGN"
   const handleApproveHod = () => {
     if (!isHOD) {
       triggerToast("Only HOD can approve this evaluation.", "error");
@@ -259,7 +292,6 @@ export default function CompetencyEvaluationForm() {
     triggerToast("HOD Approved successfully!", "success");
   };
 
-  // Download PDF Report by Date Range
   const handleDownloadPdfRange = async () => {
     if (!pdfFromDate || !pdfToDate) {
       triggerToast("Please select both From Date and To Date.", "error");
@@ -310,7 +342,6 @@ export default function CompetencyEvaluationForm() {
     }
   };
 
-  // Save / Submit Competency Evaluation
   const handleSave = async () => {
     if (!headerInfo.name.trim() || !headerInfo.employeeNo.trim()) {
       triggerToast("Please fill Employee Name and Employee No before submitting.", "error");
@@ -345,7 +376,6 @@ export default function CompetencyEvaluationForm() {
     setIsSaving(true);
     setSaveSuccess(false);
 
-    // Map questions with marks
     const processedQuestions = questions.map((q) => {
       let rating = "";
       let mark = null;
@@ -446,7 +476,6 @@ export default function CompetencyEvaluationForm() {
         onClose={() => setToast({ message: "", type: "" })}
       />
 
-      {/* Date Range Modal for PDF Download */}
       {showPdfModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
@@ -514,7 +543,6 @@ export default function CompetencyEvaluationForm() {
         </div>
       )}
 
-      {/* Loading Overlay */}
       {(isSaving || saveSuccess) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
@@ -537,7 +565,6 @@ export default function CompetencyEvaluationForm() {
       )}
 
       <div className="bg-white w-full max-w-[92rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-        {/* Card Header & Download PDF Button */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -556,12 +583,8 @@ export default function CompetencyEvaluationForm() {
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {initialFormData.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {initialFormData.formCode}</span>
-              <span>|</span>
-              <span>Revision Date: {initialFormData.revisionDate}</span>
-              <span>|</span>
-              <span className="font-bold text-orange-600">Shop ID: {shopId || 3}</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
             </div>
           </div>
 
@@ -574,7 +597,6 @@ export default function CompetencyEvaluationForm() {
           </button>
         </div>
 
-        {/* Navigation Tabs between Front Page & Back Page */}
         <div className="flex gap-2 border-b border-gray-300 pb-2">
           <button
             type="button"
@@ -600,10 +622,8 @@ export default function CompetencyEvaluationForm() {
           </button>
         </div>
 
-        {/* FRONT PAGE VIEW */}
         {activeTab === "front" && (
           <div>
-            {/* Front Header */}
             <div className="border-2 border-gray-800 mb-6">
               <div className="grid grid-cols-12 divide-x-2 divide-gray-800 border-b-2 border-gray-800">
                 <div className="col-span-3 p-3 flex items-center justify-center">
@@ -626,7 +646,6 @@ export default function CompetencyEvaluationForm() {
                 </div>
               </div>
 
-              {/* Manual Entry Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800 p-3 text-sm font-semibold">
                 <div className="space-y-2 pr-2">
                   <div className="flex items-center">
@@ -700,7 +719,6 @@ export default function CompetencyEvaluationForm() {
               </div>
             </div>
 
-            {/* Questions Table */}
             <div className="overflow-x-auto">
               <table className="w-full border-collapse border-2 border-gray-800 text-sm">
                 <thead>
@@ -736,7 +754,6 @@ export default function CompetencyEvaluationForm() {
                         {q.questionText}
                       </td>
 
-                      {/* Dropdown for OK (2) */}
                       <td className="border border-gray-800 p-0 text-center">
                         <select
                           value={q.ok}
@@ -750,7 +767,6 @@ export default function CompetencyEvaluationForm() {
                         </select>
                       </td>
 
-                      {/* Dropdown for PARTIAL (1) */}
                       <td className="border border-gray-800 p-0 text-center">
                         <select
                           value={q.partial}
@@ -764,7 +780,6 @@ export default function CompetencyEvaluationForm() {
                         </select>
                       </td>
 
-                      {/* Dropdown for NOT OK (0) */}
                       <td className="border border-gray-800 p-0 text-center">
                         <select
                           value={q.notOk}
@@ -783,7 +798,6 @@ export default function CompetencyEvaluationForm() {
               </table>
             </div>
 
-            {/* Front Page Footer Notes & Single Signature: INCHARGE SIGN (EVALUATED BY) */}
             <div className="mt-6 border-2 border-gray-800 p-4 bg-white text-xs font-bold text-gray-800 space-y-1">
               <div>Note:- 1) NOT OK & PARTIAL SHOULD BE TAKEN TO RETRAINING</div>
               <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2) PRODUCTION TARGET ACHIEVED SHOULD BE 85%</div>
@@ -822,7 +836,6 @@ export default function CompetencyEvaluationForm() {
               </div>
             </div>
 
-            {/* Front Page Bottom Button: GO TO PAGE 2 */}
             <div className="flex justify-end items-center mt-6 pt-4 border-t border-gray-300">
               <button
                 type="button"
@@ -835,10 +848,8 @@ export default function CompetencyEvaluationForm() {
           </div>
         )}
 
-        {/* BACK PAGE VIEW */}
         {activeTab === "back" && (
           <div className="space-y-6">
-            {/* Criteria Header */}
             <div className="border-2 border-gray-800 flex justify-between items-center bg-gray-200 px-4 py-2 font-extrabold text-gray-900">
               <span className="text-base uppercase">EVALUATION CRITERIA</span>
               <span className="text-base uppercase bg-white border border-gray-800 px-3 py-0.5 rounded">
@@ -846,7 +857,6 @@ export default function CompetencyEvaluationForm() {
               </span>
             </div>
 
-            {/* Written Exam Criteria Table */}
             <div className="border-2 border-gray-800">
               <div className="bg-gray-100 font-extrabold text-sm px-4 py-2 border-b-2 border-gray-800">
                 WRITTEN EXAM
@@ -889,7 +899,6 @@ export default function CompetencyEvaluationForm() {
               </table>
             </div>
 
-            {/* Practical Exam Criteria Table */}
             <div className="border-2 border-gray-800">
               <div className="bg-gray-100 font-extrabold text-sm px-4 py-2 border-b-2 border-gray-800">
                 PRACTICAL EXAM
@@ -932,7 +941,6 @@ export default function CompetencyEvaluationForm() {
               </table>
             </div>
 
-            {/* Overall Mark Table: Manual Input of Written & Practical Marks, Pass/Fail */}
             <div className="border-2 border-gray-800">
               <div className="bg-gray-100 font-extrabold text-sm px-4 py-2 border-b-2 border-gray-800 uppercase">
                 OVERALL MARK
@@ -992,7 +1000,6 @@ export default function CompetencyEvaluationForm() {
                     </td>
                   </tr>
 
-                  {/* Status Dropdown Row */}
                   <tr className="bg-gray-100 font-extrabold">
                     <td colSpan={2} className="p-3 text-right uppercase text-sm border-r border-gray-800">
                       STATUS :
@@ -1018,7 +1025,6 @@ export default function CompetencyEvaluationForm() {
               </table>
             </div>
 
-            {/* Back Page Signatures Table */}
             <div className="overflow-x-auto">
               <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center min-w-[600px]">
                 <thead>
@@ -1033,7 +1039,6 @@ export default function CompetencyEvaluationForm() {
                 </thead>
                 <tbody>
                   <tr className="h-16">
-                    {/* 1. Incharge Sign */}
                     <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                       {isInchargeApproved ? (
                         <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
@@ -1059,7 +1064,6 @@ export default function CompetencyEvaluationForm() {
                       )}
                     </td>
 
-                    {/* 2. HOD Sign */}
                     <td className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40">
                       {isHodApproved ? (
                         <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
@@ -1122,10 +1126,9 @@ export default function CompetencyEvaluationForm() {
               </table>
             </div>
 
-            {/* Back Page Bottom Submit Actions */}
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 pt-4 border-t border-gray-300">
               <span className="text-xs text-gray-500 font-semibold">
-                {initialFormData.formCode}, {initialFormData.revisionDate}
+                {qfValue}
               </span>
 
               <div className="flex items-center gap-3">

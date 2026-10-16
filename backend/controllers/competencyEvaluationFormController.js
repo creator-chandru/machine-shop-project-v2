@@ -1,4 +1,4 @@
-const sql = require('../db');
+const sql = require("../db");
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
@@ -46,7 +46,6 @@ const saveCompetencyEvaluationForm = async (req, res) => {
     });
   }
 
-  // Server-side limit check: marks can never exceed 100% (Written: 100, Practical: 40)
   const wMark = overallMark?.writtenExamMark;
   const pMark = overallMark?.practicalExamMark;
   if (wMark !== null && wMark !== undefined && wMark !== '' && (Number(wMark) < 0 || Number(wMark) > 100)) {
@@ -66,7 +65,6 @@ const saveCompetencyEvaluationForm = async (req, res) => {
     const employeeNo = String(header.employeeNo).trim();
     const evalDate = header.date ? String(header.date).split('T')[0] : null;
 
-    // Delete existing pending draft rows for this employee and date to prevent duplicates
     const deleteReq = new sql.Request(transaction);
     deleteReq.input('employeeNo', sql.NVarChar(50), employeeNo);
     deleteReq.input('evalDate', sql.Date, evalDate);
@@ -96,21 +94,15 @@ const saveCompetencyEvaluationForm = async (req, res) => {
         .input('doj', sql.Date, header.doj ? String(header.doj).split('T')[0] : null)
         .input('line', sql.NVarChar(100), header.line || '')
         .input('levelBadge', sql.NVarChar(50), header.levelBadge || 'LEVEL - 3')
-
-        // Question row
         .input('qNo', sql.Int, q.qNo)
         .input('questionText', sql.NVarChar(500), q.questionText)
         .input('rating', sql.NVarChar(20), q.rating || '')
         .input('mark', sql.Int, q.mark !== null && q.mark !== undefined ? q.mark : null)
-
-        // Overall Mark & Result
         .input('writtenExamMark', sql.Int, overallMark?.writtenExamMark !== null && overallMark?.writtenExamMark !== undefined && overallMark?.writtenExamMark !== '' ? parseInt(overallMark.writtenExamMark, 10) : null)
         .input('writtenExamPercentage', sql.NVarChar(20), overallMark?.writtenExamPercentage || '')
         .input('practicalExamMark', sql.Int, overallMark?.practicalExamMark !== null && overallMark?.practicalExamMark !== undefined && overallMark?.practicalExamMark !== '' ? parseInt(overallMark.practicalExamMark, 10) : null)
         .input('practicalExamPercentage', sql.NVarChar(20), overallMark?.practicalExamPercentage || '')
         .input('status', sql.NVarChar(20), overallMark?.status || '')
-
-        // Signatures: inchargeSign stores incharge signature, evaluatedBy stores assigned HOD, hodSign stores HOD signature
         .input('inchargeSign', sql.NVarChar(100), inchargeSignature)
         .input('evaluatedBy', sql.NVarChar(100), assignedHod)
         .input('hodSign', sql.NVarChar(100), hodSignature);
@@ -141,11 +133,7 @@ const saveCompetencyEvaluationForm = async (req, res) => {
   } catch (err) {
     console.error('Error saving Competency Evaluation Form:', err);
     if (transaction) {
-      try {
-        await transaction.rollback();
-      } catch (rollbackErr) {
-        console.error('Rollback error:', rollbackErr);
-      }
+      try { await transaction.rollback(); } catch (rollbackErr) {}
     }
     return res.status(500).json({
       error: 'Failed to save Competency Evaluation Form'
@@ -162,20 +150,11 @@ const getCompetencyEvaluationForms = async (req, res) => {
   try {
     let query = `
       SELECT DISTINCT
-        name,
-        employeeNo,
-        qualification,
+        name, employeeNo, qualification,
         FORMAT(evalDate, 'yyyy-MM-dd') AS evalDate,
         FORMAT(doj, 'yyyy-MM-dd') AS doj,
-        line,
-        levelBadge,
-        writtenExamMark,
-        practicalExamMark,
-        status,
-        inchargeSign,
-        evaluatedBy AS assignedHod,
-        hodSign,
-        createdAt
+        line, levelBadge, writtenExamMark, practicalExamMark,
+        status, inchargeSign, evaluatedBy AS assignedHod, hodSign, createdAt
       FROM CompetencyEvaluationForm
       WHERE 1 = 1
     `;
@@ -203,9 +182,7 @@ const getCompetencyEvaluationForms = async (req, res) => {
     return res.status(200).json(result.recordset);
   } catch (err) {
     console.error('Error fetching Competency Evaluation Forms:', err);
-    return res.status(500).json({
-      error: 'Failed to fetch Competency Evaluation Forms'
-    });
+    return res.status(500).json({ error: 'Failed to fetch Competency Evaluation Forms' });
   }
 };
 
@@ -239,9 +216,7 @@ const getCompetencyEvaluationFormByEmp = async (req, res) => {
     return res.status(200).json(result.recordset);
   } catch (err) {
     console.error('Error fetching evaluation form for employee:', err);
-    return res.status(500).json({
-      error: 'Failed to fetch evaluation form'
-    });
+    return res.status(500).json({ error: 'Failed to fetch evaluation form' });
   }
 };
 
@@ -293,7 +268,18 @@ const getPendingHodReports = async (req, res) => {
       ORDER BY evalDate DESC, MIN(id) DESC
     `);
 
-    return res.status(200).json(result.recordset);
+    const safeRecords = (result.recordset || []).map(r => ({
+      ...r,
+      name: r.name || '',
+      employeeNo: r.employeeNo || '',
+      evalDate: r.evalDate || '',
+      assignedHod: r.assignedHod || '',
+      hodSign: r.hodSign || 'Pending',
+      inchargeSign: r.inchargeSign || 'Pending',
+      status: r.status || '-'
+    }));
+
+    return res.status(200).json(safeRecords);
   } catch (err) {
     console.error('Pending HOD Competency Reports Fetch Error:', err);
     return res.status(500).json({ message: 'DB error fetching pending reports' });
@@ -342,7 +328,7 @@ const signHodApproval = async (req, res) => {
 };
 
 // ============================================================
-// 7. PDF REPORT GENERATOR (DATE RANGE / SINGLE EVALUATION)
+// 7. PDF REPORT GENERATOR WITH DYNAMIC QF HISTORY
 // ============================================================
 const generateReport = async (req, res) => {
   try {
@@ -364,14 +350,11 @@ const generateReport = async (req, res) => {
     `;
 
     if (fromDate && toDate) {
-      const cleanFrom = String(fromDate).split('T')[0];
-      const cleanTo = String(toDate).split('T')[0];
-      request.input('fromDate', sql.Date, cleanFrom);
-      request.input('toDate', sql.Date, cleanTo);
+      request.input('fromDate', sql.Date, String(fromDate).split('T')[0]);
+      request.input('toDate', sql.Date, String(toDate).split('T')[0]);
       query += ` AND CONVERT(date, evalDate) >= CONVERT(date, @fromDate) AND CONVERT(date, evalDate) <= CONVERT(date, @toDate)`;
     } else if (date) {
-      const cleanDate = String(date).split('T')[0];
-      request.input('evalDate', sql.Date, cleanDate);
+      request.input('evalDate', sql.Date, String(date).split('T')[0]);
       query += ` AND CONVERT(date, evalDate) = CONVERT(date, @evalDate)`;
     } else {
       return res.status(400).send('fromDate and toDate (or date) are required.');
@@ -396,13 +379,43 @@ const generateReport = async (req, res) => {
       return res.status(404).send('No records found for the selected parameters.');
     }
 
-    // Group rows by unique evaluation: employeeNo + evalDate
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date 
+        FROM CompetencyEvaluationQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch CompetencyEvaluationQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/06/ADM - 04, Rev.No: 01 dt 01.11.2018";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
+
     const groupedMap = new Map();
     records.forEach((r) => {
       const key = `${r.employeeNo}_${r.evalDate}`;
-      if (!groupedMap.has(key)) {
-        groupedMap.set(key, []);
-      }
+      if (!groupedMap.has(key)) groupedMap.set(key, []);
       groupedMap.get(key).push(r);
     });
 
@@ -417,35 +430,25 @@ const generateReport = async (req, res) => {
     doc.pipe(res);
 
     const startX = 25;
-    const pageWidth = doc.page.width - 50; // ~545pt
+    const pageWidth = doc.page.width - 50;
     const logoPath = path.join(__dirname, 'logo.jpg');
 
-    // ---- Vector mark helpers (Helvetica has no tick / cross glyphs) ----
     const drawCheckMark = (centerX, centerY, size = 10, color = '#16a34a') => {
-      doc.save()
-        .lineWidth(1.5)
-        .strokeColor(color)
+      doc.save().lineWidth(1.5).strokeColor(color)
         .moveTo(centerX - size * 0.45, centerY)
         .lineTo(centerX - size * 0.1, centerY + size * 0.4)
         .lineTo(centerX + size * 0.45, centerY - size * 0.35)
-        .stroke()
-        .restore();
+        .stroke().restore();
     };
 
     const drawCrossMark = (centerX, centerY, size = 9, color = '#dc2626') => {
       const half = size / 2;
-      doc.save()
-        .lineWidth(1.5)
-        .strokeColor(color)
-        .moveTo(centerX - half, centerY - half)
-        .lineTo(centerX + half, centerY + half)
-        .moveTo(centerX + half, centerY - half)
-        .lineTo(centerX - half, centerY + half)
-        .stroke()
-        .restore();
+      doc.save().lineWidth(1.5).strokeColor(color)
+        .moveTo(centerX - half, centerY - half).lineTo(centerX + half, centerY + half)
+        .moveTo(centerX + half, centerY - half).lineTo(centerX - half, centerY + half)
+        .stroke().restore();
     };
 
-    // Green vector tick + "APPROVED BY: NAME", centered in a box
     const drawApprovedText = (x, y, w, name, fontSize) => {
       const label = `APPROVED BY: ${String(name).toUpperCase()}`;
       doc.font('Helvetica-Bold').fontSize(fontSize);
@@ -459,82 +462,61 @@ const generateReport = async (req, res) => {
 
     groups.forEach((groupRecords, gIdx) => {
       const first = groupRecords[0];
+      const effectiveQf = getEffectiveQfValue(first.evalDate);
       const [yy, mm, dd] = String(first.evalDate || '').split('-');
       const displayDate = dd && mm && yy ? `${dd}.${mm}.${yy}` : first.evalDate || '-';
-
       const [dojY, dojM, dojD] = String(first.doj || '').split('-');
       const displayDoj = dojD && dojM && dojY ? `${dojD}.${dojM}.${dojY}` : first.doj || '-';
 
       if (gIdx > 0) doc.addPage();
 
-      // ========================================================
-      // PAGE 1: FRONT PAGE (PRACTICAL QUESTIONS)
-      // ========================================================
       let currY = 25;
-
-      // Header Box
       doc.lineWidth(1).strokeColor('black').rect(startX, currY, pageWidth, 50).stroke();
 
-      // Company Logo Column (width: 140, height: 50)
       const logoBoxWidth = 140;
       if (fs.existsSync(logoPath)) {
-        doc.image(logoPath, startX + 5, currY + 5, {
-          fit: [logoBoxWidth - 10, 40],
-          align: 'center',
-          valign: 'center'
-        });
+        doc.image(logoPath, startX + 5, currY + 5, { fit: [logoBoxWidth - 10, 40], align: 'center', valign: 'center' });
       } else {
         doc.font('Helvetica-Bold').fontSize(8).fillColor('black');
         doc.text('SAKTHI AUTO COMPONENT\nLIMITED', startX + 5, currY + 16, { width: logoBoxWidth - 10, align: 'center' });
       }
       doc.lineCap('butt').moveTo(startX + logoBoxWidth, currY).lineTo(startX + logoBoxWidth, currY + 50).stroke();
 
-      // Title & Subtitle Column (width: 290)
-      doc.font('Helvetica-Bold').fontSize(11).text('COMPETENCY EVALUATION FORM', startX + 140, currY + 12, { width: 290, align: 'center' });
-      doc.font('Helvetica').fontSize(8.5).text('(PRACTICAL) - VTL & HTL', startX + 140, currY + 28, { width: 290, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(10).text('COMPETENCY EVALUATION FORM', startX + 140, currY + 8, { width: 290, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(7.5).text(effectiveQf, startX + 140, currY + 21, { width: 290, align: 'center' });
+      doc.font('Helvetica').fontSize(8.5).text('(PRACTICAL) - VTL & HTL', startX + 140, currY + 33, { width: 290, align: 'center' });
       doc.moveTo(startX + 430, currY).lineTo(startX + 430, currY + 50).stroke();
 
-      // Level Column (width: 115)
       doc.font('Helvetica-Bold').fontSize(11).text(first.levelBadge || 'LEVEL - 3', startX + 430, currY + 19, { width: 115, align: 'center' });
-
       currY += 50;
 
-      // Meta Information Box
       const metaH = 46;
       doc.rect(startX, currY, pageWidth, metaH).stroke();
       doc.moveTo(startX + pageWidth / 2, currY).lineTo(startX + pageWidth / 2, currY + metaH).stroke();
 
       doc.font('Helvetica-Bold').fontSize(7.5);
-      // Left Column
       doc.text('NAME :', startX + 6, currY + 6);
       doc.font('Helvetica').text(first.name || '-', startX + 90, currY + 6);
-
       doc.font('Helvetica-Bold').text('EMPLOYEE NO :', startX + 6, currY + 19);
       doc.font('Helvetica').text(first.employeeNo || '-', startX + 90, currY + 19);
-
       doc.font('Helvetica-Bold').text('QUALIFICATION :', startX + 6, currY + 32);
       doc.font('Helvetica').text(first.qualification || '-', startX + 90, currY + 32);
 
-      // Right Column
       const rightMetaX = startX + pageWidth / 2 + 6;
       doc.font('Helvetica-Bold').text('DATE :', rightMetaX, currY + 6);
       doc.font('Helvetica').text(displayDate, rightMetaX + 60, currY + 6);
-
       doc.font('Helvetica-Bold').text('DOJ :', rightMetaX, currY + 19);
       doc.font('Helvetica').text(displayDoj, rightMetaX + 60, currY + 19);
-
       doc.font('Helvetica-Bold').text('LINE :', rightMetaX, currY + 32);
       doc.font('Helvetica').text(first.line || '-', rightMetaX + 60, currY + 32);
 
       currY += metaH + 4;
 
-      // Table Header
       const colSNo = 30;
       const colMarks = 40;
-      const colQ = pageWidth - colSNo - colMarks * 3; // 545 - 30 - 120 = 395
+      const colQ = pageWidth - colSNo - colMarks * 3;
 
       doc.lineWidth(0.8);
-      // Row 1
       doc.rect(startX, currY, colSNo, 36).fillAndStroke('#f0f0f0', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(7.5).text('S.NO', startX, currY + 14, { width: colSNo, align: 'center' });
 
@@ -544,7 +526,6 @@ const generateReport = async (req, res) => {
       doc.rect(startX + colSNo + colQ, currY, colMarks * 3, 14).fillAndStroke('#f0f0f0', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(7.5).text('MARKS', startX + colSNo + colQ, currY + 3.5, { width: colMarks * 3, align: 'center' });
 
-      // Row 2: Marks points
       const marksX = startX + colSNo + colQ;
       doc.rect(marksX, currY + 14, colMarks, 11).stroke();
       doc.font('Helvetica-Bold').fontSize(7.5).text('2', marksX, currY + 16, { width: colMarks, align: 'center' });
@@ -553,7 +534,6 @@ const generateReport = async (req, res) => {
       doc.rect(marksX + colMarks * 2, currY + 14, colMarks, 11).stroke();
       doc.text('0', marksX + colMarks * 2, currY + 16, { width: colMarks, align: 'center' });
 
-      // Row 3: Status Labels
       doc.rect(marksX, currY + 25, colMarks, 11).stroke();
       doc.font('Helvetica-Bold').fontSize(7).text('OK', marksX, currY + 27, { width: colMarks, align: 'center' });
       doc.rect(marksX + colMarks, currY + 25, colMarks, 11).stroke();
@@ -563,7 +543,6 @@ const generateReport = async (req, res) => {
 
       currY += 36;
 
-      // Table Rows: Questions 1 to 20
       doc.font('Helvetica').fontSize(6.5);
       const rowHeight = 26;
 
@@ -573,35 +552,28 @@ const generateReport = async (req, res) => {
         const isPartial = q.rating === 'PARTIAL' || q.mark === 1;
         const isNotOk = q.rating === 'NOT OK' || (q.mark === 0 && !isFail);
 
-        // Border SNo
         doc.rect(startX, currY, colSNo, rowHeight).stroke();
         doc.font('Helvetica-Bold').fontSize(6.5).text(String(q.qNo), startX, currY + 9, { width: colSNo, align: 'center' });
 
-        // Border Question
         doc.rect(startX + colSNo, currY, colQ, rowHeight).stroke();
         doc.font('Helvetica').fontSize(6.5).text(q.questionText || '', startX + colSNo + 6, currY + 6, { width: colQ - 12 });
 
         const markCenterY = currY + rowHeight / 2;
 
-        // Col OK (2)
         doc.rect(marksX, currY, colMarks, rowHeight).stroke();
         if (isOk) drawCheckMark(marksX + colMarks / 2, markCenterY, 10, '#16a34a');
 
-        // Col PARTIAL (1)
         doc.rect(marksX + colMarks, currY, colMarks, rowHeight).stroke();
         if (isPartial) drawCheckMark(marksX + colMarks * 1.5, markCenterY, 10, '#eab308');
 
-        // Col NOT OK (0)
         doc.rect(marksX + colMarks * 2, currY, colMarks, rowHeight).stroke();
         if (isNotOk) drawCheckMark(marksX + colMarks * 2.5, markCenterY, 10, '#dc2626');
         if (isFail) drawCrossMark(marksX + colMarks * 2.5, markCenterY, 9, '#dc2626');
 
         doc.fillColor('black');
-
         currY += rowHeight;
       });
 
-      // Front Page Notes & Signature Box
       const footerH = 50;
       doc.rect(startX, currY + 4, pageWidth, footerH).stroke();
 
@@ -610,7 +582,6 @@ const generateReport = async (req, res) => {
       doc.text('       2) PRODUCTION TARGET ACHIEVED SHOULD BE 85%', startX + 6, currY + 18);
       doc.text('       3) QUALITY LEVEL 90% ABOVE SHOULD BE PASSED TO LEVEL-3', startX + 6, currY + 28);
 
-      // Single Signature: INCHARGE SIGN (EVALUATED BY)
       const sigBoxW = 160;
       const sigBoxX = startX + pageWidth - sigBoxW - 10;
       doc.rect(sigBoxX, currY + 10, sigBoxW, 36).stroke();
@@ -623,13 +594,10 @@ const generateReport = async (req, res) => {
         doc.fillColor('red').font('Helvetica').fontSize(7.5).text('Pending Shift Incharge', sigBoxX, currY + 28, { width: sigBoxW, align: 'center' }).fillColor('black');
       }
 
-      // ========================================================
-      // PAGE 2: BACK PAGE (EVALUATION CRITERIA & OVERALL MARKS)
-      // ========================================================
+      // PAGE 2
       doc.addPage();
       let page2Y = 30;
 
-      // Header
       doc.lineWidth(1).strokeColor('black').rect(startX, page2Y, pageWidth, 24).fillAndStroke('#f0f0f0', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(10).text('EVALUATION CRITERIA', startX + 10, page2Y + 7);
       doc.rect(startX + pageWidth - 80, page2Y + 3, 70, 18).fillAndStroke('white', 'black');
@@ -637,7 +605,6 @@ const generateReport = async (req, res) => {
 
       page2Y += 32;
 
-      // 1. Written Exam Criteria Table
       doc.rect(startX, page2Y, pageWidth, 18).fillAndStroke('#e5e7eb', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(8.5).text('WRITTEN EXAM', startX + 10, page2Y + 5);
       page2Y += 18;
@@ -645,7 +612,6 @@ const generateReport = async (req, res) => {
       const descW = 345;
       const detW = 150;
 
-      // Header row
       doc.rect(startX, page2Y, 50, 16).stroke();
       doc.text('S.NO', startX, page2Y + 5, { width: 50, align: 'center' });
       doc.rect(startX + 50, page2Y, descW, 16).stroke();
@@ -675,7 +641,6 @@ const generateReport = async (req, res) => {
 
       page2Y += 16;
 
-      // 2. Practical Exam Criteria Table
       doc.rect(startX, page2Y, pageWidth, 18).fillAndStroke('#e5e7eb', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(8.5).text('PRACTICAL EXAM', startX + 10, page2Y + 5);
       page2Y += 18;
@@ -709,7 +674,6 @@ const generateReport = async (req, res) => {
 
       page2Y += 16;
 
-      // 3. Overall Mark Table
       doc.rect(startX, page2Y, pageWidth, 18).fillAndStroke('#e5e7eb', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(8.5).text('OVERALL MARK', startX + 10, page2Y + 5);
       page2Y += 18;
@@ -728,7 +692,6 @@ const generateReport = async (req, res) => {
       doc.text('PERCENTAGE', startX + 50 + omDescW + omMarkW, page2Y + 5, { width: omPercW, align: 'center' });
       page2Y += 16;
 
-      // Row 1: Written Exam
       doc.rect(startX, page2Y, 50, 20).stroke();
       doc.text('1', startX, page2Y + 6, { width: 50, align: 'center' });
       doc.rect(startX + 50, page2Y, omDescW, 20).stroke();
@@ -739,7 +702,6 @@ const generateReport = async (req, res) => {
       doc.text(first.writtenExamPercentage || '-', startX + 50 + omDescW + omMarkW, page2Y + 6, { width: omPercW, align: 'center' });
       page2Y += 20;
 
-      // Row 2: Practical Exam
       doc.rect(startX, page2Y, 50, 20).stroke();
       doc.text('2', startX, page2Y + 6, { width: 50, align: 'center' });
       doc.rect(startX + 50, page2Y, omDescW, 20).stroke();
@@ -750,7 +712,6 @@ const generateReport = async (req, res) => {
       doc.text(first.practicalExamPercentage || '-', startX + 50 + omDescW + omMarkW, page2Y + 6, { width: omPercW, align: 'center' });
       page2Y += 20;
 
-      // Row 3: Status Pass / Fail
       doc.rect(startX, page2Y, 50 + omDescW, 22).fillAndStroke('#f9fafb', 'black');
       doc.fillColor('black').font('Helvetica-Bold').fontSize(9).text('STATUS :', startX + 50, page2Y + 7, { width: omDescW, align: 'right' });
 
@@ -759,7 +720,6 @@ const generateReport = async (req, res) => {
       doc.fillColor(statusColor).font('Helvetica-Bold').fontSize(10).text(first.status ? String(first.status).toUpperCase() : '-', startX + 50 + omDescW, page2Y + 6, { width: omMarkW + omPercW, align: 'center' }).fillColor('black');
       page2Y += 32;
 
-      // 4. Back Page Signatures
       const sigColW = pageWidth / 2;
       doc.rect(startX, page2Y, sigColW, 55).stroke();
       doc.font('Helvetica-Bold').fontSize(8).text('INCHARGE SIGN (EVALUATED BY)', startX, page2Y + 8, { width: sigColW, align: 'center' });
@@ -769,7 +729,6 @@ const generateReport = async (req, res) => {
         doc.fillColor('red').font('Helvetica').fontSize(8).text('Pending Shift Incharge', startX, page2Y + 30, { width: sigColW, align: 'center' }).fillColor('black');
       }
 
-      // HOD Signature
       doc.rect(startX + sigColW, page2Y, sigColW, 55).stroke();
       doc.font('Helvetica-Bold').fontSize(8).text('HOD SIGN', startX + sigColW, page2Y + 8, { width: sigColW, align: 'center' });
       const hodApproved = first.hodSign && !String(first.hodSign).toLowerCase().includes('pending');
@@ -779,16 +738,18 @@ const generateReport = async (req, res) => {
         const assignedTxt = first.evaluatedBy ? `(Assigned: ${first.evaluatedBy.toUpperCase()})` : '';
         doc.fillColor('red').font('Helvetica').fontSize(8).text(`Pending ${assignedTxt}`, startX + sigColW, page2Y + 30, { width: sigColW, align: 'center' }).fillColor('black');
       }
+
+      // Render QF Value at the bottom of Page 2
+      page2Y += 65;
+      doc.font('Helvetica').fontSize(7.5).fillColor('#6b7280').text(effectiveQf, startX, page2Y);
+      doc.fillColor('black');
     });
 
     doc.end();
   } catch (err) {
     console.error('PDF generation error:', err);
-    if (!res.headersSent) {
-      res.status(500).json({ message: 'PDF generation failed' });
-    } else {
-      res.end();
-    }
+    if (!res.headersSent) res.status(500).json({ message: 'PDF generation failed' });
+    else res.end();
   }
 };
 

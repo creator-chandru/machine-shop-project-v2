@@ -133,6 +133,7 @@ const getRecord = async (req, res) => {
         });
     }
 };
+
 /*
 ============================================================
 SAVE CORRECTIVE ACTION RECORD
@@ -196,8 +197,7 @@ const saveRecord = async (req, res) => {
                     message: `Problem category (A, B, C, D, or E) is required for row ${index + 1}`
                 });
             }
-            // Corrective Action Register does not depend on lineCode.
-            // The database column is NOT NULL, so store an empty string.
+
             const lineCode = '';
 
             preparedEntries.push({
@@ -218,7 +218,6 @@ const saveRecord = async (req, res) => {
         transaction = new sql.Transaction(pool);
         await transaction.begin();
 
-        // Target delete scoped per part name + date
         for (const entry of preparedEntries) {
             await transaction
                 .request()
@@ -366,7 +365,7 @@ const signPeApproval = async (req, res) => {
 
 /*
 ============================================================
-GENERATE CORRECTIVE ACTION PDF (BY DATE RANGE)
+GENERATE CORRECTIVE ACTION PDF (BY DATE RANGE) WITH DYNAMIC QF
 ============================================================
 */
 const generatePdfReport = async (req, res) => {
@@ -430,6 +429,40 @@ const generatePdfReport = async (req, res) => {
             });
         }
 
+        // --- Fetch QF History dynamically ---
+        let qfHistory = [];
+        try {
+            const qfRes = await sql.query(`
+                SELECT id, formName, qfValue, date 
+                FROM CorrectiveActionQFvalues 
+                ORDER BY date DESC, id DESC
+            `);
+            qfHistory = qfRes.recordset || [];
+        } catch (qfErr) {
+            console.error("Warning: Could not fetch CorrectiveActionQFvalues:", qfErr.message);
+        }
+
+        const getEffectiveQfValue = (recordDateStr) => {
+            const fallback = "QF/08/MRO-04, Rev. No.:03 dt 20.08.2024";
+            if (!qfHistory || qfHistory.length === 0) return fallback;
+
+            if (recordDateStr) {
+                const targetDate = new Date(recordDateStr);
+                targetDate.setHours(0, 0, 0, 0);
+
+                for (let qf of qfHistory) {
+                    if (!qf.date) continue;
+                    const qfDate = new Date(qf.date);
+                    qfDate.setHours(0, 0, 0, 0);
+
+                    if (qfDate <= targetDate) {
+                        return qf.qfValue;
+                    }
+                }
+            }
+            return qfHistory[0]?.qfValue || fallback;
+        };
+
         const doc = new PDFDocument({
             margin: 20,
             size: 'A4',
@@ -492,9 +525,11 @@ const generatePdfReport = async (req, res) => {
             align: 'center'
         });
 
+        const effectiveQf = getEffectiveQfValue(cleanFromDate);
+
         const metaX = startX + logoBoxWidth + titleBoxWidth;
         doc.rect(metaX, startY, metaBoxWidth, headerHeight).stroke();
-        doc.font('Helvetica-Bold').fontSize(8).text('FORM: QF/08/MRO-04 | REV: 03', metaX + 8, startY + 8);
+        doc.font('Helvetica-Bold').fontSize(8).text(effectiveQf, metaX + 8, startY + 8);
         doc.text(`MACHINE SHOP: ${machineShop}`, metaX + 8, startY + 22);
         doc.font('Helvetica').fontSize(8).text(`PERIOD: ${cleanFromDate} to ${cleanToDate}`, metaX + 8, startY + 36);
 
@@ -607,7 +642,7 @@ const generatePdfReport = async (req, res) => {
             currentY += rowHeight;
         });
 
-        // Legend / Footer Note
+        // Legend / Footer Note with Dynamic QF
         currentY += 8;
         if (currentY + 36 > doc.page.height - 20) {
             doc.addPage();
@@ -618,7 +653,7 @@ const generatePdfReport = async (req, res) => {
         doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black')
             .text('Category Legend: A: >5 parts in same defect | B: Repeated rejections | C: Critical/Safety characteristics | D: Crack/Broken | E: New defect', startX + 6, currentY + 6);
         doc.font('Helvetica').fontSize(7)
-            .text('QF/08/MRO-04, Rev.No: 03 dt 20.08.2024 - Machine Shop Quality Assurance Register', startX + 6, currentY + 20);
+            .text(`${effectiveQf} - Machine Shop Quality Assurance Register`, startX + 6, currentY + 20);
 
         doc.end();
     } catch (error) {

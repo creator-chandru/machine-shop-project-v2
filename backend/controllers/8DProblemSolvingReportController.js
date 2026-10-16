@@ -781,6 +781,42 @@ const generateEightDPdf = async (req, res) => {
 
     const r = result.recordset[0];
 
+    // Fetch QF History for 8D Report
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date 
+        FROM EightDReportQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch EightDReportQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/08/CAT-05, Rev.No: 02 dt 25.11.2024";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
+
+    const effectiveQf = getEffectiveQfValue(r.ReportDate);
+
     const doc = new PDFDocument({ 
       margin: 15, 
       size: "A4", 
@@ -814,7 +850,7 @@ const generateEightDPdf = async (req, res) => {
 
     doc.rect(startX + fullWidth - 210, 15, 210, 28).stroke();
     doc.font("Helvetica-Bold").fontSize(6.8).fillColor('#374151');
-    doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 18, { width: 200, align: 'center' });
+    doc.text(effectiveQf, startX + fullWidth - 205, 18, { width: 200, align: 'center' });
     doc.font("Helvetica").fontSize(6.8);
     doc.text(`Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}   |   Shop: ${r.MachineShop || 3}`, startX + fullWidth - 205, 28, { width: 200, align: 'center' });
 
@@ -1087,7 +1123,7 @@ const generateEightDPdf = async (req, res) => {
 
     // Page 1 Footer
     doc.font("Helvetica").fontSize(6.5).fillColor('#6b7280')
-      .text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX, 568, { width: fullWidth, align: 'center' });
+      .text(effectiveQf, startX, 568, { width: fullWidth, align: 'center' });
 
     // ============================================================
     // ======================== PAGE 2 ============================
@@ -1108,7 +1144,7 @@ const generateEightDPdf = async (req, res) => {
 
     doc.rect(startX + fullWidth - 210, 15, 210, 24).stroke();
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#374151');
-    doc.text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX + fullWidth - 205, 18, { width: 200, align: 'center' });
+    doc.text(effectiveQf, startX + fullWidth - 205, 18, { width: 200, align: 'center' });
     doc.font("Helvetica").fontSize(6.5);
     doc.text(`Part: ${r.PartNo || '-'}   |   Date: ${r.ReportDate ? new Date(r.ReportDate).toLocaleDateString('en-GB') : '-'}   |   Shift: ${r.Shift || '1ST'}`, startX + fullWidth - 205, 26, { width: 200, align: 'center' });
 
@@ -1359,7 +1395,7 @@ const generateEightDPdf = async (req, res) => {
 
     // Page 2 Footer
     doc.font("Helvetica").fontSize(6.5).fillColor('#6b7280')
-      .text("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024", startX, 568, { width: fullWidth, align: 'center' });
+      .text(effectiveQf, startX, 568, { width: fullWidth, align: 'center' });
 
     doc.end();
   } catch (err) {

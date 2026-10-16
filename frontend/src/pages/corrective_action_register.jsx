@@ -19,7 +19,7 @@ const formMeta = {
 };
 
 const createFreshRow = () => ({
-  date: "",
+  date: new Date().toISOString().split('T')[0],
   partName: "",
   problemDescription: "",
   problemCategory: "",
@@ -73,6 +73,10 @@ export default function CorrectiveActionRegister() {
   const [pdfFromDate, setPdfFromDate] = useState("");
   const [pdfToDate, setPdfToDate] = useState("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  // --- Dynamic QF States ---
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/08/MRO-04, Rev. No.:03 dt 20.08.2024");
 
   const triggerToast = (message, type = 'error') => {
     setToast({ message, type });
@@ -130,6 +134,53 @@ export default function CorrectiveActionRegister() {
     fetchPartNames();
   }, [actualShopId]);
 
+  // --- Fetch QF History on Mount ---
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/corrective-action-register`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+        );
+
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // --- Calculate QF based on selected Date (Effective Date Logic) ---
+  useEffect(() => {
+    let currentQf = "QF/08/MRO-04, Rev. No.:03 dt 20.08.2024";
+    const targetRowDate = entries[0]?.date;
+
+    if (targetRowDate && qfHistory.length > 0) {
+      const selectedDate = new Date(targetRowDate);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [entries, qfHistory]);
+
   // Fetch the Product Engineers that can receive a register for approval.
   useEffect(() => {
     const fetchProductEngineers = async () => {
@@ -165,7 +216,6 @@ export default function CorrectiveActionRegister() {
 
   const handleAddRow = () => {
     if (isSavedRecord) return;
-    // Fresh row creation - does not inherit prior row values
     setEntries((prev) => [...prev, createFreshRow()]);
   };
 
@@ -209,9 +259,7 @@ export default function CorrectiveActionRegister() {
         try {
           const errorData = await res.json();
           if (errorData.message) errorMessage = errorData.message;
-        } catch {
-          // Fall back to default error message
-        }
+        } catch {}
         throw new Error(errorMessage);
       }
 
@@ -239,7 +287,6 @@ export default function CorrectiveActionRegister() {
       return;
     }
 
-    // Validate empty rows
     const emptyEntries = entries.some(
       (e) =>
         !e.date ||
@@ -395,14 +442,10 @@ export default function CorrectiveActionRegister() {
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 items-center font-bold">
+              <span>{qfValue}</span>
               <span>|</span>
-              <span>Revision: {formMeta.revision}</span>
-              <span>|</span>
-              <span>Revision Date: {formMeta.revisionDate}</span>
-              <span>|</span>
-              <span className="font-bold text-orange-600">Shop ID: {actualShopId}</span>
+              <span className="text-orange-600">Shop ID: {actualShopId}</span>
             </div>
           </div>
 
@@ -474,7 +517,6 @@ export default function CorrectiveActionRegister() {
             <tbody>
               {entries.map((row, idx) => (
                 <tr key={`entry-${idx}`} className="hover:bg-gray-50 h-12">
-                  {/* DATE */}
                   <td className="border border-gray-800 p-1">
                     <input
                       type="date"
@@ -485,7 +527,6 @@ export default function CorrectiveActionRegister() {
                     />
                   </td>
 
-                  {/* PART NAME */}
                   <td className="border border-gray-800 p-1 text-left">
                     <select
                       disabled={isSavedRecord}
@@ -514,7 +555,6 @@ export default function CorrectiveActionRegister() {
                     )}
                   </td>
 
-                  {/* PROBLEM DESCRIPTION */}
                   <td className="border border-gray-800 p-1">
                     <textarea
                       rows={2}
@@ -526,7 +566,6 @@ export default function CorrectiveActionRegister() {
                     />
                   </td>
 
-                  {/* CATEGORY (Blank by default) */}
                   <td className="border border-gray-800 p-1">
                     <select
                       disabled={isSavedRecord}
@@ -543,7 +582,6 @@ export default function CorrectiveActionRegister() {
                     </select>
                   </td>
 
-                  {/* QUANTITY */}
                   <td className="border border-gray-800 p-1">
                     <input
                       type="number"
@@ -557,7 +595,6 @@ export default function CorrectiveActionRegister() {
                     />
                   </td>
 
-                  {/* ROOT CAUSE */}
                   <td className="border border-gray-800 p-1">
                     <textarea
                       rows={2}
@@ -569,7 +606,6 @@ export default function CorrectiveActionRegister() {
                     />
                   </td>
 
-                  {/* CORRECTIVE ACTION */}
                   <td className="border border-gray-800 p-1">
                     <textarea
                       rows={2}
@@ -581,7 +617,6 @@ export default function CorrectiveActionRegister() {
                     />
                   </td>
 
-                  {/* RESULT */}
                   <td className="border border-gray-800 p-1">
                     <select
                       disabled={isSavedRecord}
@@ -594,7 +629,6 @@ export default function CorrectiveActionRegister() {
                     </select>
                   </td>
 
-                  {/* SIGNATURE & APPROVAL */}
                   <td className="border border-gray-800 p-1 text-center bg-gray-50/40">
                     {row.signature ? (
                       <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
@@ -713,7 +747,9 @@ export default function CorrectiveActionRegister() {
         </div>
 
         {/* Footer Save Actions */}
-        <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-300">
+        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-300">
+          <span className="text-xs text-gray-500 font-bold">{qfValue}</span>
+
           <button
             type="button"
             onClick={handleSave}

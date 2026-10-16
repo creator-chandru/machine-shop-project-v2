@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileDown, Plus, Trash2 } from "lucide-react";
-import Header from "../components/Header";
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, FileDown, Plus, Trash2 } from 'lucide-react';
+import Header from '../components/Header';
 
 const formMeta = {
   formCode: "QF/08/CAT-05",
@@ -110,6 +110,10 @@ export default function EightDProblemSolvingReport() {
   const [qcUsers, setQcUsers] = useState([]);
   const [peUsers, setPeUsers] = useState([]);
   const [hofUsers, setHofUsers] = useState([]);
+
+  // Dynamic QF States
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/08/CAT-05, Rev.No: 02 dt 25.11.2024");
 
   const lookupSeqRef = useRef(0);
   const problemDescRef = useRef(null);
@@ -299,6 +303,52 @@ export default function EightDProblemSolvingReport() {
     };
     fetchMasterData();
   }, []);
+
+  // Fetch QF History on Mount
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/qf-values/history/eight-d-report`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  // Calculate QF based on selected Date
+  useEffect(() => {
+    let currentQf = "QF/08/CAT-05, Rev.No: 02 dt 25.11.2024";
+
+    if (header.date && qfHistory.length > 0) {
+      const selectedDate = new Date(header.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [header.date, qfHistory]);
 
   // Full reset back to a clean/fresh form
   const resetFormToBlank = (keepDate, keepShift, keepPartName, keepPartNo) => {
@@ -856,12 +906,10 @@ export default function EightDProblemSolvingReport() {
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
               <span>|</span>
-              <span>Revision: {formMeta.revision} ({formMeta.revisionDate})</span>
-              <span>|</span>
-              <span className="font-bold text-orange-600">Shop ID: {shopId || 3}</span>
+              <span className="text-orange-600">Shop ID: {shopId || 3}</span>
             </div>
           </div>
 

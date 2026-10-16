@@ -15,7 +15,8 @@ const FORM_QF_TABLES = {
   "competency-evaluation-form": "CompetencyEvaluationQFvalues",
   "corrective-action-register": "CorrectiveActionQFvalues",
   "eight-d-report": "EightDReportQFvalues",
-  "job-setup-verification": "JobSetupVerificationQFvalues" // <-- Added
+  "job-setup-verification": "JobSetupVerificationQFvalues",
+  "operator-allotment": "OperatorAllotmentQFvalues" // <-- Added
 };
 
 // GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]

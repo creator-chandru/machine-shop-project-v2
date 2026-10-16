@@ -336,7 +336,7 @@ const signPEOperatorAllotment = async (req, res) => {
 }; 
 
 // ============================================================ 
-// GENERATE PDF REPORT (MODIFIED TO MATCH THE REFERENCE STYLE)
+// GENERATE PDF REPORT (WITH DYNAMIC QF VALUES)
 // ============================================================ 
 const generateOperatorAllotmentReport = async (req, res) => { 
     try { 
@@ -362,6 +362,42 @@ const generateOperatorAllotmentReport = async (req, res) => {
 
         const row = result.recordset[0]; 
         const displayDate = formatDate(row.recordDate);
+
+        // Fetch QF History for dynamic versioning
+        let qfHistory = [];
+        try {
+            const qfRes = await sql.query(`
+                SELECT id, formName, qfValue, date 
+                FROM OperatorAllotmentQFvalues 
+                ORDER BY date DESC, id DESC
+            `);
+            qfHistory = qfRes.recordset || [];
+        } catch (qfErr) {
+            console.error("Warning: Could not fetch OperatorAllotmentQFvalues:", qfErr.message);
+        }
+
+        const getEffectiveQfValue = (recordDateStr) => {
+            const fallback = "QF/07/MPD-06, Revision 05 dt 10.07.2026";
+            if (!qfHistory || qfHistory.length === 0) return fallback;
+
+            if (recordDateStr) {
+                const targetDate = new Date(recordDateStr);
+                targetDate.setHours(0, 0, 0, 0);
+
+                for (let qf of qfHistory) {
+                    if (!qf.date) continue;
+                    const qfDate = new Date(qf.date);
+                    qfDate.setHours(0, 0, 0, 0);
+
+                    if (qfDate <= targetDate) {
+                        return qf.qfValue;
+                    }
+                }
+            }
+            return qfHistory[0]?.qfValue || fallback;
+        };
+
+        const effectiveQf = getEffectiveQfValue(row.recordDate);
 
         const doc = new PDFDocument({ 
             margin: 20, 
@@ -400,13 +436,13 @@ const generateOperatorAllotmentReport = async (req, res) => {
            }); 
 
         doc.rect(startX + totalWidth - 160, headerY, 160, 35).stroke(); 
-        doc.font('Helvetica-Bold').fontSize(8.5).fillColor('black') 
-           .text(`LINE: ${row.lineCode || 'ALL'}`, startX + totalWidth - 160, headerY + 6, { 
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('black') 
+           .text(`LINE: ${row.lineCode || 'ALL'} | DATE: ${displayDate}`, startX + totalWidth - 160, headerY + 6, { 
                width: 160, 
                align: 'center' 
            }); 
-        doc.font('Helvetica').fontSize(8).fillColor('black') 
-           .text(`DATE: ${displayDate}`, startX + totalWidth - 160, headerY + 20, { 
+        doc.font('Helvetica').fontSize(7).fillColor('black') 
+           .text(effectiveQf, startX + totalWidth - 160, headerY + 20, { 
                width: 160, 
                align: 'center' 
            }); 

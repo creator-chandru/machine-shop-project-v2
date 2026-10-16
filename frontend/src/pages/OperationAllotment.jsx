@@ -44,14 +44,17 @@ const OperatorAllotment = () => {
     const [peStatus, setPeStatus] = useState('Pending'); 
     const [peApproved, setPeApproved] = useState(false); 
 
+    const [qfHistory, setQfHistory] = useState([]);
+    const [qfValue, setQfValue] = useState("QF/07/MPD-06 | Revision 05 | Revision Date: 10.07.2026");
+
     const showToast = (message, type = 'success') => { 
         setToast({ message, type }); 
         setTimeout(() => setToast(null), 3000); 
     }; 
 
-    // Fetch initial dropdown values
+    // Fetch initial dropdown values & QF History
     useEffect(() => { 
-        const loadDropdowns = async () => { 
+        const loadMasterData = async () => { 
             try { 
                 setLoading(true); 
 
@@ -79,6 +82,15 @@ const OperatorAllotment = () => {
                 const peData = await peResponse.json(); 
                 setProductEngineers(peData.peList || peData.productManagers || peData.productEngineers || []); 
 
+                // Fetch QF History
+                const qfRes = await fetch(`${API_BASE}/qf-values/history/operator-allotment`, {
+                    headers: { 'Accept': 'application/json' }
+                }).catch(() => null);
+                if (qfRes && qfRes.ok) {
+                    const historyData = await qfRes.json();
+                    setQfHistory(historyData || []);
+                }
+
             } catch (error) { 
                 console.error('Operator Allotment dropdown error:', error); 
                 showToast(error.message || 'Failed to load dropdown data', 'error'); 
@@ -87,8 +99,33 @@ const OperatorAllotment = () => {
             } 
         }; 
 
-        loadDropdowns(); 
+        loadMasterData(); 
     }, []); 
+
+    // Compute active QF value based on selected date
+    useEffect(() => {
+        let currentQf = "QF/07/MPD-06 | Revision 05 | Revision Date: 10.07.2026";
+
+        if (form.recordDate && qfHistory.length > 0) {
+            const selectedDate = new Date(form.recordDate);
+            selectedDate.setHours(0, 0, 0, 0);
+
+            for (let qf of qfHistory) {
+                if (!qf.date) continue;
+                const qfDate = new Date(qf.date);
+                qfDate.setHours(0, 0, 0, 0);
+
+                if (qfDate <= selectedDate) {
+                    currentQf = qf.qfValue;
+                    break;
+                }
+            }
+        } else if (qfHistory.length > 0) {
+            currentQf = qfHistory[0].qfValue;
+        }
+
+        setQfValue(currentQf);
+    }, [form.recordDate, qfHistory]);
 
     // Fetch allotment data automatically when recordDate or lineCode changes
     const fetchRecord = useCallback(async (date, lineCode) => {
@@ -245,7 +282,7 @@ const OperatorAllotment = () => {
                     <div> 
                         <div className="text-orange-600 font-bold text-sm">SAKTHI AUTO</div> 
                         <h1 className="text-3xl font-bold text-gray-800 mt-1">OPERATOR ALLOTMENT SHEET</h1> 
-                        <p className="text-xs text-gray-500 mt-1">QF/07/MPD-06 &nbsp; | &nbsp; Revision 05 &nbsp; | &nbsp; Revision Date: 10.07.2026</p> 
+                        <p className="text-xs text-gray-500 mt-1">{qfValue}</p> 
                     </div> 
 
                     <button 

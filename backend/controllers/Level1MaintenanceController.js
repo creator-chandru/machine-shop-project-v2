@@ -798,21 +798,7 @@ const generateLevel1Report = async (req, res) => {
         .text(
           "LEVEL 1 MAINTENANCE CHECK SHEET",
           startX + 85,
-          blockStartY + 4,
-          {
-            width: midWidth - 10,
-            align: "center",
-          }
-        );
-
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(6)
-        .fillColor("#374151")
-        .text(
-          effectiveQf,
-          startX + 85,
-          blockStartY + 14,
+          blockStartY + 6,
           {
             width: midWidth - 10,
             align: "center",
@@ -826,7 +812,7 @@ const generateLevel1Report = async (req, res) => {
         .text(
           `LINE: ${first.lineCode}   |   M/C NO: ${first.machineNo}   |   OP: ${first.opNo || "-"}`,
           startX + 85,
-          blockStartY + 23,
+          blockStartY + 20,
           {
             width: midWidth - 10,
             align: "center",
@@ -1102,7 +1088,18 @@ const generateLevel1Report = async (req, res) => {
           }
         );
 
-      return sigY + 34;
+      // ======================================================
+      // PRINT QF VALUE BELOW TABLE & SIGNATURES
+      // ======================================================
+
+      let qfY = sigY + 30;
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(7.5)
+        .fillColor("#374151")
+        .text(effectiveQf, startX, qfY + 4, { align: "left" });
+
+      return qfY + 16;
     };
 
     // ========================================================

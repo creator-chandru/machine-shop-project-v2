@@ -423,7 +423,8 @@ const generate4MReport = async (req, res) => {
         const computeEntryHeight = (groupRecords) => {
             const headerTotalH = 50;
             const tableHeadersH = 30;
-            const footerH = 36;
+            const footerH = 32;
+            const qfH = 20;
             let rowsH = 0;
 
             doc.font("Helvetica").fontSize(7);
@@ -434,7 +435,7 @@ const generate4MReport = async (req, res) => {
                 rowsH += rowH;
             });
 
-            return headerTotalH + 5 + tableHeadersH + rowsH + footerH + 10;
+            return headerTotalH + 5 + tableHeadersH + rowsH + footerH + qfH + 10;
         };
 
         // Render one full entry block
@@ -553,12 +554,10 @@ const generate4MReport = async (req, res) => {
                 currY += rowH;
             });
 
-            // 4. Footer & HOD Sign Block (32pt)
+            // 4. HOD Sign Block (32pt)
             currY += 4;
             const footerH = 32;
             doc.lineWidth(0.5).strokeColor('black');
-            doc.rect(startX, currY, totalWidth - 250, footerH).stroke();
-            doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(effectiveQf, startX + 10, currY + 12);
 
             const hodX = startX + totalWidth - 250;
             doc.rect(hodX, currY, 250, footerH).stroke();
@@ -578,7 +577,13 @@ const generate4MReport = async (req, res) => {
                 doc.fillColor('red').font("Helvetica").fontSize(8).text("Pending Review", hodX + 65, currY + 11);
             }
 
-            return currY + footerH;
+            currY += footerH;
+
+            // 5. Print QF Value below table & signatures
+            doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+                .text(effectiveQf, startX, currY + 4, { align: 'left' });
+
+            return currY + 16;
         };
 
         // Render entries with dynamic page fitting
@@ -596,13 +601,13 @@ const generate4MReport = async (req, res) => {
 
             if (!isFirstOnPage) {
                 doc.save()
-                   .lineWidth(0.5)
-                   .dash(3, { space: 3 })
-                   .strokeColor('#9ca3af')
-                   .moveTo(startX, currentY - 4)
-                   .lineTo(startX + totalWidth, currentY - 4)
-                   .stroke()
-                   .restore();
+                    .lineWidth(0.5)
+                    .dash(3, { space: 3 })
+                    .strokeColor('#9ca3af')
+                    .moveTo(startX, currentY - 4)
+                    .lineTo(startX + totalWidth, currentY - 4)
+                    .stroke()
+                    .restore();
             }
 
             const endY = drawEntry(groupRecords, currentY);

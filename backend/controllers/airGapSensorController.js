@@ -537,7 +537,8 @@ const generateAirGapReport = async (req, res) => {
             const blockH = (22 * 4) + 24;
             const prodRowH = 26;
             const notesH = 68;
-            return headerH + 6 + tableHeaderH + (uniqueBlocksCount * blockH) + prodRowH + 6 + notesH + 10;
+            const qfH = 20;
+            return headerH + 6 + tableHeaderH + (uniqueBlocksCount * blockH) + prodRowH + 6 + notesH + qfH + 10;
         };
 
         const drawEntry = (groupRecords, entryY) => {
@@ -600,10 +601,9 @@ const generateAirGapReport = async (req, res) => {
                 doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI AUTO", startX, entryY + 25, { width: logoBoxWidth, align: "center" });
             }
 
-            // Title & Dynamic QF
+            // Title Box
             doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerH).stroke();
-            doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, entryY + 18, { width: titleBoxWidth, align: "center" });
-            doc.font("Helvetica-Bold").fontSize(8).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, entryY + 36, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, entryY + 26, { width: titleBoxWidth, align: "center" });
 
             // Metadata Box
             const metaX = startX + logoBoxWidth + titleBoxWidth;
@@ -768,7 +768,13 @@ const generateAirGapReport = async (req, res) => {
             doc.text("d) Error proof verification should be conducted and recorded during setup changes, major breakdowns.", startX + 6, currY + 51);
             doc.font("Helvetica-Bold").fontSize(7).text("LEGEND: *-Applicable for single part fixture (LH), #-Applicable for single part fixture (RH), I ,II, III -Shift.", startX + 6, currY + 60);
 
-            return currY + noteBoxHeight;
+            currY += noteBoxHeight;
+
+            // 6. Print QF Value below Notes Box
+            doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+                .text(effectiveQf, startX, currY + 4, { align: 'left' });
+
+            return currY + 16;
         };
 
         let currentY = topMargin;

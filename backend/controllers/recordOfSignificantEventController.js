@@ -378,12 +378,11 @@ const generateSignificantEventPDF = async (req, res) => {
         doc.rect(startX + 110, currentY, titleW, topHeaderH).stroke();
         doc.fillColor('black').font("Helvetica-Bold").fontSize(13).text("RECORD OF SIGNIFICANT EVENT (MACHINE SHOP)", startX + 110, currentY + 14, { width: titleW, align: "center" });
 
-        // Meta Info Box with Dynamic QF Value
+        // Meta Info Box
         const metaBoxW = 200;
         doc.rect(startX + totalWidth - metaBoxW, currentY, metaBoxW, topHeaderH).stroke();
-        doc.font("Helvetica-Bold").fontSize(7).fillColor('black').text(effectiveQf, startX + totalWidth - metaBoxW, currentY + 6, { width: metaBoxW, align: "center" });
-        doc.font("Helvetica").fontSize(7.5).text(`LINE: ${lineCode} | SHIFT: ${header.shift || 'I'}`, startX + totalWidth - metaBoxW, currentY + 18, { width: metaBoxW, align: "center" });
-        doc.text(`DATE: ${displayDate}`, startX + totalWidth - metaBoxW, currentY + 29, { width: metaBoxW, align: "center" });
+        doc.font("Helvetica").fontSize(7.5).fillColor('black').text(`LINE: ${lineCode} | SHIFT: ${header.shift || 'I'}`, startX + totalWidth - metaBoxW, currentY + 11, { width: metaBoxW, align: "center" });
+        doc.text(`DATE: ${displayDate}`, startX + totalWidth - metaBoxW, currentY + 24, { width: metaBoxW, align: "center" });
 
         currentY += topHeaderH;
 
@@ -545,6 +544,12 @@ const generateSignificantEventPDF = async (req, res) => {
         doc.rect(startX, currentY, totalWidth, 18).stroke();
         doc.fillColor('black').font("Helvetica-Bold").fontSize(7.5).text("Applicable Events:", startX + 6, currentY + 5);
         doc.font("Helvetica").fontSize(7.5).text("Significant Machine Break Downs & Other unusual situation and applicable 4M change.", startX + 85, currentY + 5);
+
+        currentY += 18;
+
+        // PRINT QF VALUE BELOW FOOTER
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+            .text(effectiveQf, startX, currentY + 4, { align: 'left' });
 
         doc.end();
     } catch (err) {

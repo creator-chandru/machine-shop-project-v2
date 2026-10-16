@@ -544,11 +544,11 @@ const generatePreOperationReport = async (req, res) => {
       } else {
         doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", inchargeX + 10, sigY + 16, { width: sigColWidth - 20, align: "center" });
       }
+      let qfY = sigY + 30;
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+        .text(currentPageQfValue, startX, qfY + 4, { align: 'left' });
 
-      // 🔥 3. PRINT QF VALUE AT THE BOTTOM LEFT
-      doc.fontSize(6).font('Helvetica').fillColor('black').text(currentPageQfValue, startX, sigY + 32);
-
-      return sigY + 38; 
+      return qfY + 16; 
     };
 
     // Loop through groups and render 2 per page

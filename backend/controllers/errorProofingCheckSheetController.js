@@ -295,6 +295,7 @@ const generateErrorProofingReport = async (req, res) => {
             const headerH = 40;
             const tableHeaderH = 14;
             const sigBlockH = 36;
+            const qfH = 20;
             let rowsTotalH = 0;
 
             doc.font("Helvetica").fontSize(fontSize);
@@ -315,7 +316,7 @@ const generateErrorProofingReport = async (req, res) => {
                 rowsTotalH += rowH;
             });
 
-            return headerH + 3 + tableHeaderH + rowsTotalH + sigBlockH + 10;
+            return headerH + 3 + tableHeaderH + rowsTotalH + sigBlockH + qfH + 10;
         };
 
         // Helper to draw an entry at a given Y position
@@ -343,11 +344,9 @@ const generateErrorProofingReport = async (req, res) => {
 
             doc.rect(startX + logoWidth, blockStartY, midWidth, headerH).stroke();
             doc.font("Helvetica-Bold").fontSize(9).fillColor('black')
-               .text("ERROR PROOFING CHECK SHEET", startX + logoWidth, blockStartY + 5, { width: midWidth, align: "center" });
-            doc.font("Helvetica-Bold").fontSize(7).fillColor('#333333')
-               .text(effectiveQf, startX + logoWidth, blockStartY + 18, { width: midWidth, align: "center" });
+               .text("ERROR PROOFING CHECK SHEET", startX + logoWidth, blockStartY + 9, { width: midWidth, align: "center" });
             doc.font("Helvetica").fontSize(7.5).fillColor('black')
-               .text(`LINE: ${first.lineCode}`, startX + logoWidth, blockStartY + 29, { width: midWidth, align: "center" });
+               .text(`LINE: ${first.lineCode}`, startX + logoWidth, blockStartY + 24, { width: midWidth, align: "center" });
 
             const rightX = startX + totalWidth - rightWidth;
             doc.rect(rightX, blockStartY, rightWidth, headerH).stroke();
@@ -446,7 +445,12 @@ const generateErrorProofingReport = async (req, res) => {
                 doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", inchargeX + 10, sigY + 17, { width: sigColWidth - 20, align: "center" });
             }
 
-            return sigY + 32;
+            // 5. Print QF Value below signatures
+            let qfY = sigY + 32;
+            doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+                .text(effectiveQf, startX, qfY + 4, { align: 'left' });
+
+            return qfY + 16;
         };
 
         // Render groups: dynamically pack as many as fit on each page
@@ -466,13 +470,13 @@ const generateErrorProofingReport = async (req, res) => {
             // Draw divider between multiple entries on the same page
             if (!isFirstOnPage) {
                 doc.save()
-                   .lineWidth(0.5)
-                   .dash(3, { space: 3 })
-                   .strokeColor('#9ca3af')
-                   .moveTo(startX, currentY - 5)
-                   .lineTo(startX + totalWidth, currentY - 5)
-                   .stroke()
-                   .restore();
+                    .lineWidth(0.5)
+                    .dash(3, { space: 3 })
+                    .strokeColor('#9ca3af')
+                    .moveTo(startX, currentY - 5)
+                    .lineTo(startX + totalWidth, currentY - 5)
+                    .stroke()
+                    .restore();
             }
 
             const endY = drawEntry(groupRecords, currentY);

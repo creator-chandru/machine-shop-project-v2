@@ -658,9 +658,9 @@ const generateReport = async (req, res) => {
 
         const drawPageHeading = () => {
             y = drawCells(
-                ['SAKTHI AUTO', 'TOOL CHANGE RECORD', effectiveQf],
-                [0.20, 0.45, 0.35], y,
-                { bold: true, fontSize: 9, minHeight: 34, fill: '#f0f0f0' }
+                ['SAKTHI AUTO', 'TOOL CHANGE RECORD'],
+                [0.25, 0.75], y,
+                { bold: true, fontSize: 10, minHeight: 34, fill: '#f0f0f0' }
             );
             y = drawCells(
                 [`LINE CODE: ${lineCode}`, `PART NO: ${first.partNo || '-'}`, `PART NAME: ${first.partName || '-'}`],
@@ -726,6 +726,10 @@ const generateReport = async (req, res) => {
             [0.22, 0.78], y,
             { boldFirst: true, labelLeft: true, fontSize: 7, minHeight: 28 }
         );
+
+        // Print QF Value below table & footer
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+            .text(effectiveQf, left, y + 4, { align: 'left' });
 
         doc.end();
     } catch (err) {

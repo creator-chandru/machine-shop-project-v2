@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useLineSet } from "../context/LineSetContext.jsx";
 import { ArrowLeft, FileDown, Save, Plus, Trash2, ImagePlus, X } from "lucide-react";
 import Header from "../components/Header";
-import {OPERATION_OPTIONS, blobToCompressedDataUrl, imageFromPasteEvent, imageFromClipboardApi,} from "../components/specImage.jsx";
+import {OPERATION_OPTIONS, blobToCompressedDataUrl, imageFromPasteEvent, imageFromClipboardApi} from "../components/specImage.jsx";
 const API = process.env.REACT_APP_API_URL || "";
 
 const formMeta = {
@@ -63,7 +63,6 @@ export default function JobSetupVerification() {
   const [searchParams] = useSearchParams();
   const { lineSet, setLineSet } = useLineSet();
 
-  // Role extraction
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
   const currentUserRole = (currentUser?.role || "").toLowerCase();
@@ -81,16 +80,17 @@ export default function JobSetupVerification() {
   const [toast, setToast] = useState({ message: "", type: "" });
   const [previewImage, setPreviewImage] = useState(null);
 
-  // Master Data Dropdowns
   const [partSets, setPartSets] = useState([]);
   const [machineDetails, setMachineDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
   const [loadingMasterData, setLoadingMasterData] = useState(true);
 
-  // Approver dropdown users
   const [qcUsers, setQcUsers] = useState([]);
   const [hofInspnUsers, setHofInspnUsers] = useState([]);
   const [hofUsers, setHofUsers] = useState([]);
+
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/07/MPD-03, Rev.No: 03 dt 31.01.2025");
 
   const isSavedRef = useRef(false);
   const rowsRef = useRef([]);
@@ -142,13 +142,8 @@ export default function JobSetupVerification() {
     assignedHof: "",
   });
 
-  // 1. Basic Form Information
   const [form, setForm] = useState(() => buildFreshForm());
-
-  // 2. Inspection rows
   const [rows, setRows] = useState([]);
-
-  // 3. Signatures State
   const [signatures, setSignatures] = useState(emptySignatures);
 
   useEffect(() => {
@@ -158,6 +153,50 @@ export default function JobSetupVerification() {
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  useEffect(() => {
+    const fetchQfHistory = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(
+          `${API}/api/qf-values/history/job-setup-verification`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (res.ok) {
+          const historyData = await res.json();
+          setQfHistory(historyData);
+        }
+      } catch (err) {
+        console.error("Failed to load QF history", err);
+      }
+    };
+    fetchQfHistory();
+  }, []);
+
+  useEffect(() => {
+    let currentQf = "QF/07/MPD-03, Rev.No: 03 dt 31.01.2025";
+
+    if (form.date && qfHistory.length > 0) {
+      const selectedDate = new Date(form.date);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [form.date, qfHistory]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -230,7 +269,6 @@ export default function JobSetupVerification() {
     )
   );
 
-  // Automatic calculation of Setting Time & Total Time
   useEffect(() => {
     if (isSavedRecord) return;
     if (form.settingStartedAt && form.settingFinishedAt) {
@@ -257,7 +295,6 @@ export default function JobSetupVerification() {
     }
   }, [form.settingStartedAt, form.settingFinishedAt, form.inspectionTimeMetrology, isSavedRecord]);
 
-  // Load an already-submitted record (locked, read only)
   const loadRecordData = (record) => {
     if (!record) return;
     setIsSavedRecord(true);
@@ -317,63 +354,60 @@ export default function JobSetupVerification() {
     });
   };
 
-  // Load the master Control + Specification rows for a part (strictly by part name)
-const fetchControlSpecifications = async (partName, operationNo, seq) => {
-  if (!partName || !operationNo) {
-    setRows([]);
-    setSpecsMissing(false);
-    return;
-  }
-  try {
-    const token = localStorage.getItem("token");
-    const res = await fetch(
-      `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(partName)}&operationNo=${encodeURIComponent(operationNo)}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (seq !== undefined && seq !== lookupSeqRef.current) return;
-    if (res.ok) {
-      const data = await res.json();
-      const specs = Array.isArray(data.specifications) ? data.specifications : [];
-      if (specs.length > 0) {
-        setRows(
-          specs.map((spec, idx) => ({
-            slNo: idx + 1,
-            controlName: spec.controlName || "",
-            specification: spec.specification || "",
-            image: spec.image || "",
-            LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
-            status: "",
-            remarks: "",
-            isExisting: true,
-          }))
-        );
-        setSpecsMissing(false);
-        triggerToast(`Loaded ${specs.length} Control Specifications.`, "success");
-      } else {
-        setRows([createEmptyInspectionRow(1)]);
-        setSpecsMissing(true);
-        triggerToast("No pre-configured specifications for this part & operation. You can add them below.", "info");
-      }
+  const fetchControlSpecifications = async (partName, operationNo, seq) => {
+    if (!partName || !operationNo) {
+      setRows([]);
+      setSpecsMissing(false);
+      return;
     }
-  } catch (err) {
-    console.error("Fetch specs error:", err);
-  }
-};
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${API}/api/job-setup-verification/specifications?partName=${encodeURIComponent(partName)}&operationNo=${encodeURIComponent(operationNo)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (seq !== undefined && seq !== lookupSeqRef.current) return;
+      if (res.ok) {
+        const data = await res.json();
+        const specs = Array.isArray(data.specifications) ? data.specifications : [];
+        if (specs.length > 0) {
+          setRows(
+            specs.map((spec, idx) => ({
+              slNo: idx + 1,
+              controlName: spec.controlName || "",
+              specification: spec.specification || "",
+              image: spec.image || "",
+              LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
+              status: "",
+              remarks: "",
+              isExisting: true,
+            }))
+          );
+          setSpecsMissing(false);
+          triggerToast(`Loaded ${specs.length} Control Specifications.`, "success");
+        } else {
+          setRows([createEmptyInspectionRow(1)]);
+          setSpecsMissing(true);
+          triggerToast("No pre-configured specifications for this part & operation. You can add them below.", "info");
+        }
+      }
+    } catch (err) {
+      console.error("Fetch specs error:", err);
+    }
+  };
 
-  // Look for a filled record for part + date + shift + operationNo.
-  // Specifications for the Part Name remain loaded when switching forms.
   const loadSelection = async (partName, partNo, date, shift, operationNo, forceSpecs = false) => {
     if (!partName || !date) return;
     const seq = ++lookupSeqRef.current;
     if (!operationNo) {
-    setForm(buildFreshForm({ partName, partNo, date, shift, operationNo: "" }));
-    setSignatures(emptySignatures);
-    setIsSavedRecord(false);
-    setSaveSuccess(false);
-    setRows([]);
-    setSpecsMissing(false);
-    return;
-  }
+      setForm(buildFreshForm({ partName, partNo, date, shift, operationNo: "" }));
+      setSignatures(emptySignatures);
+      setIsSavedRecord(false);
+      setSaveSuccess(false);
+      setRows([]);
+      setSpecsMissing(false);
+      return;
+    }
     let record = null;
     try {
       const token = localStorage.getItem("token");
@@ -402,7 +436,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
       return;
     }
 
-    // Record does not exist: show fresh form while keeping specs loaded
     setForm(buildFreshForm({ partName, partNo, date, shift, operationNo }));
     setSignatures(emptySignatures);
     setIsSavedRecord(false);
@@ -411,7 +444,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     if (forceSpecs || isSavedRef.current || rowsRef.current.length === 0) {
       await fetchControlSpecifications(partName, operationNo, seq);
     } else {
-      // Clear inspection measurements while preserving control specs
       setRows((prev) =>
         prev.map((r, i) => ({
           ...r,
@@ -429,7 +461,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     }
   };
 
-  // Part change
   const handlePartNameChange = (val) => {
     const matchedPartSet = partSets.find((p) => p.partName === val);
     const matchedMachine = machineDetails.find((m) => m.partName === val);
@@ -452,7 +483,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     loadSelection(val, partNoVal, form.date, form.shift, form.operationNo, true);
   };
 
-  // Date change
   const handleDateChange = (val) => {
     setForm((prev) => ({ ...prev, date: val }));
     if (form.partName && val) {
@@ -460,7 +490,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     }
   };
 
-  // Shift change: updates the form state and queries record, keeping control specs unchanged
   const handleShiftChange = (val) => {
     setForm((prev) => ({ ...prev, shift: val }));
     if (form.partName && form.date) {
@@ -468,13 +497,13 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     }
   };
 
-  // Operation No change: updates the form state and queries record, keeping control specs unchanged
   const handleOperationNoChange = (val) => {
     setForm((prev) => ({ ...prev, operationNo: val }));
     if (form.partName && form.date) {
       loadSelection(form.partName, form.partNo, form.date, form.shift, val, true);
     }
   };
+
   useEffect(() => {
     if (lineSet?.partName && !form.partName) {
       setForm((prev) => ({
@@ -484,7 +513,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
       }));
       loadSelection(lineSet.partName, lineSet.partNo || "", form.date, form.shift, form.operationNo, true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineSet]);
 
   useEffect(() => {
@@ -499,7 +527,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
       setForm((prev) => ({ ...prev, partName: qPart, date: dateVal, shift: shiftVal, operationNo: opVal }));
       loadSelection(qPart, "", dateVal, shiftVal, opVal, true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const updateRow = (idx, field, val) => {
@@ -533,6 +560,7 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     if (isSavedRecord) return;
     setRows((prev) => [...prev, createEmptyInspectionRow(prev.length + 1)]);
   };
+
   const attachImage = async (idx, blob) => {
     try {
       updateRow(idx, "image", await blobToCompressedDataUrl(blob));
@@ -568,7 +596,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     });
   };
 
-  // PDF Download Handler
   const handleDownloadPdf = async () => {
     if (!form.partName || !form.date) {
       triggerToast("Please select Part Name and Date to preview PDF.", "error");
@@ -612,7 +639,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     }
   };
 
-  // Shift Incharge signs directly - with validation checks
   const handleApproveShiftIncharge = () => {
     if (isSavedRecord) return;
     if (!isShiftIncharge) {
@@ -640,7 +666,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
     triggerToast("Shift Incharge Approved!", "success");
   };
 
-  // Save Verification Record - with complete validations
   const handleSaveVerification = async () => {
     if (isSavedRecord) return;
 
@@ -701,16 +726,11 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
         slNo: i + 1,
         controlName: r.controlName.trim(),
         specification: r.specification.trim(),
+        image: r.image || "",
       })),
       signatures: {
         shiftIncharge: signatures.shiftIncharge,
       },
-      controlSpecifications: validRows.map((r, i) => ({
-        slNo: i + 1,
-        controlName: r.controlName.trim(),
-        specification: r.specification.trim(),
-        image: r.image || "",
-      })),
     };
 
     try {
@@ -814,7 +834,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
         </div>
       )}
 
-      {/* SAVING OVERLAY */}
       {isSaving && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
@@ -824,10 +843,7 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
         </div>
       )}
 
-      {/* MAIN DOCUMENT CARD */}
       <div className={`bg-white w-full max-w-[98rem] rounded-xl p-4 sm:p-6 md:p-8 shadow-2xl border-4 border-gray-100 space-y-6 ${lockedTextCls}`}>
-
-        {/* CARD HEADER & PDF PREVIEW */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -846,10 +862,8 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {formMeta.title}
             </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
-              <span>|</span>
-              <span>Revision: {formMeta.revision} ({formMeta.revisionDate})</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
               <span>|</span>
               <span className="font-bold text-orange-600">Shop ID: {shopId || 3}</span>
             </div>
@@ -866,7 +880,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           </div>
         </div>
 
-        {/* SECTION 1: REASON FOR JOB SETUP */}
         <fieldset disabled={isSavedRecord} className="border border-gray-800 p-3 bg-gray-50 text-xs rounded min-w-0">
           <span className="font-bold text-gray-900 uppercase block mb-1.5">Reason for job setup:</span>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -890,11 +903,8 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           </div>
         </fieldset>
 
-        {/* SECTION 2: BASIC INFO & TIME TRACKING GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-2 border border-gray-800 text-xs rounded overflow-hidden">
-          {/* Left Column: Job Information */}
           <div className="p-3.5 border-b lg:border-b-0 lg:border-r border-gray-800 space-y-2.5 bg-white">
-            {/* Part Name Dropdown (Always selectable) */}
             <div className="flex items-center">
               <label className="w-36 font-bold text-gray-800">Part Name:</label>
               <select
@@ -911,7 +921,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
               </select>
             </div>
 
-            {/* Date / Shift (Always selectable to switch records) */}
             <div className="flex items-center gap-2">
               <label className="w-36 font-bold text-gray-800">Date / Shift:</label>
               <div className="flex-1 flex gap-2">
@@ -933,7 +942,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
               </div>
             </div>
 
-            {/* Operation No Dropdown (Always selectable to switch records) */}
             <div className="flex items-center">
               <label className="w-36 font-bold text-gray-800">Operation No:</label>
               <div className="flex-1 flex gap-2">
@@ -952,7 +960,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
               </div>
             </div>
 
-            {/* Locked fields once saved */}
             <fieldset disabled={isSavedRecord} className="space-y-2.5 min-w-0">
               <div className="flex items-center">
                 <label className="w-36 font-bold text-gray-800">Setter Name:</label>
@@ -978,7 +985,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
             </fieldset>
           </div>
 
-          {/* Right Column: Time Tracking */}
           <fieldset disabled={isSavedRecord} className="p-3.5 space-y-2 bg-orange-50/40 min-w-0">
             <div className="flex items-center justify-between">
               <span className="font-bold text-gray-800">a) Setting Started at :</span>
@@ -1046,7 +1052,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           </fieldset>
         </div>
 
-        {/* SECTION 3: DETAILS OF SETTING CHANGE */}
         <div className="border border-gray-800 text-xs overflow-x-auto rounded">
           <fieldset disabled={isSavedRecord} className="min-w-0">
             <table className="w-full border-collapse text-center min-w-[750px]">
@@ -1162,14 +1167,11 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           </fieldset>
         </div>
 
-        {/* INSTRUCTION BAR */}
         <div className="bg-orange-100 border border-orange-300 p-2 text-xs font-semibold text-orange-950 text-center rounded">
           ⚠️ Before setting change clear all the running items after completion of all operation from the hand.
         </div>
 
-        {/* SECTION 4: ACTUAL VALUES INSPECTION TABLE */}
         <div className="space-y-2">
-          {/* SPECIAL SYMBOLS TOOLBAR */}
           {!isSavedRecord && (
             <div className="bg-orange-50 border border-orange-200 p-2.5 rounded flex flex-wrap items-center gap-1.5 text-xs shadow-inner">
               <span className="font-bold text-gray-800 mr-2 uppercase text-[11px]">
@@ -1249,7 +1251,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                       <tr key={`row-${idx}`} className="h-9 hover:bg-orange-50/30">
                         <td className="border border-gray-800 p-1 font-bold bg-gray-50">{r.slNo || idx + 1}</td>
 
-                        {/* Control Name */}
                         <td className={`border border-gray-800 p-0 text-left px-1.5 font-bold uppercase text-[11px] ${isControlLocked ? "bg-gray-50/50" : "bg-white"}`}>
                           <input
                             type="text"
@@ -1264,7 +1265,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                           />
                         </td>
 
-                        {/* Control Specification */}
                         <td
                           className={`border border-gray-800 p-1 text-left px-1.5 font-bold text-gray-900 ${isControlLocked ? "bg-gray-50/80" : "bg-white"}`}
                           onPaste={(e) => handleCellPaste(e, idx)}
@@ -1312,7 +1312,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                           )}
                         </td>
 
-                        {/* Actual Values LH1 to RH3 */}
                         {["LH1", "RH1", "LH2", "RH2", "LH3", "RH3"].map((f) => (
                           <td key={f} className="border border-gray-800 p-0">
                             <input
@@ -1328,7 +1327,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                           </td>
                         ))}
 
-                        {/* OK / NOT OK Status */}
                         <td className="border border-gray-800 p-1">
                           <select
                             className="w-full text-center font-bold text-xs p-1 rounded outline-none bg-white text-gray-800 border border-gray-300"
@@ -1341,7 +1339,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                           </select>
                         </td>
 
-                        {/* Remarks */}
                         <td className="border border-gray-800 p-0">
                           <input
                             type="text"
@@ -1355,7 +1352,6 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
                           />
                         </td>
 
-                        {/* Action Column for Non-saved forms */}
                         {!isSavedRecord && (
                           <td className="border border-gray-800 p-1">
                             {!r.isExisting ? (
@@ -1381,18 +1377,15 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           </div>
         </div>
 
-        {/* SECTION 5: NOTES SECTION */}
         <div className="border border-gray-800 p-3 bg-gray-50 text-[11px] space-y-1 rounded">
           <span className="font-bold text-gray-900 block">Note:</span>
-1.           <p>For setting trial prefer rejected components should be marked with pink paint identification. If pink colour component is not available, put red paint mark on the line part with proper higher authority approval so as to use it. The same should be verified and disposed.
-</p>
+          <p>1. For setting trial prefer rejected components should be marked with pink paint identification. If pink colour component is not available, put red paint mark on the line part with proper higher authority approval so as to use it. The same should be verified and disposed.</p>
           <p>2. To identify control specification refer JSV parameter in relevant work instruction (process sheet). Do statistical approval for special characteristics for 3 subgroups.</p>
           <p>3. Keep the set up part with proper traceability, and if found any deviation reactivity is applied.</p>
           <p>4. After Regular holiday product conformance will done by inprocess gauges and final inspection gauges.</p>
           <p>5. Error proofs and Process parameters should be verified during set-up change.</p>
         </div>
 
-        {/* SECTION 6: SIGNATURES BLOCK */}
         <div className="overflow-x-auto mt-6">
           <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center min-w-[800px]">
             <thead>
@@ -1465,9 +1458,8 @@ const fetchControlSpecifications = async (partName, operationNo, seq) => {
           </table>
         </div>
 
-        {/* BOTTOM ACTIONS */}
         <div className="flex justify-between items-center pt-4 border-t border-gray-300">
-          <span className="text-xs text-gray-500 font-semibold">{formMeta.formCode}, Rev.No: {formMeta.revision} dt {formMeta.revisionDate}</span>
+          <span className="text-xs text-gray-500 font-semibold">{qfValue}</span>
           <button
             type="button"
             onClick={handleSaveVerification}

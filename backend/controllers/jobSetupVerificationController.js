@@ -3,9 +3,24 @@ const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
 
-// ============================================================
-// HELPERS
-// ============================================================
+// Auto-ensure OperationNo column exists in JobSetupControlMaster table
+(async () => {
+  try {
+    await sql.query(`
+      IF NOT EXISTS (
+        SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'JobSetupControlMaster' AND COLUMN_NAME = 'OperationNo'
+      )
+      BEGIN
+        ALTER TABLE dbo.JobSetupControlMaster ADD OperationNo NVARCHAR(100) NOT NULL DEFAULT '';
+      END
+    `);
+    console.log("✅ JobSetupControlMaster table schema verified (OperationNo column present).");
+  } catch (err) {
+    console.error("Schema migration warning (JobSetupControlMaster):", err.message);
+  }
+})();
+
 const isPendingValue = (v) =>
   !v || String(v).trim() === "" || String(v).trim().toLowerCase() === "pending";
 
@@ -19,7 +34,6 @@ const safeParse = (raw, fallback) => {
   }
 };
 
-// Keep only rows that have something in them and renumber Sl.No
 const MAX_IMAGE_CHARS = 3_000_000;
 const cleanImage = (v) => {
   const s = typeof v === "string" ? v : "";
@@ -36,9 +50,6 @@ const cleanSpecs = (specs) =>
     .filter((s) => s.controlName || s.specification || s.image)
     .map((s, i) => ({ slNo: i + 1, ...s }));
 
-// ============================================================
-// 1. GET MASTER CONTROL SPECIFICATIONS (BY PART NAME ONLY)
-// ============================================================
 const getControlSpecifications = async (req, res) => {
   const { partName, operationNo } = req.query;
   if (!partName || !operationNo) {
@@ -71,9 +82,6 @@ const getControlSpecifications = async (req, res) => {
   }
 };
 
-// ============================================================
-// 2. LIST ALL PARTS THAT HAVE MASTER SPECIFICATIONS CONFIGURED
-// ============================================================
 const listMasterSpecifications = async (req, res) => {
   try {
     const result = await new sql.Request().query(`
@@ -98,9 +106,6 @@ const listMasterSpecifications = async (req, res) => {
   }
 };
 
-// ============================================================
-// 3. SAVE / UPDATE MASTER CONTROL SPECIFICATIONS (BY PART NAME ONLY)
-// ============================================================
 const saveControlSpecifications = async (req, res) => {
   const { partName, partNo, operationNo, specifications, username } = req.body;
   if (!partName || !String(partName).trim()) {
@@ -160,9 +165,6 @@ const saveControlSpecifications = async (req, res) => {
   }
 };
 
-// ============================================================
-// 4. GET EXISTING RECORD FOR PART NAME + DATE (+ SHIFT + OP NO)
-// ============================================================
 const getJobSetupRecord = async (req, res) => {
   const { partName, date, shopId, shift, operationNo } = req.query;
 
@@ -208,9 +210,6 @@ const getJobSetupRecord = async (req, res) => {
   }
 };
 
-// ============================================================
-// 5. SAVE JOB SETUP VERIFICATION (SYNC SPECS BY PART NAME ONLY)
-// ============================================================
 const saveJobSetupVerification = async (req, res) => {
   const {
     machineShop,
@@ -273,7 +272,6 @@ const saveJobSetupVerification = async (req, res) => {
     const reportDate = String(date).split("T")[0];
     const shopVal = String(machineShop || "3");
 
-    // Uniqueness checked per Part Name + Date + Shift + Operation No
     const existReq = transaction.request();
     existReq.input("machineShop", sql.VarChar(50), shopVal);
     existReq.input("partName", sql.NVarChar(255), String(partName).trim());
@@ -299,8 +297,6 @@ const saveJobSetupVerification = async (req, res) => {
       });
     }
 
-    // Sync specs to master (strictly keyed by PartName)
-        // Sync specs to master (keyed by PartName + OperationNo)
     const cleanedIncoming = cleanSpecs(controlSpecifications);
     const opKey = String(operationNo).trim();
     if (cleanedIncoming.length > 0) {
@@ -329,7 +325,6 @@ const saveJobSetupVerification = async (req, res) => {
           }
         });
 
-        // slNo AFTER the spread, otherwise old slNo values win
         const reindexed = merged.map((m, i) => ({ ...m, slNo: i + 1 }));
 
         const updateMasterReq = transaction.request();
@@ -359,7 +354,6 @@ const saveJobSetupVerification = async (req, res) => {
       }
     }
 
-    // Insert new record
     const request = transaction.request();
     request.input("machineShop", sql.VarChar(50), shopVal);
     request.input("partName", sql.NVarChar(255), String(partName).trim());
@@ -438,9 +432,6 @@ const saveJobSetupVerification = async (req, res) => {
   }
 };
 
-// ============================================================
-// 6. GET SINGLE VERIFICATION RECORD BY ID
-// ============================================================
 const getJobSetupVerificationById = async (req, res) => {
   const { id } = req.params;
   try {
@@ -452,9 +443,6 @@ const getJobSetupVerificationById = async (req, res) => {
   }
 };
 
-// ============================================================
-// 7. HOF-INSPECTION USERS
-// ============================================================
 const getHofInspectionUsers = async (req, res) => {
   try {
     const r = await sql.query`
@@ -475,9 +463,6 @@ const getHofInspectionUsers = async (req, res) => {
   }
 };
 
-// ============================================================
-// 8. PENDING LISTS
-// ============================================================
 const makePendingHandler = (signCol, assignedCol, label) => async (req, res) => {
   try {
     const { name } = req.params;
@@ -526,9 +511,6 @@ const getQcPending = makePendingHandler("Sign_Inspector", "AssignedQc", "QC");
 const getHofInspectionPending = makePendingHandler("Sign_HofInspection", "AssignedHofInspection", "HOF-INSPN");
 const getHofProductionPending = makePendingHandler("Sign_HofProduction", "AssignedHofProduction", "HOF-PRODN");
 
-// ============================================================
-// 9. SIGN ENDPOINTS
-// ============================================================
 const doneExpr = (col) => `(ISNULL(${col}, '') NOT IN ('', 'Pending'))`;
 
 const makeSignHandler = ({ signCol, assignedCol, otherCols, label }) => async (req, res) => {
@@ -595,9 +577,6 @@ const signHofProductionApproval = makeSignHandler({
   label: "HOF-PRODN",
 });
 
-// ============================================================
-// 10. PDF REPORT GENERATOR
-// ============================================================
 const generatePdfReport = async (req, res) => {
   try {
     const { partName, date, shopId, shift, operationNo } = req.query;
@@ -642,6 +621,41 @@ const generatePdfReport = async (req, res) => {
       return res.status(404).send("No inspection record found to generate PDF.");
     }
 
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date 
+        FROM JobSetupVerificationQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch JobSetupVerificationQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/07/MPD-03, Rev.No: 03 dt 31.01.2025";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
+
+    const effectiveQf = getEffectiveQfValue(record.ReportDateStr || record.ReportDate);
+
     let displayDate = "-";
     if (record.ReportDateStr) {
       const [yy, mm, dd] = String(record.ReportDateStr).split("-");
@@ -658,7 +672,6 @@ const generatePdfReport = async (req, res) => {
     const totalWidth = doc.page.width - 40;
     const startX = 20;
 
-    // Header Block
     doc.lineWidth(1).strokeColor("black");
     doc.rect(startX, 20, 100, 35).stroke();
 
@@ -674,9 +687,8 @@ const generatePdfReport = async (req, res) => {
 
     doc.rect(startX + totalWidth - 140, 20, 140, 35).stroke();
     doc.font("Helvetica-Bold").fontSize(8).text(`Date: ${displayDate} | Shift: ${record.Shift || "1st"}`, startX + totalWidth - 140, 26, { width: 140, align: "center" });
-    doc.font("Helvetica").fontSize(7).text("QF/07/MPD-03, Rev.No: 03", startX + totalWidth - 140, 40, { width: 140, align: "center" });
+    doc.font("Helvetica").fontSize(7).text(effectiveQf, startX + totalWidth - 140, 40, { width: 140, align: "center" });
 
-    // Sub-header details
     doc.rect(startX, 58, totalWidth, 40).stroke();
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor("black");
     doc.text(`Part Name: ${record.PartName || "-"}`, startX + 5, 63);
@@ -687,7 +699,6 @@ const generatePdfReport = async (req, res) => {
     doc.text(`Setting Time: ${record.SettingTime || "-"}`, startX + 500, 74);
     doc.text(`Total Time: ${record.TotalTime || "-"}`, startX + 500, 85);
 
-    // Actual Values Table
     let tableY = 104;
     const colWidths = [30, 160, 200, 40, 40, 40, 40, 40, 40, 50, totalWidth - 680];
     const headers = ["Sl.No", "Control", "Specification", "LH 1", "RH 1", "LH 2", "RH 2", "LH 3", "RH 3", "Status", "Remarks"];
@@ -756,7 +767,6 @@ const generatePdfReport = async (req, res) => {
       tableY += rowH;
     });
 
-    // Signatures
     let sigY = Math.max(tableY + 10, doc.page.height - 50);
     const sigColW = totalWidth / 4;
 
@@ -779,9 +789,6 @@ const generatePdfReport = async (req, res) => {
   }
 };
 
-// ============================================================
-// 11. GET PART SETS DYNAMICALLY BY SHOP ID
-// ============================================================
 const getShopPartSets = async (req, res) => {
   const { shopId } = req.params;
   const shopIdClean = String(shopId || "3").replace(/[^a-zA-Z0-9]/g, "");

@@ -312,11 +312,11 @@ const generateBreakdownPdfReport = async (req, res) => {
       return res.status(404).send("No records found for the selected parameters.");
     }
 
-    // --- Fetch QF History for Breakdown Intimation Report ---
+    // --- Fetch QF History for Breakdown Intimation Report with formatted date ---
     let qfHistory = [];
     try {
       const qfRes = await sql.query(`
-        SELECT id, formName, qfValue, date 
+        SELECT id, formName, qfValue, FORMAT(date, 'yyyy-MM-dd') AS date 
         FROM BreakdownIntimationQFvalues 
         ORDER BY date DESC, id DESC
       `);
@@ -363,7 +363,7 @@ const generateBreakdownPdfReport = async (req, res) => {
       if (idx > 0) doc.addPage();
 
       let currY = 25;
-      const effectiveQf = getEffectiveQfValue(r.reportDate); // <-- Dynamically resolves past or present QF version based on record date
+      const effectiveQf = getEffectiveQfValue(r.reportDate); // Dynamically resolves past or present QF version based on record date
 
       doc.font("Helvetica-Bold").fontSize(15).fillColor("black").text("SAKTHI", startX, currY);
       doc.fontSize(13).text("AUTO", startX, currY + 15);
@@ -652,7 +652,6 @@ const generateBreakdownPdfReport = async (req, res) => {
     }
   }
 };
-
 module.exports = {
   saveBreakdownIntimationReport,
   getBreakdownIntimationReports,

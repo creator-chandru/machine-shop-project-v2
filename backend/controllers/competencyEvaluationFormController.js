@@ -382,7 +382,7 @@ const generateReport = async (req, res) => {
     let qfHistory = [];
     try {
       const qfRes = await sql.query(`
-        SELECT id, formName, qfValue, date 
+        SELECT id, formName, qfValue, FORMAT(date, 'yyyy-MM-dd') AS date 
         FROM CompetencyEvaluationQFvalues 
         ORDER BY date DESC, id DESC
       `);
@@ -752,7 +752,6 @@ const generateReport = async (req, res) => {
     else res.end();
   }
 };
-
 module.exports = {
   getHodIncharges,
   saveCompetencyEvaluationForm,

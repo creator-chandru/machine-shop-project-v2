@@ -11,12 +11,13 @@ const FORM_QF_TABLES = {
   "daily-production-report": "DailyProductionReportQFvalues",
   "daily-production-idle-time": "DailyProductionIdleTimeQFvalues",
   "breakdown-intimation-report": "BreakdownIntimationQFvalues",
-  "operator-observation-sheet": "OperatorObservationQFvalues",
+  "operator-observation-sheet": "OperatorObservationSheetQFvalues",
   "competency-evaluation-form": "CompetencyEvaluationQFvalues",
   "corrective-action-register": "CorrectiveActionQFvalues",
   "eight-d-report": "EightDReportQFvalues",
   "job-setup-verification": "JobSetupVerificationQFvalues",
-  "operator-allotment": "OperatorAllotmentQFvalues" // <-- Added
+  "operator-allotment": "OperatorAllotmentQFvalues",
+  "operator-observation-plan": "OperatorObservationPlanQFvalues" // <-- Added
 };
 
 // GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]

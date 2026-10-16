@@ -262,7 +262,7 @@ const saveOperatorObservationPlan = async (req, res) => {
 };
 
 // ============================================================
-// 3. PDF REPORT FOR A SPECIFIC EMP NO
+// 3. PDF REPORT FOR A SPECIFIC EMP NO (WITH DYNAMIC QF VALUES)
 // ============================================================
 const generateReport = async (req, res) => {
   try {
@@ -302,6 +302,42 @@ const generateReport = async (req, res) => {
     const first = records[0];
     const safeEmp = String(first.empNo).replace(/[^A-Za-z0-9_-]/g, '_');
 
+    // Fetch QF History for dynamic versioning
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT id, formName, qfValue, date 
+        FROM OperatorObservationPlanQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (qfErr) {
+      console.error("Warning: Could not fetch OperatorObservationPlanQFvalues:", qfErr.message);
+    }
+
+    const getEffectiveQfValue = (recordDateStr) => {
+      const fallback = "QF/XX/MPD-XX | Revision 00 | Revision Date: 01.01.2024";
+      if (!qfHistory || qfHistory.length === 0) return fallback;
+
+      if (recordDateStr) {
+        const targetDate = new Date(recordDateStr);
+        targetDate.setHours(0, 0, 0, 0);
+
+        for (let qf of qfHistory) {
+          if (!qf.date) continue;
+          const qfDate = new Date(qf.date);
+          qfDate.setHours(0, 0, 0, 0);
+
+          if (qfDate <= targetDate) {
+            return qf.qfValue;
+          }
+        }
+      }
+      return qfHistory[0]?.qfValue || fallback;
+    };
+
+    const effectiveQf = getEffectiveQfValue(first.planDateTime || first.doj);
+
     const doc = new PDFDocument({ margin: 20, size: "A4", layout: "landscape", bufferPages: true, autoPageBreak: false });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename=Operator_Observation_Plan_${safeEmp}.pdf`);
@@ -324,16 +360,16 @@ const generateReport = async (req, res) => {
         doc.font("Helvetica-Bold").fontSize(10).fillColor('black').text("SAKTHI\nAUTO", startX, topMargin + 8, { width: 90, align: "center" });
       }
 
-      const titleW = totalWidth - 90 - 160;
+      const titleW = totalWidth - 90 - 180;
       doc.rect(startX + 90, topMargin, titleW, headerH).stroke();
       doc.font("Helvetica-Bold").fontSize(11).fillColor('black')
         .text("OPERATOR OBSERVATION PLAN", startX + 90, topMargin + 12, { width: titleW, align: "center" });
 
-      doc.rect(startX + totalWidth - 160, topMargin, 160, headerH).stroke();
+      doc.rect(startX + totalWidth - 180, topMargin, 180, headerH).stroke();
       doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black')
-        .text(`MACHINE SHOP: ${first.MachineShop}`, startX + totalWidth - 160, topMargin + 6, { width: 160, align: "center" });
-      doc.font("Helvetica").fontSize(7)
-        .text(`EMP NO: ${first.empNo}`, startX + totalWidth - 160, topMargin + 18, { width: 160, align: "center" });
+        .text(`SHOP: ${first.MachineShop} | EMP: ${first.empNo}`, startX + totalWidth - 180, topMargin + 5, { width: 180, align: "center" });
+      doc.font("Helvetica").fontSize(6.5).fillColor('black')
+        .text(effectiveQf, startX + totalWidth - 180, topMargin + 18, { width: 180, align: "center" });
 
       const infoY = topMargin + headerH + 6;
       const infoH = 20;

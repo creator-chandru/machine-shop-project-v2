@@ -7,7 +7,6 @@ const GAP_MONTHS = 6;
 const GENERATED_COUNT = 3; // next plans generated after a date is chosen
 const LOADED_COUNT = 3; // last saved plans loaded (locked) for an existing employee
 
-// TODO: replace with the real values printed on the form
 const formMeta = {
   formCode: "QF/XX/MPD-XX",
   revision: "00",
@@ -113,6 +112,10 @@ export default function OperatorObservationPlan() {
   const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0 });
   const dropdownRef = useRef(null);
 
+  // QF History & Dynamic QF Value State
+  const [qfHistory, setQfHistory] = useState([]);
+  const [qfValue, setQfValue] = useState("QF/XX/MPD-XX, Revision 00 dt 01.01.2024");
+
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -153,9 +156,9 @@ export default function OperatorObservationPlan() {
     };
   }, [openDropdownRow]);
 
-  // Load dropdown options (max 10)
+  // Load dropdown options & QF History
   useEffect(() => {
-    const loadEmployeeOptions = async () => {
+    const loadMasterData = async () => {
       try {
         const params = new URLSearchParams({
           machineShop: String(shopId || 3),
@@ -166,21 +169,53 @@ export default function OperatorObservationPlan() {
           { headers: authHeaders() }
         );
 
-        if (!res.ok) {
-          throw new Error("Failed to load employee-number options");
+        if (res.ok) {
+          const data = await res.json();
+          setEmployeeOptions(
+            Array.isArray(data.employeeNumbers) ? data.employeeNumbers : []
+          );
         }
 
-        const data = await res.json();
-        setEmployeeOptions(
-          Array.isArray(data.employeeNumbers) ? data.employeeNumbers : []
-        );
+        const qfRes = await fetch(`${API}/api/qf-values/history/operator-observation-plan`, {
+          headers: authHeaders(),
+        }).catch(() => null);
+        if (qfRes && qfRes.ok) {
+          const historyData = await qfRes.json();
+          setQfHistory(historyData || []);
+        }
       } catch (err) {
-        console.error("Employee-number dropdown error:", err);
+        console.error("Master data load error:", err);
       }
     };
 
-    loadEmployeeOptions();
+    loadMasterData();
   }, [shopId]);
+
+  // Compute active QF value based on effective date
+  useEffect(() => {
+    let currentQf = "QF/XX/MPD-XX, Revision 00 dt 01.01.2024";
+    const baseDate = rows[0]?.plans?.[0]?.planDateTime || rows[0]?.doj;
+
+    if (baseDate && qfHistory.length > 0) {
+      const selectedDate = new Date(baseDate);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      for (let qf of qfHistory) {
+        if (!qf.date) continue;
+        const qfDate = new Date(qf.date);
+        qfDate.setHours(0, 0, 0, 0);
+
+        if (qfDate <= selectedDate) {
+          currentQf = qf.qfValue;
+          break;
+        }
+      }
+    } else if (qfHistory.length > 0) {
+      currentQf = qfHistory[0].qfValue;
+    }
+
+    setQfValue(currentQf);
+  }, [rows, qfHistory]);
 
   // Toggle Dropdown Menu
   const toggleDropdown = (rIdx, buttonEl) => {
@@ -727,12 +762,8 @@ export default function OperatorObservationPlan() {
               <span className="text-xs font-bold text-orange-600 tracking-wider uppercase">{formMeta.company}</span>
             </div>
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">{formMeta.title}</h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-              <span>Form Code: {formMeta.formCode}</span>
-              <span>|</span>
-              <span>Revision: {formMeta.revision}</span>
-              <span>|</span>
-              <span>Revision Date: {formMeta.revisionDate}</span>
+            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
+              <span>{qfValue}</span>
               <span>|</span>
               <span className="font-bold text-orange-600">Shop ID: {shopId}</span>
             </div>

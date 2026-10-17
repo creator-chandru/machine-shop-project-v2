@@ -5,13 +5,12 @@ const path = require('path');
 
 const VALID_ACTUAL = ['COMPLETED', 'NOT COMPLETED'];
 
-// ---------- helpers ----------
+// Helpers
 const normalizeActual = (v) => {
   const s = String(v || '').trim().toUpperCase();
   return VALID_ACTUAL.includes(s) ? s : null;
 };
 
-// "2026-10-12T09:30" -> "2026-10-12T09:30:00" (kept as string to avoid timezone shifts)
 const toSqlDateTime = (v) => {
   const m = String(v || '').trim().match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
   return m ? `${m[1]}T${m[2]}:00` : null;
@@ -22,7 +21,6 @@ const toSqlDate = (v) => {
   return m ? m[0] : null;
 };
 
-// "2026-10-12T09:30" -> "12/10/2026 09:30"
 const displayDateTime = (v) => {
   const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : '-';
@@ -33,9 +31,7 @@ const displayDate = (v) => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : '-';
 };
 
-// ============================================================
-// 1. GET EMPLOYEE PLANS (all saved slots, ordered by planNo)
-// ============================================================
+// 1. GET EMPLOYEE PLANS
 const getEmployeePlans = async (req, res) => {
   const { machineShop, empNo } = req.query;
 
@@ -82,9 +78,7 @@ const getEmployeePlans = async (req, res) => {
   }
 };
 
-// ============================================================
-// 2. SAVE OPERATOR OBSERVATION PLAN
-// ============================================================
+// 2. SAVE PLAN
 const saveOperatorObservationPlan = async (req, res) => {
   const { machineShop, rows, signature } = req.body;
 
@@ -97,7 +91,6 @@ const saveOperatorObservationPlan = async (req, res) => {
 
   const shop = parseInt(machineShop, 10) || 3;
 
-  // Validate payload + reject duplicate empNo in a single submission
   const seenEmp = new Set();
   for (const row of rows) {
     const empNo = String(row.empNo || '').trim();
@@ -139,7 +132,6 @@ const saveOperatorObservationPlan = async (req, res) => {
           `);
 
         if (existing.recordset.length === 0) {
-          // New plan slot
           await transaction.request()
             .input('machineShop', sql.Int, shop)
             .input('empName', sql.NVarChar(100), empName)
@@ -158,7 +150,6 @@ const saveOperatorObservationPlan = async (req, res) => {
               )
             `);
         } else if (!existing.recordset[0].actualStatus && actual) {
-          // Existing slot, ACTUAL still blank -> allowed to set once
           await transaction.request()
             .input('id', sql.Int, existing.recordset[0].id)
             .input('actualStatus', sql.NVarChar(20), actual)
@@ -176,7 +167,6 @@ const saveOperatorObservationPlan = async (req, res) => {
 
     await transaction.commit();
 
-    // Remember employee numbers for the dropdown.
     for (const row of rows) {
       const empNo = String(row.empNo || '').trim();
       if (!empNo) continue;
@@ -226,7 +216,6 @@ const saveOperatorObservationPlan = async (req, res) => {
       }
     }
 
-    // Keep only the 10 most recently used employee numbers per shop
     try {
       const cleanup = new sql.Request();
       cleanup.input('machineShop', sql.Int, shop);
@@ -261,9 +250,7 @@ const saveOperatorObservationPlan = async (req, res) => {
   }
 };
 
-// ============================================================
-// 3. PDF REPORT FOR A SPECIFIC EMP NO (WITH DYNAMIC QF VALUES)
-// ============================================================
+// 3. PDF REPORT GENERATOR WITH FIXED QF TABLE LOOKUP
 const generateReport = async (req, res) => {
   try {
     const { empNo, shopId } = req.query;
@@ -302,21 +289,21 @@ const generateReport = async (req, res) => {
     const first = records[0];
     const safeEmp = String(first.empNo).replace(/[^A-Za-z0-9_-]/g, '_');
 
-    // Fetch QF History for dynamic versioning
+    // FIX: Table query targeted to OperatorObservationQFvalues
     let qfHistory = [];
     try {
       const qfRes = await sql.query(`
         SELECT id, formName, qfValue, date 
-        FROM OperatorObservationPlanQFvalues 
+        FROM OperatorObservationQFvalues 
         ORDER BY date DESC, id DESC
       `);
       qfHistory = qfRes.recordset || [];
     } catch (qfErr) {
-      console.error("Warning: Could not fetch OperatorObservationPlanQFvalues:", qfErr.message);
+      console.error("Warning: Could not fetch OperatorObservationQFvalues:", qfErr.message);
     }
 
     const getEffectiveQfValue = (recordDateStr) => {
-      const fallback = "QF/XX/MPD-XX | Revision 00 | Revision Date: 01.01.2024";
+      const fallback = "QF/XX/MPD-XX, Revision 00 dt 01.01.2024";
       if (!qfHistory || qfHistory.length === 0) return fallback;
 
       if (recordDateStr) {
@@ -368,6 +355,8 @@ const generateReport = async (req, res) => {
       doc.rect(startX + totalWidth - 180, topMargin, 180, headerH).stroke();
       doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black')
         .text(`SHOP: ${first.MachineShop} | EMP: ${first.empNo}`, startX + totalWidth - 180, topMargin + 5, { width: 180, align: "center" });
+      
+      // Dynamic QF Value rendered on top right of PDF header
       doc.font("Helvetica").fontSize(6.5).fillColor('black')
         .text(effectiveQf, startX + totalWidth - 180, topMargin + 18, { width: 180, align: "center" });
 
@@ -460,9 +449,7 @@ const generateReport = async (req, res) => {
   }
 };
 
-// ============================================================
-// 4. GET SAVED EMPLOYEE-NUMBER OPTIONS (MAXIMUM 10)
-// ============================================================
+// 4. GET EMPLOYEE OPTIONS
 const getEmployeeNumberOptions = async (req, res) => {
   const machineShop = parseInt(req.query.machineShop, 10) || 3;
 
@@ -500,9 +487,7 @@ const getEmployeeNumberOptions = async (req, res) => {
   }
 };
 
-// ============================================================
-// 5. REMOVE AN EMPLOYEE-NUMBER OPTION
-// ============================================================
+// 5. REMOVE EMPLOYEE OPTION
 const removeEmployeeNumberOption = async (req, res) => {
   const machineShop = parseInt(req.query.machineShop, 10) || 3;
   const empNo = String(req.query.empNo || '').trim();

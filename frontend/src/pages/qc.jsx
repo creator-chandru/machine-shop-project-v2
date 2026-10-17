@@ -9,7 +9,10 @@ import {
   FileSpreadsheet, 
   Wrench, 
   FileText,
-  FileSearch
+  FileSearch,
+  Building2,
+  UserCheck,
+  CheckCircle2
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -26,9 +29,22 @@ const QC = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const currentUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
   const currentQC = currentUser.username || currentUser.employeeId || "qc";
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "";
@@ -126,6 +142,7 @@ const QC = () => {
   }, [shopId, activeFormType]);
 
   const handleOpenReviewModal = async (report) => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     setSelectedReport(report);
     setPdfUrl(null);
     setIsPdfLoading(true);
@@ -289,413 +306,542 @@ const QC = () => {
     }
   };
 
-  return (
-    <>
-      <Header />
-      <ToastContainer position="top-right" autoClose={2000} />
+  const handleRefreshAll = async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      fetchPendingReports(),
+      fetchPendingSignificantReports(),
+      fetchPendingEightDReports(),
+      fetchPendingJobSetupReports()
+    ]);
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
 
-      <div className="min-h-screen bg-[#2d2d2d] p-10 space-y-10">
-        <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-2xl p-8 border-t-4 border-orange-500">
-          <div className="flex justify-between items-center mb-6 border-b pb-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">
-                QC Verification Dashboard
-              </h1>
-              <p className="text-xs text-gray-500 mt-1">
-                Machine Shop-{shopId || 3} Pending QC Verification
+  return (
+    <div className="min-h-screen w-full bg-[#2d2d2d] font-sans text-gray-100 pb-16 selection:bg-[#ff9100]/30 selection:text-white">
+      <Header />
+      <ToastContainer position="top-right" autoClose={2000} theme="dark" />
+
+      {/* Main Page Content */}
+      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+        
+        {/* Primary Verification Workspace Card */}
+        <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden text-gray-800">
+          
+          {/* Card Topbar: Header, Logged In Info, and Controls */}
+          <div className="px-6 py-5 border-b border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl md:text-2xl font-black text-gray-900 uppercase tracking-tight">
+                  QC Verification Dashboard
+                </h1>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-[#ff9100]/15 text-[#ff9100] border border-[#ff9100]/30 shadow-sm">
+                  <Building2 className="w-3.5 h-3.5" />
+                  Machine Shop - {shopId || 3}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 font-medium">
+                Review and digitally verify pending tool change records, daily production, significant events, and inspection checklists.
               </p>
             </div>
-            <div className="flex items-center gap-3">
+
+            <div className="flex items-center gap-3 self-start md:self-auto">
+              <div className="flex items-center gap-2.5 bg-white border border-gray-300 px-3.5 py-1.5 rounded-xl shadow-sm text-xs">
+                <UserCheck className="w-4 h-4 text-orange-600" />
+                <span className="font-semibold text-gray-500">QC:</span>
+                <span className="font-extrabold text-gray-800 uppercase">{currentQC}</span>
+              </div>
+
               <button
                 type="button"
-                onClick={() => {
-                  fetchPendingReports();
-                  fetchPendingSignificantReports();
-                  fetchPendingEightDReports();
-                  fetchPendingJobSetupReports();
-                }}
-                className="p-2 text-gray-500 hover:text-orange-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                title="Refresh"
+                onClick={handleRefreshAll}
+                className="p-2.5 bg-white hover:bg-gray-100 text-gray-600 hover:text-orange-600 rounded-xl border border-gray-300 shadow-sm transition-all cursor-pointer group"
+                title="Refresh Records"
               >
-                <RefreshCw className="w-5 h-5" />
+                <RefreshCw className={`w-4 h-4 transition-transform duration-500 ${isRefreshing ? "animate-spin text-orange-600" : ""}`} />
               </button>
-              <span className="bg-orange-100 text-orange-800 px-4 py-2 rounded font-bold uppercase shadow-sm">
-                Logged in: {currentQC}
-              </span>
             </div>
           </div>
 
           {/* Form Selection Tabs */}
-          <div className="flex gap-4 mb-6 flex-wrap">
-            <button
-              onClick={() => setActiveFormType("tool-change")}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
-                activeFormType === "tool-change"
-                  ? "bg-orange-500 text-white shadow-md"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              <Wrench className="w-4 h-4" />
-              Tool Change Records
-            </button>
-            <button
-              onClick={() => setActiveFormType("daily-production")}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
-                activeFormType === "daily-production"
-                  ? "bg-orange-500 text-white shadow-md"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              Daily Production Reports
-            </button>
-            <button
-              onClick={() => setActiveFormType("significant")}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
-                activeFormType === "significant"
-                  ? "bg-orange-500 text-white shadow-md"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              Significant Event Records
-              {pendingSignificantReports.length > 0 && (
-                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
-                  {pendingSignificantReports.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveFormType("8d-report")}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
-                activeFormType === "8d-report"
-                  ? "bg-orange-500 text-white shadow-md"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              <FileSearch className="w-4 h-4" />
-              8D Problem Solving Reports
-              {pendingEightDReports.length > 0 && (
-                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
-                  {pendingEightDReports.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveFormType("job-setup")}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-all cursor-pointer ${
-                activeFormType === "job-setup"
-                  ? "bg-orange-500 text-white shadow-md"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              <ClipboardCheck className="w-4 h-4" />
-              Job Setup Verification
-              {pendingJobSetupReports.length > 0 && (
-                <span className="bg-white text-orange-500 text-[11px] font-extrabold px-2 py-0.5 rounded-full ml-1">
-                  {pendingJobSetupReports.length}
-                </span>
-              )}
-            </button>
+          <div className="px-6 py-4 border-b border-gray-200 bg-white">
+            <div className="inline-flex p-1 bg-gray-100 rounded-xl gap-1 border border-gray-200 flex-wrap">
+              <button
+                onClick={() => setActiveFormType("tool-change")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer ${
+                  activeFormType === "tool-change"
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                }`}
+              >
+                <Wrench className="w-4 h-4" />
+                Tool Change Records
+              </button>
+
+              <button
+                onClick={() => setActiveFormType("daily-production")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer ${
+                  activeFormType === "daily-production"
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Daily Production Reports
+              </button>
+
+              <button
+                onClick={() => setActiveFormType("significant")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer ${
+                  activeFormType === "significant"
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                Significant Event Records
+                {pendingSignificantReports.length > 0 && (
+                  <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ml-1 ${
+                    activeFormType === "significant" ? "bg-white text-orange-600" : "bg-gray-300 text-gray-800"
+                  }`}>
+                    {pendingSignificantReports.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveFormType("8d-report")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer ${
+                  activeFormType === "8d-report"
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                }`}
+              >
+                <FileSearch className="w-4 h-4" />
+                8D Problem Solving Reports
+                {pendingEightDReports.length > 0 && (
+                  <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ml-1 ${
+                    activeFormType === "8d-report" ? "bg-white text-orange-600" : "bg-gray-300 text-gray-800"
+                  }`}>
+                    {pendingEightDReports.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveFormType("job-setup")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer ${
+                  activeFormType === "job-setup"
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                }`}
+              >
+                <ClipboardCheck className="w-4 h-4" />
+                Job Setup Verification
+                {pendingJobSetupReports.length > 0 && (
+                  <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ml-1 ${
+                    activeFormType === "job-setup" ? "bg-white text-orange-600" : "bg-gray-300 text-gray-800"
+                  }`}>
+                    {pendingJobSetupReports.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
 
-          {/* TAB CONTENT: Tool Change & Daily Production */}
-          {(activeFormType === "tool-change" || activeFormType === "daily-production") && (
-            <div>
-              {pendingReports.length === 0 ? (
-                <p className="text-gray-500 italic py-6">
-                  No {activeFormType === "tool-change" ? "Tool Change" : "Daily Production"} records pending your review.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-gray-300">
-                    <thead className="bg-gray-800 text-white">
-                      <tr>
-                        <th className="p-3 border border-gray-300 w-20 text-center">ID</th>
-                        <th className="p-3 border border-gray-300">Date</th>
-                        <th className="p-3 border border-gray-300">Line Code</th>
-                        {activeFormType === "daily-production" && (
-                          <th className="p-3 border border-gray-300">Shift</th>
-                        )}
-                        <th className="p-3 border border-gray-300">Part Details</th>
-                        <th className="p-3 border border-gray-300">Shift Incharge</th>
-                        <th className="p-3 border border-gray-300">Status</th>
-                        <th className="p-3 border border-gray-300 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pendingReports.map((report) => (
-                        <tr key={report.id} className="hover:bg-gray-50">
-                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
-                            #{report.id}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-medium">
-                            {formatDate(report.reportDate)}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-bold">
-                            {report.lineCode}
-                          </td>
-                          {activeFormType === "daily-production" && (
-                            <td className="p-3 border border-gray-300 font-semibold">
-                              {report.shift || "I"}
-                            </td>
-                          )}
-                          <td className="p-3 border border-gray-300">
-                            {report.partName || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            {report.shiftInchargeName || report.toolChangedBySignature || "Shift Incharge"}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
-                              <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
-                                ✓ Signed
-                              </span>
-                            ) : (
-                              <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
-                                Pending Review
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3 border border-gray-300 text-center">
-                            {(!report.verifiedByQcSignature || report.verifiedByQcSignature === "Pending") && (
-                              <button
-                                onClick={() => handleOpenReviewModal(report)}
-                                className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded font-bold text-sm shadow transition-colors cursor-pointer"
-                              >
-                                Review & Sign
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          {/* Section Body */}
+          <div className="p-6 md:p-8">
+            
+            {/* TAB CONTENT: Tool Change & Daily Production */}
+            {(activeFormType === "tool-change" || activeFormType === "daily-production") && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-2">
+                  <div>
+                    <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                      Pending {activeFormType === "tool-change" ? "Tool Change Records" : "Daily Production Reports"}
+                    </h3>
+                    <p className="text-xs text-gray-500">Quality inspection verification and sign-off required.</p>
+                  </div>
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                    Total: {pendingReports.length}
+                  </span>
                 </div>
-              )}
-            </div>
-          )}
 
-          {/* TAB CONTENT: Significant Event Records */}
-          {activeFormType === "significant" && (
-            <div>
-              {pendingSignificantReports.length === 0 ? (
-                <p className="text-gray-500 italic py-6">
-                  No Significant Event Records pending your review.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-gray-300">
-                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
-                      <tr>
-                        <th className="p-3 border border-gray-300">Date</th>
-                        <th className="p-3 border border-gray-300">Line Name</th>
-                        <th className="p-3 border border-gray-300">Part Name</th>
-                        <th className="p-3 border border-gray-300">Event</th>
-                        <th className="p-3 border border-gray-300 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                      {pendingSignificantReports.map((report, idx) => (
-                        <tr key={`sig-${idx}`} className="hover:bg-orange-50/40 transition-colors">
-                          <td className="p-3 border border-gray-300 font-bold">
-                            {formatDate(report.recordDate)}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-bold text-orange-700">
-                            {report.lineCode}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            {report.partName || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300 text-gray-600">
-                            {report.event || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300 text-center">
-                            <button
-                              onClick={() => handleOpenReviewModal(report)}
-                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
-                            >
-                              Review & Sign
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB CONTENT: 8D Problem Solving Reports */}
-          {activeFormType === "8d-report" && (
-            <div>
-              {pendingEightDReports.length === 0 ? (
-                <p className="text-gray-500 italic py-6">
-                  No 8D Problem Solving Records pending your review.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-gray-300">
-                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
-                      <tr>
-                        <th className="p-3 border border-gray-300 w-16 text-center">ID</th>
-                        <th className="p-3 border border-gray-300">Date</th>
-                        <th className="p-3 border border-gray-300">Customer</th>
-                        <th className="p-3 border border-gray-300">Part No</th>
-                        <th className="p-3 border border-gray-300">Part Name</th>
-                        <th className="p-3 border border-gray-300">Shift</th>
-                        <th className="p-3 border border-gray-300">Status</th>
-                        <th className="p-3 border border-gray-300 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                      {pendingEightDReports.map((report) => (
-                        <tr key={`8d-${report.id}`} className="hover:bg-orange-50/40 transition-colors">
-                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
-                            #{report.id}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-bold">
-                            {formatDate(report.reportDate)}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-semibold">
-                            {report.customer || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-mono text-xs">
-                            {report.partNo || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            {report.partName || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-semibold">
-                            {report.shift || "1ST"}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
-                              <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
-                                ✓ Verified
-                              </span>
-                            ) : (
-                              <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
-                                Pending QC
-                              </span>
+                {pendingReports.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                    <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-bold text-gray-800">
+                      No {activeFormType === "tool-change" ? "Tool Change" : "Daily Production"} Records Pending
+                    </h4>
+                    <p className="text-xs text-gray-500 max-w-sm">All entries for this category have been verified by QC.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                            <th className="py-3.5 px-4 font-bold w-20 text-center">ID</th>
+                            <th className="py-3.5 px-4 font-bold">Date</th>
+                            <th className="py-3.5 px-4 font-bold">Line Code</th>
+                            {activeFormType === "daily-production" && (
+                              <th className="py-3.5 px-4 font-bold">Shift</th>
                             )}
-                          </td>
-                          <td className="p-3 border border-gray-300 text-center">
-                            <button
-                              onClick={() => handleOpenReviewModal(report)}
-                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
-                            >
-                              Review & Sign
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
+                            <th className="py-3.5 px-4 font-bold">Part Details</th>
+                            <th className="py-3.5 px-4 font-bold">Shift Incharge</th>
+                            <th className="py-3.5 px-4 font-bold">Status</th>
+                            <th className="py-3.5 px-4 font-bold text-right pr-6">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm">
+                          {pendingReports.map((report) => (
+                            <tr key={report.id} className="hover:bg-orange-50/30 transition-colors">
+                              <td className="py-4 px-4 text-center font-bold text-gray-400 font-mono text-xs">
+                                #{report.id}
+                              </td>
+                              <td className="py-4 px-4 font-medium text-gray-800 text-xs">
+                                {formatDate(report.reportDate)}
+                              </td>
+                              <td className="py-4 px-4 font-extrabold text-gray-900">
+                                <span className="px-2.5 py-1 rounded-md bg-gray-100 border border-gray-300 font-mono text-xs">
+                                  {report.lineCode}
+                                </span>
+                              </td>
+                              {activeFormType === "daily-production" && (
+                                <td className="py-4 px-4 font-semibold text-gray-700 text-xs">
+                                  {report.shift || "I"}
+                                </td>
+                              )}
+                              <td className="py-4 px-4 font-semibold text-gray-800">
+                                {report.partName || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 text-gray-600 text-xs">
+                                {report.shiftInchargeName || report.toolChangedBySignature || "Shift Incharge"}
+                              </td>
+                              <td className="py-4 px-4">
+                                {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                    ✓ Signed
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                    Pending Review
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-4 px-4 text-right pr-6">
+                                {(!report.verifiedByQcSignature || report.verifiedByQcSignature === "Pending") && (
+                                  <button
+                                    onClick={() => handleOpenReviewModal(report)}
+                                    className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md shadow-orange-500/20 transition-all cursor-pointer"
+                                  >
+                                    <FileText className="w-3.5 h-3.5" />
+                                    Review & Sign
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
-          {/* TAB CONTENT: Job Setup Verification (Inspector sign) */}
-          {activeFormType === "job-setup" && (
-            <div>
-              {pendingJobSetupReports.length === 0 ? (
-                <p className="text-gray-500 italic py-6">
-                  No Job Setup Verification records pending your review.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-gray-300">
-                    <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
-                      <tr>
-                        <th className="p-3 border border-gray-300 w-16 text-center">ID</th>
-                        <th className="p-3 border border-gray-300">Date</th>
-                        <th className="p-3 border border-gray-300">Part Name</th>
-                        <th className="p-3 border border-gray-300">Operation No</th>
-                        <th className="p-3 border border-gray-300">Shift</th>
-                        <th className="p-3 border border-gray-300">Setter</th>
-                        <th className="p-3 border border-gray-300">Status</th>
-                        <th className="p-3 border border-gray-300 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                      {pendingJobSetupReports.map((report) => (
-                        <tr key={`js-${report.id}`} className="hover:bg-orange-50/40 transition-colors">
-                          <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
-                            #{report.id}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-bold">
-                            {formatDate(report.reportDate)}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-bold">
-                            {report.partName || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-semibold">
-                            {report.operationNo || "N/A"}
-                          </td>
-                          <td className="p-3 border border-gray-300 font-semibold">
-                            {report.shift || "1st"}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            {report.shiftInchargeName || "Shift Incharge"}
-                          </td>
-                          <td className="p-3 border border-gray-300">
-                            <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">
-                              Pending Review
-                            </span>
-                          </td>
-                          <td className="p-3 border border-gray-300 text-center">
-                            <button
-                              onClick={() => handleOpenReviewModal(report)}
-                              className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
-                            >
-                              Review & Sign
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* TAB CONTENT: Significant Event Records */}
+            {activeFormType === "significant" && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-2">
+                  <div>
+                    <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                      Pending Significant Event Records
+                    </h3>
+                    <p className="text-xs text-gray-500">Examine recorded line and event disruptions before QC verification.</p>
+                  </div>
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                    Total: {pendingSignificantReports.length}
+                  </span>
                 </div>
-              )}
-            </div>
-          )}
+
+                {pendingSignificantReports.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                    <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-bold text-gray-800">No Significant Event Records Pending</h4>
+                    <p className="text-xs text-gray-500 max-w-sm">All significant event entries have been reviewed.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                            <th className="py-3.5 px-4 font-bold">Date</th>
+                            <th className="py-3.5 px-4 font-bold">Line Code</th>
+                            <th className="py-3.5 px-4 font-bold">Part Name</th>
+                            <th className="py-3.5 px-4 font-bold">Event Details</th>
+                            <th className="py-3.5 px-4 font-bold text-right pr-6">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm">
+                          {pendingSignificantReports.map((report, idx) => (
+                            <tr key={`sig-${idx}`} className="hover:bg-orange-50/30 transition-colors">
+                              <td className="py-4 px-4 font-medium text-gray-800 text-xs">
+                                {formatDate(report.recordDate)}
+                              </td>
+                              <td className="py-4 px-4 font-extrabold text-orange-700">
+                                <span className="px-2.5 py-1 rounded-md bg-orange-50 border border-orange-200 font-mono text-xs">
+                                  {report.lineCode}
+                                </span>
+                              </td>
+                              <td className="py-4 px-4 font-semibold text-gray-800">
+                                {report.partName || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 text-gray-600 text-xs">
+                                {report.event || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 text-right pr-6">
+                                <button
+                                  onClick={() => handleOpenReviewModal(report)}
+                                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md shadow-orange-500/20 transition-all cursor-pointer"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  Review & Sign
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB CONTENT: 8D Problem Solving Reports */}
+            {activeFormType === "8d-report" && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-2">
+                  <div>
+                    <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                      Pending 8D Problem Solving Reports
+                    </h3>
+                    <p className="text-xs text-gray-500">Root cause and corrective action verification sheets.</p>
+                  </div>
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                    Total: {pendingEightDReports.length}
+                  </span>
+                </div>
+
+                {pendingEightDReports.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                    <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-bold text-gray-800">No 8D Reports Pending</h4>
+                    <p className="text-xs text-gray-500 max-w-sm">All 8D problem solving reports are approved.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                            <th className="py-3.5 px-4 font-bold w-16 text-center">ID</th>
+                            <th className="py-3.5 px-4 font-bold">Date</th>
+                            <th className="py-3.5 px-4 font-bold">Customer</th>
+                            <th className="py-3.5 px-4 font-bold">Part No</th>
+                            <th className="py-3.5 px-4 font-bold">Part Name</th>
+                            <th className="py-3.5 px-4 font-bold">Shift</th>
+                            <th className="py-3.5 px-4 font-bold">Status</th>
+                            <th className="py-3.5 px-4 font-bold text-right pr-6">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm">
+                          {pendingEightDReports.map((report) => (
+                            <tr key={`8d-${report.id}`} className="hover:bg-orange-50/30 transition-colors">
+                              <td className="py-4 px-4 text-center font-bold text-gray-400 font-mono text-xs">
+                                #{report.id}
+                              </td>
+                              <td className="py-4 px-4 font-medium text-gray-800 text-xs">
+                                {formatDate(report.reportDate)}
+                              </td>
+                              <td className="py-4 px-4 font-bold text-gray-800">
+                                {report.customer || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 font-mono text-xs font-semibold text-gray-700">
+                                {report.partNo || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 text-gray-800 font-medium">
+                                {report.partName || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 font-semibold text-gray-700 text-xs">
+                                {report.shift || "1ST"}
+                              </td>
+                              <td className="py-4 px-4">
+                                {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                    ✓ Verified
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                    Pending QC
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-4 px-4 text-right pr-6">
+                                <button
+                                  onClick={() => handleOpenReviewModal(report)}
+                                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md shadow-orange-500/20 transition-all cursor-pointer"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  Review & Sign
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB CONTENT: Job Setup Verification */}
+            {activeFormType === "job-setup" && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-2">
+                  <div>
+                    <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                      Pending Job Setup Verifications
+                    </h3>
+                    <p className="text-xs text-gray-500">Quality Inspector tooling & part verification approval.</p>
+                  </div>
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                    Total: {pendingJobSetupReports.length}
+                  </span>
+                </div>
+
+                {pendingJobSetupReports.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                    <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-bold text-gray-800">No Job Setup Records Pending</h4>
+                    <p className="text-xs text-gray-500 max-w-sm">All line machine tooling setups are verified.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                            <th className="py-3.5 px-4 font-bold w-16 text-center">ID</th>
+                            <th className="py-3.5 px-4 font-bold">Date</th>
+                            <th className="py-3.5 px-4 font-bold">Part Name</th>
+                            <th className="py-3.5 px-4 font-bold">Operation No</th>
+                            <th className="py-3.5 px-4 font-bold">Shift</th>
+                            <th className="py-3.5 px-4 font-bold">Setter</th>
+                            <th className="py-3.5 px-4 font-bold">Status</th>
+                            <th className="py-3.5 px-4 font-bold text-right pr-6">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm">
+                          {pendingJobSetupReports.map((report) => (
+                            <tr key={`js-${report.id}`} className="hover:bg-orange-50/30 transition-colors">
+                              <td className="py-4 px-4 text-center font-bold text-gray-400 font-mono text-xs">
+                                #{report.id}
+                              </td>
+                              <td className="py-4 px-4 font-medium text-gray-800 text-xs">
+                                {formatDate(report.reportDate)}
+                              </td>
+                              <td className="py-4 px-4 font-bold text-gray-800">
+                                {report.partName || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 font-semibold text-gray-700 text-xs">
+                                {report.operationNo || "N/A"}
+                              </td>
+                              <td className="py-4 px-4 font-semibold text-gray-700 text-xs">
+                                {report.shift || "1st"}
+                              </td>
+                              <td className="py-4 px-4 text-gray-600 text-xs">
+                                {report.shiftInchargeName || "Shift Incharge"}
+                              </td>
+                              <td className="py-4 px-4">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                  Pending Review
+                                </span>
+                              </td>
+                              <td className="py-4 px-4 text-right pr-6">
+                                <button
+                                  onClick={() => handleOpenReviewModal(report)}
+                                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md shadow-orange-500/20 transition-all cursor-pointer"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  Review & Sign
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* FULL-SCREEN SPLIT MODAL */}
+      {/* FULL-SCREEN SPLIT MODAL (Matching Dark Slate Theme) */}
       {selectedReport && (
-        <div className="fixed inset-0 z-[9999] bg-white flex flex-col overflow-hidden animate-fade-in">
-          <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
-            <h3 className="font-bold text-xl uppercase tracking-wider">
-              Review & Sign {
-                activeFormType === "tool-change" 
-                  ? "Tool Change Record" 
-                  : activeFormType === "significant" 
-                  ? "Significant Event Record" 
-                  : activeFormType === "8d-report"
-                  ? "8D Problem Solving Report"
-                  : activeFormType === "job-setup"
-                  ? "Job Setup Verification (Inspector)"
-                  : "Daily Production Report"
-              }
-            </h3>
+        <div className="fixed inset-0 z-[8000] bg-slate-950/90 backdrop-blur-md flex flex-col overflow-hidden animate-fade-in">
+          <div className="bg-slate-900 text-white px-8 py-4 flex justify-between items-center shrink-0 border-b border-slate-800 shadow-xl z-10">
+            <div className="flex items-center gap-3">
+              <span className="p-2 rounded-xl bg-orange-500/20 text-[#ff9100]">
+                <FileText className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-lg tracking-wide uppercase text-[#ff9100] leading-tight">
+                  Review & Sign {
+                    activeFormType === "tool-change" 
+                      ? "Tool Change Record" 
+                      : activeFormType === "significant" 
+                      ? "Significant Event Record" 
+                      : activeFormType === "8d-report"
+                      ? "8D Problem Solving Report"
+                      : activeFormType === "job-setup"
+                      ? "Job Setup Verification (Inspector)"
+                      : "Daily Production Report"
+                  }
+                </h3>
+                <p className="text-xs text-gray-400">Examine PDF report details before recording official QC verification sign-off</p>
+              </div>
+            </div>
             <button
               onClick={() => {
+                if (pdfUrl) URL.revokeObjectURL(pdfUrl);
                 setSelectedReport(null);
                 setPdfUrl(null);
               }}
-              className="text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
+              className="text-gray-400 hover:text-white bg-slate-800 hover:bg-slate-700 p-2 rounded-xl transition-colors cursor-pointer"
             >
-              <X size={28} />
+              <X size={20} />
             </button>
           </div>
+
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-            <div className="flex-1 h-full bg-[#525659] relative flex items-center justify-center">
+            <div className="flex-1 h-full bg-[#3d4144] relative flex items-center justify-center">
               {isPdfLoading && (
-                <Loader className="animate-spin text-white w-12 h-12 absolute" />
+                <Loader className="animate-spin text-white w-10 h-10 absolute" />
               )}
               {pdfUrl && (
                 <iframe
@@ -705,61 +851,72 @@ const QC = () => {
                 />
               )}
             </div>
-            <div className="w-full lg:w-[400px] bg-gray-50 border-l border-gray-300 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
-              <div className="p-6 flex-1 flex flex-col">
-                <div className="bg-orange-100 p-4 rounded-xl border border-orange-200 mb-6 text-sm flex flex-col gap-2 shadow-sm text-orange-900">
-                  {selectedReport.lineCode && (
-                    <p>
-                      <span className="font-bold">Line Code:</span> {selectedReport.lineCode}
-                    </p>
-                  )}
-                  {selectedReport.customer && (
-                    <p>
-                      <span className="font-bold">Customer:</span> {selectedReport.customer}
-                    </p>
-                  )}
-                  {selectedReport.partNo && (
-                    <p>
-                      <span className="font-bold">Part No:</span> {selectedReport.partNo}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-bold">Part Details:</span> {selectedReport.partName || "N/A"}
-                  </p>
-                  {activeFormType === "job-setup" && selectedReport.operationNo && (
-                    <p>
-                      <span className="font-bold">Operation No:</span> {selectedReport.operationNo}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate || selectedReport.recordDate)}
-                  </p>
-                  
-                  {selectedReport.shift && (
-                    <p>
-                      <span className="font-bold">Shift:</span> {selectedReport.shift}
-                    </p>
-                  )}
-                  
-                  {activeFormType === "significant" && selectedReport.event && (
-                    <p>
-                      <span className="font-bold">Event:</span> {selectedReport.event}
-                    </p>
-                  )}
 
-                  {activeFormType !== "significant" && (
-                    <p>
-                      <span className="font-bold">Shift Incharge:</span>{" "}
-                      {selectedReport.shiftInchargeName || selectedReport.toolChangedBySignature || "Shift Incharge"}
-                    </p>
-                  )}
+            <div className="w-full lg:w-[420px] bg-slate-900 text-gray-100 border-l border-slate-800 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
+              <div className="p-7 flex-1 flex flex-col justify-between">
+                <div className="space-y-5">
+                  <h4 className="text-xs font-black text-[#ff9100] tracking-widest uppercase">Report Metadata</h4>
+                  
+                  <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700/80 shadow-inner flex flex-col gap-3 text-sm">
+                    {selectedReport.lineCode && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Line Code</span>
+                        <span className="font-mono font-bold text-white bg-slate-700/50 px-2 py-0.5 rounded text-xs">{selectedReport.lineCode}</span>
+                      </div>
+                    )}
+                    {selectedReport.customer && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Customer</span>
+                        <span className="font-bold text-white">{selectedReport.customer}</span>
+                      </div>
+                    )}
+                    {selectedReport.partNo && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Part No</span>
+                        <span className="font-mono text-xs font-bold text-gray-200">{selectedReport.partNo}</span>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-1 border-b border-slate-700/60 pb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Part Details</span>
+                      <span className="font-bold text-gray-100 text-xs leading-relaxed">{selectedReport.partName || "N/A"}</span>
+                    </div>
+                    {activeFormType === "job-setup" && selectedReport.operationNo && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Operation No</span>
+                        <span className="font-bold text-white">{selectedReport.operationNo}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Date</span>
+                      <span className="text-gray-300 font-medium">{formatDate(selectedReport.reportDate || selectedReport.recordDate)}</span>
+                    </div>
+                    {selectedReport.shift && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Shift</span>
+                        <span className="text-white font-bold">{selectedReport.shift}</span>
+                      </div>
+                    )}
+                    {activeFormType === "significant" && selectedReport.event && (
+                      <div className="flex flex-col gap-1 border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Event</span>
+                        <span className="text-gray-200 text-xs leading-relaxed">{selectedReport.event}</span>
+                      </div>
+                    )}
+                    {activeFormType !== "significant" && (
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Shift Incharge</span>
+                        <span className="text-gray-300 font-medium">{selectedReport.shiftInchargeName || selectedReport.toolChangedBySignature || "Shift Incharge"}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="mt-auto">
+                <div className="pt-6">
                   <button
                     onClick={submitQcSignature}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1 cursor-pointer"
+                    className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 active:scale-98 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-900/40 transition-all cursor-pointer flex items-center justify-center gap-2"
                   >
+                    <CheckCircle2 className="w-4 h-4" />
                     Approve Report
                   </button>
                 </div>
@@ -768,7 +925,7 @@ const QC = () => {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

@@ -12,6 +12,10 @@ import {
   FileSpreadsheet,
   Users,
   FileSearch,
+  Building2,
+  UserCheck,
+  CheckCircle2,
+  Check
 } from "lucide-react";
 
 import { ToastContainer, toast } from "react-toastify";
@@ -21,7 +25,6 @@ import "react-toastify/dist/ReactToastify.css";
 // API CONFIGURATION
 // ============================================================
 
-// FIXED: Ensures "/api" is correctly appended to prevent the 404 errors!
 const API_BASE = process.env.REACT_APP_API_URL 
   ? `${process.env.REACT_APP_API_URL}/api` 
   : "http://localhost:5000/api";
@@ -62,6 +65,7 @@ const ProductEngineer = () => {
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // ============================================================
   // CURRENT PRODUCT ENGINEER
@@ -79,6 +83,13 @@ const ProductEngineer = () => {
     currentUser.username || currentUser.employeeId || "";
 
   const currentShop = shopId || 3;
+
+  // Revoke Blob URLs on unmount to prevent browser memory leaks
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
 
   // ============================================================
   // DATE FORMAT
@@ -392,16 +403,20 @@ const ProductEngineer = () => {
   // FETCH ALL REPORTS
   // ============================================================
 
-  const fetchAllReports = () => {
-    fetchPendingAirGapReports();
-    fetchPendingIdleTimeReports();
-    fetchPendingDailyProdReports();
-    fetchPendingSignificantReports();
-    fetchPendingOperatorAllotments();
-    fetchPendingEightDReports();
-    fetchPendingLevel1Reports();
-    fetchPendingBreakdownReports();
-    fetchPendingCorrectiveActionReports();
+  const fetchAllReports = async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      fetchPendingAirGapReports(),
+      fetchPendingIdleTimeReports(),
+      fetchPendingDailyProdReports(),
+      fetchPendingSignificantReports(),
+      fetchPendingOperatorAllotments(),
+      fetchPendingEightDReports(),
+      fetchPendingLevel1Reports(),
+      fetchPendingBreakdownReports(),
+      fetchPendingCorrectiveActionReports()
+    ]);
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
   useEffect(() => {
@@ -442,7 +457,6 @@ const ProductEngineer = () => {
 
       // IDLE TIME
       else if (type === "idletime") {
-        // FIXED: Using fromDate and toDate to prevent 400 Bad Request error
         const params = new URLSearchParams({
           lineCode: report.lineCode,
           fromDate: isoDate,
@@ -1056,448 +1070,440 @@ const ProductEngineer = () => {
   const columns = getTableColumns(activeTab);
 
   // ============================================================
-  // TAB COLORS
+  // TAB STYLES
   // ============================================================
 
   const tabStyles = {
     airgap: {
-      active: "border-blue-600 text-blue-600 bg-blue-50/50",
-      badge: "bg-blue-600",
-      button: "bg-blue-600 hover:bg-blue-700",
-      row: "hover:bg-blue-50/40",
+      active: "bg-blue-600 text-white shadow-md",
+      badge: "bg-white text-blue-600",
+      button: "bg-blue-600 hover:bg-blue-700 shadow-blue-600/20",
+      row: "hover:bg-blue-50/30",
     },
     idletime: {
-      active: "border-orange-600 text-orange-600 bg-orange-50/50",
-      badge: "bg-orange-600",
-      button: "bg-orange-600 hover:bg-orange-700",
-      row: "hover:bg-orange-50/40",
+      active: "bg-orange-500 text-white shadow-md",
+      badge: "bg-white text-orange-600",
+      button: "bg-orange-500 hover:bg-orange-600 shadow-orange-500/20",
+      row: "hover:bg-orange-50/30",
     },
     dailyproduction: {
-      active: "border-green-600 text-green-600 bg-green-50/50",
-      badge: "bg-green-600",
-      button: "bg-green-600 hover:bg-green-700",
-      row: "hover:bg-green-50/40",
+      active: "bg-emerald-600 text-white shadow-md",
+      badge: "bg-white text-emerald-600",
+      button: "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20",
+      row: "hover:bg-emerald-50/30",
     },
     significant: {
-      active: "border-purple-600 text-purple-600 bg-purple-50/50",
-      badge: "bg-purple-600",
-      button: "bg-purple-600 hover:bg-purple-700",
-      row: "hover:bg-purple-50/40",
+      active: "bg-purple-600 text-white shadow-md",
+      badge: "bg-white text-purple-600",
+      button: "bg-purple-600 hover:bg-purple-700 shadow-purple-600/20",
+      row: "hover:bg-purple-50/30",
     },
     operatorallotment: {
-      active: "border-teal-600 text-teal-600 bg-teal-50/50",
-      badge: "bg-teal-600",
-      button: "bg-teal-600 hover:bg-teal-700",
-      row: "hover:bg-teal-50/40",
+      active: "bg-teal-600 text-white shadow-md",
+      badge: "bg-white text-teal-600",
+      button: "bg-teal-600 hover:bg-teal-700 shadow-teal-600/20",
+      row: "hover:bg-teal-50/30",
     },
     eightd: {
-      active: "border-amber-600 text-amber-600 bg-amber-50/50",
-      badge: "bg-amber-600",
-      button: "bg-amber-600 hover:bg-amber-700",
-      row: "hover:bg-amber-50/40",
+      active: "bg-amber-500 text-white shadow-md",
+      badge: "bg-white text-amber-600",
+      button: "bg-amber-500 hover:bg-amber-600 shadow-amber-500/20",
+      row: "hover:bg-amber-50/30",
     },
     level1maintenance: {
-      active: "border-indigo-600 text-indigo-600 bg-indigo-50/50",
-      badge: "bg-indigo-600",
-      button: "bg-indigo-600 hover:bg-indigo-700",
-      row: "hover:bg-indigo-50/40",
+      active: "bg-indigo-600 text-white shadow-md",
+      badge: "bg-white text-indigo-600",
+      button: "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20",
+      row: "hover:bg-indigo-50/30",
     },
     breakdown: {
-      active: "border-rose-600 text-rose-600 bg-rose-50/50",
-      badge: "bg-rose-600",
-      button: "bg-rose-600 hover:bg-rose-700",
-      row: "hover:bg-rose-50/40",
+      active: "bg-rose-600 text-white shadow-md",
+      badge: "bg-white text-rose-600",
+      button: "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20",
+      row: "hover:bg-rose-50/30",
     },
     correctiveaction: {
-      active: "border-orange-600 text-orange-600 bg-orange-50/50",
-      badge: "bg-orange-600",
-      button: "bg-orange-600 hover:bg-orange-700",
-      row: "hover:bg-orange-50/40",
+      active: "bg-orange-600 text-white shadow-md",
+      badge: "bg-white text-orange-600",
+      button: "bg-orange-600 hover:bg-orange-700 shadow-orange-600/20",
+      row: "hover:bg-orange-50/30",
     },
   };
 
-  // ============================================================
-  // UI
-  // ============================================================
-
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen w-full bg-[#2d2d2d] font-sans text-gray-100 pb-16 selection:bg-[#ff9100]/30 selection:text-white">
       <Header />
+      <ToastContainer position="top-right" autoClose={2000} theme="dark" />
 
-      <ToastContainer />
-
-      <div className="p-6">
-        {/* =====================================================
-            PAGE HEADER
-        ===================================================== */}
-
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-extrabold text-gray-800">
-              Product Engineer Verification
-            </h1>
-
-            <p className="text-sm text-gray-500 mt-1">
-              Review and verify pending production records
-            </p>
-          </div>
-
-          <button
-            onClick={fetchAllReports}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors cursor-pointer"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </button>
-        </div>
-
-        {/* =====================================================
-            TABS
-        ===================================================== */}
-
-        <div className="bg-white border-b border-gray-200 rounded-t-xl px-4 pt-2">
-          <div className="flex items-center gap-1 overflow-x-auto">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              const style = tabStyles[tab.id] || {
-                active: "border-gray-800 text-gray-800 bg-gray-50",
-                badge: "bg-gray-800",
-                button: "bg-gray-800 hover:bg-gray-900",
-                row: "hover:bg-gray-50",
-              };
-
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 py-3 px-5 font-bold text-sm rounded-t-lg transition-all cursor-pointer border-b-2 whitespace-nowrap ${
-                    isActive
-                      ? style.active
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-
-                  <span>{tab.title}</span>
-
-                  {tab.reports.length > 0 && (
-                    <span
-                      className={`${style.badge} text-white text-[11px] font-extrabold px-2 py-0.5 rounded-full`}
-                    >
-                      {tab.reports.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* =====================================================
-            CONTENT
-        ===================================================== */}
-
-        <div className="bg-white rounded-b-xl shadow-sm p-5">
-          {activeReports.length === 0 ? (
-            <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-              {activeTabData && (
-                <activeTabData.icon className="w-12 h-12 mx-auto text-gray-300 mb-2" />
-              )}
-
-              <p className="text-gray-500 font-semibold">
-                No {activeTabData?.title || "reports"} pending your review.
+      {/* Main Page Content */}
+      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+        
+        {/* Primary Verification Workspace Card */}
+        <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden text-gray-800">
+          
+          {/* Card Topbar: Header, Logged In Info, and Controls */}
+          <div className="px-6 py-5 border-b border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl md:text-2xl font-black text-gray-900 uppercase tracking-tight">
+                  Product Engineer Verification
+                </h1>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-[#ff9100]/15 text-[#ff9100] border border-[#ff9100]/30 shadow-sm">
+                  <Building2 className="w-3.5 h-3.5" />
+                  Machine Shop - {currentShop}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 font-medium">
+                Review and digitally verify pending operational records, sensor checksheets, maintenance, and 8D reports.
               </p>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-gray-300">
-                <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
-                  <tr>
-                    {columns.map((column) => (
-                      <th
-                        key={column.key}
-                        className="p-3 border border-gray-300"
-                      >
-                        {column.label}
-                      </th>
-                    ))}
 
-                    <th className="p-3 border border-gray-300 text-center">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
+            <div className="flex items-center gap-3 self-start md:self-auto">
+              <div className="flex items-center gap-2.5 bg-white border border-gray-300 px-3.5 py-1.5 rounded-xl shadow-sm text-xs">
+                <UserCheck className="w-4 h-4 text-blue-600" />
+                <span className="font-semibold text-gray-500">PE:</span>
+                <span className="font-extrabold text-gray-800 uppercase">{currentPE || "PE"}</span>
+              </div>
 
-                <tbody className="text-sm">
-                  {activeReports.map((report, index) => (
-                    <tr
-                      key={`${activeTab}-${index}`}
-                      className={`${
-                        tabStyles[activeTab]?.row || "hover:bg-gray-50"
-                      } transition-colors`}
-                    >
-                      {columns.map((column) => {
-                        const value = column.render
-                          ? column.render(report)
-                          : report[column.key];
-
-                        return (
-                          <td
-                            key={column.key}
-                            className="p-3 border border-gray-300"
-                          >
-                            {value || "N/A"}
-                          </td>
-                        );
-                      })}
-
-                      <td className="p-3 border border-gray-300 text-center">
-                        <button
-                          onClick={() =>
-                            handleOpenReviewModal(report, activeTab)
-                          }
-                          className={`${
-                            tabStyles[activeTab]?.button ||
-                            "bg-gray-800 hover:bg-gray-900"
-                          } text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer`}
-                        >
-                          Review & Verify
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <button
+                type="button"
+                onClick={fetchAllReports}
+                className="p-2.5 bg-white hover:bg-gray-100 text-gray-600 hover:text-blue-600 rounded-xl border border-gray-300 shadow-sm transition-all cursor-pointer group"
+                title="Refresh Records"
+              >
+                <RefreshCw className={`w-4 h-4 transition-transform duration-500 ${isRefreshing ? "animate-spin text-blue-600" : ""}`} />
+              </button>
             </div>
-          )}
+          </div>
+
+          {/* Navigation Tab Bar */}
+          <div className="px-6 py-4 border-b border-gray-200 bg-white">
+            <div className="inline-flex p-1 bg-gray-100 rounded-xl gap-1 border border-gray-200 overflow-x-auto max-w-full">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                const style = tabStyles[tab.id] || {
+                  active: "bg-gray-800 text-white",
+                  badge: "bg-white text-gray-800",
+                };
+
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? style.active
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{tab.title}</span>
+
+                    {tab.reports.length > 0 && (
+                      <span
+                        className={`${style.badge} text-[11px] font-black px-2 py-0.5 rounded-full ml-0.5`}
+                      >
+                        {tab.reports.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Section Body */}
+          <div className="p-6 md:p-8">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center pb-2">
+                <div>
+                  <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                    {activeTabData?.title || "Pending Records"}
+                  </h3>
+                  <p className="text-xs text-gray-500">Examine record details before recording official Product Engineer digital approval.</p>
+                </div>
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                  Total: {activeReports.length}
+                </span>
+              </div>
+
+              {activeReports.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                    <CheckCircle2 className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-base font-bold text-gray-800">No {activeTabData?.title} Pending</h4>
+                  <p className="text-xs text-gray-500 max-w-sm">All entries for this category have been verified and cleared by Product Engineering.</p>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                          {columns.map((column) => (
+                            <th key={column.key} className="py-3.5 px-4 font-bold">
+                              {column.label}
+                            </th>
+                          ))}
+                          <th className="py-3.5 px-4 font-bold text-right pr-6">
+                            Action
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-gray-200 text-sm">
+                        {activeReports.map((report, index) => (
+                          <tr
+                            key={`${activeTab}-${index}`}
+                            className={`${
+                              tabStyles[activeTab]?.row || "hover:bg-gray-50"
+                            } transition-colors`}
+                          >
+                            {columns.map((column) => {
+                              const value = column.render
+                                ? column.render(report)
+                                : report[column.key];
+
+                              return (
+                                <td
+                                  key={column.key}
+                                  className="py-4 px-4 text-gray-800 font-medium text-xs"
+                                >
+                                  {column.key === "lineCode" ? (
+                                    <span className="px-2.5 py-1 rounded-md bg-gray-100 border border-gray-300 font-mono text-xs font-bold text-gray-900">
+                                      {value || "N/A"}
+                                    </span>
+                                  ) : (
+                                    value || "N/A"
+                                  )}
+                                </td>
+                              );
+                            })}
+
+                            <td className="py-4 px-4 text-right pr-6">
+                              <button
+                                onClick={() =>
+                                  handleOpenReviewModal(report, activeTab)
+                                }
+                                className={`${
+                                  tabStyles[activeTab]?.button ||
+                                  "bg-gray-800 hover:bg-gray-900"
+                                } inline-flex items-center gap-1.5 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md transition-all cursor-pointer`}
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                Review & Verify
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* ========================================================
-          FULL SCREEN PDF REVIEW MODAL
+          FULL SCREEN PDF REVIEW MODAL (Unified Dark Layout)
       ======================================================== */}
 
       {selectedReport && (
-        <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white w-full h-full max-w-[1600px] rounded-xl shadow-2xl overflow-hidden flex flex-col">
-            {/* =================================================
-                MODAL HEADER
-            ================================================= */}
+        <div className="fixed inset-0 z-[8000] bg-slate-950/90 backdrop-blur-md flex flex-col overflow-hidden animate-fade-in">
+          <div className="bg-slate-900 text-white px-8 py-4 flex justify-between items-center shrink-0 border-b border-slate-800 shadow-xl z-10">
+            <div className="flex items-center gap-3">
+              <span className="p-2 rounded-xl bg-blue-500/20 text-blue-400">
+                <FileText className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-lg tracking-wide uppercase text-blue-400 leading-tight">
+                  {reviewReportType === "airgap"
+                    ? "REVIEW & SIGN AIR GAP CHECKSHEET"
+                    : reviewReportType === "dailyproduction"
+                    ? "REVIEW & SIGN DAILY PRODUCTION REPORT"
+                    : reviewReportType === "significant"
+                    ? "REVIEW & SIGN SIGNIFICANT EVENT RECORD"
+                    : reviewReportType === "operatorallotment"
+                    ? "REVIEW & SIGN OPERATOR ALLOTMENT SHEET"
+                    : reviewReportType === "eightd"
+                    ? "REVIEW & SIGN 8D PROBLEM SOLVING REPORT"
+                    : reviewReportType === "level1maintenance"
+                    ? "REVIEW & SIGN LEVEL 1 MAINTENANCE CHECK SHEET"
+                    : reviewReportType === "breakdown"
+                    ? "REVIEW & SIGN BREAKDOWN INTIMATION REPORT"
+                    : reviewReportType === "correctiveaction"
+                    ? "REVIEW & SIGN CORRECTIVE ACTION REGISTER"
+                    : "REVIEW & SIGN IDLE TIME REPORT"}
+                </h3>
+                <p className="text-xs text-gray-400">Examine PDF report details before recording official Product Engineer sign-off</p>
+              </div>
+            </div>
+            <button
+              onClick={closeReviewModal}
+              className="text-gray-400 hover:text-white bg-slate-800 hover:bg-slate-700 p-2 rounded-xl transition-colors cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+          </div>
 
-            <div className="h-[58px] min-h-[58px] bg-[#111827] flex items-center justify-between px-6 border-b-2 border-gray-400 shrink-0">
-              <h2 className="text-white text-lg font-extrabold tracking-wide uppercase">
-                {reviewReportType === "airgap"
-                  ? "REVIEW & SIGN AIR GAP CHECKSHEET"
-                  : reviewReportType === "dailyproduction"
-                  ? "REVIEW & SIGN DAILY PRODUCTION REPORT"
-                  : reviewReportType === "significant"
-                  ? "REVIEW & SIGN SIGNIFICANT EVENT RECORD"
-                  : reviewReportType === "operatorallotment"
-                  ? "REVIEW & SIGN OPERATOR ALLOTMENT SHEET"
-                  : reviewReportType === "eightd"
-                  ? "REVIEW & SIGN 8D PROBLEM SOLVING REPORT"
-                  : reviewReportType === "level1maintenance"
-                  ? "REVIEW & SIGN LEVEL 1 MAINTENANCE CHECK SHEET"
-                  : reviewReportType === "breakdown"
-                  ? "REVIEW & SIGN BREAKDOWN INTIMATION REPORT"
-                  : reviewReportType === "correctiveaction"
-                  ? "REVIEW & SIGN CORRECTIVE ACTION REGISTER"
-                  : "REVIEW & SIGN IDLE TIME REPORT"}
-              </h2>
-
-              <button
-                onClick={closeReviewModal}
-                className="text-gray-400 hover:text-white transition-colors cursor-pointer"
-              >
-                <X className="w-8 h-8" />
-              </button>
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            {/* Left Side: PDF Preview */}
+            <div className="flex-1 h-full bg-[#3d4144] relative flex items-center justify-center">
+              {isPdfLoading ? (
+                <div className="text-center">
+                  <Loader className="w-10 h-10 animate-spin mx-auto text-white mb-3" />
+                  <p className="text-white font-semibold text-sm">
+                    Generating report preview...
+                  </p>
+                </div>
+              ) : pdfUrl ? (
+                <iframe
+                  src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                  title="Report PDF Preview"
+                  className="w-full h-full border-none relative z-10"
+                />
+              ) : (
+                <div className="text-center">
+                  <FileText className="w-12 h-12 mx-auto text-gray-400 mb-2" />
+                  <p className="text-gray-400 font-semibold text-sm">
+                    Unable to load PDF preview.
+                  </p>
+                </div>
+              )}
             </div>
 
-            {/* =================================================
-                MAIN CONTENT
-            ================================================= */}
+            {/* Right Side: Metadata Panel */}
+            <div className="w-full lg:w-[420px] bg-slate-900 text-gray-100 border-l border-slate-800 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
+              <div className="p-7 flex-1 flex flex-col justify-between">
+                <div className="space-y-5">
+                  <h4 className="text-xs font-black text-blue-400 tracking-widest uppercase">Report Metadata</h4>
 
-            <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden bg-gray-100">
-              {/* ===============================================
-                  LEFT SIDE - PDF PREVIEW
-              =============================================== */}
-
-              <div className="flex-1 h-full relative flex items-center justify-center border-r border-gray-300 bg-[#525659]">
-                {isPdfLoading ? (
-                  <div className="text-center">
-                    <Loader className="w-12 h-12 animate-spin mx-auto text-white mb-4" />
-
-                    <p className="text-white font-semibold text-lg">
-                      Generating report preview...
-                    </p>
-                  </div>
-                ) : pdfUrl ? (
-                  <iframe
-                    src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                    title="Report PDF Preview"
-                    className="w-full h-full border-none relative z-10"
-                  />
-                ) : (
-                  <div className="text-center">
-                    <FileText className="w-14 h-14 mx-auto text-gray-400 mb-3" />
-
-                    <p className="text-gray-400 font-semibold">
-                      Unable to load PDF preview.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* ===============================================
-                  RIGHT SIDE - REVIEW PANEL
-              =============================================== */}
-
-              <div className="w-full lg:w-[400px] min-w-[360px] bg-white flex flex-col shrink-0 overflow-y-auto">
-                <div className="flex-1 p-6 flex flex-col">
-                  {/* ===========================================
-                      INFORMATION CARD
-                  =========================================== */}
-
-                  <div className="bg-orange-50 p-5 rounded-xl border border-orange-200 mb-6 text-sm flex flex-col gap-3 shadow-sm text-orange-900">
+                  <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700/80 shadow-inner flex flex-col gap-3 text-sm">
                     {(selectedReport.lineCode || selectedReport.lineNo) && (
-                      <p>
-                        <span className="font-extrabold">Line Code:</span>{" "}
-                        {selectedReport.lineCode || selectedReport.lineNo}
-                      </p>
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Line Code</span>
+                        <span className="font-mono font-bold text-white bg-slate-700/50 px-2 py-0.5 rounded text-xs">
+                          {selectedReport.lineCode || selectedReport.lineNo}
+                        </span>
+                      </div>
                     )}
 
                     {selectedReport.machineNo && (
-                      <p>
-                        <span className="font-extrabold">Machine No:</span>{" "}
-                        {selectedReport.machineNo}
-                      </p>
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Machine No</span>
+                        <span className="font-bold text-white">{selectedReport.machineNo}</span>
+                      </div>
                     )}
 
                     {selectedReport.customer && (
-                      <p>
-                        <span className="font-extrabold">Customer:</span>{" "}
-                        {selectedReport.customer}
-                      </p>
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Customer</span>
+                        <span className="font-bold text-white">{selectedReport.customer}</span>
+                      </div>
                     )}
 
                     {(selectedReport.partName || selectedReport.partNo) && (
-                      <p>
-                        <span className="font-extrabold">Part Details:</span>{" "}
-                        {selectedReport.partName || "N/A"}
-                        {selectedReport.partNo && ` (${selectedReport.partNo})`}
-                      </p>
+                      <div className="flex flex-col gap-1 border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Part Details</span>
+                        <span className="font-bold text-gray-100 text-xs leading-relaxed">
+                          {selectedReport.partName || "N/A"}
+                          {selectedReport.partNo && ` (${selectedReport.partNo})`}
+                        </span>
+                      </div>
                     )}
 
-                    <p>
-                      <span className="font-extrabold">Date:</span>{" "}
-                      {formatDate(
-                        selectedReport.reportDate ||
-                          selectedReport.checkDate ||
-                          selectedReport.recordDate ||
-                          selectedReport.checklistDate ||
-                          selectedReport.date
-                      )}
-                    </p>
+                    <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Date</span>
+                      <span className="text-gray-300 font-medium">
+                        {formatDate(
+                          selectedReport.reportDate ||
+                            selectedReport.checkDate ||
+                            selectedReport.recordDate ||
+                            selectedReport.checklistDate ||
+                            selectedReport.date
+                        )}
+                      </span>
+                    </div>
 
                     {selectedReport.shift && (
-                      <p>
-                        <span className="font-extrabold">Shift:</span> Shift{" "}
-                        {selectedReport.shift}
-                      </p>
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Shift</span>
+                        <span className="text-white font-bold">Shift {selectedReport.shift}</span>
+                      </div>
                     )}
 
-                    {reviewReportType === "operatorallotment" &&
-                      selectedReport.productEngineer && (
-                        <p>
-                          <span className="font-extrabold">Assigned PE:</span>{" "}
-                          {selectedReport.productEngineer}
-                        </p>
-                      )}
+                    {reviewReportType === "operatorallotment" && selectedReport.productEngineer && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Assigned PE</span>
+                        <span className="text-gray-200">{selectedReport.productEngineer}</span>
+                      </div>
+                    )}
 
                     {reviewReportType === "correctiveaction" && (
-                      <p>
-                        <span className="font-extrabold">Assigned Product Engineer:</span>{" "}
-                        {selectedReport.productEngineer || currentPE}
-                      </p>
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Assigned PE</span>
+                        <span className="text-gray-200">{selectedReport.productEngineer || currentPE}</span>
+                      </div>
                     )}
 
-                    {reviewReportType === "level1maintenance" && (
-                      <p>
-                        <span className="font-extrabold">
-                          Assigned Product Engineer:
-                        </span>{" "}
-                        {currentPE}
-                      </p>
+                    {(reviewReportType === "level1maintenance" || reviewReportType === "breakdown") && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Assigned PE</span>
+                        <span className="text-gray-200">{currentPE}</span>
+                      </div>
                     )}
 
-                    {reviewReportType === "breakdown" && (
-                      <p>
-                        <span className="font-extrabold">
-                          Assigned Product Engineer:
-                        </span>{" "}
-                        {currentPE}
-                      </p>
+                    {reviewReportType === "significant" && selectedReport.event && (
+                      <div className="flex flex-col gap-1 border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Event</span>
+                        <span className="text-gray-200 text-xs leading-relaxed">{selectedReport.event}</span>
+                      </div>
                     )}
-
-                    {reviewReportType === "significant" &&
-                      selectedReport.event && (
-                        <p>
-                          <span className="font-extrabold">Event:</span>{" "}
-                          {selectedReport.event}
-                        </p>
-                      )}
 
                     {reviewReportType !== "significant" &&
                       reviewReportType !== "operatorallotment" &&
                       reviewReportType !== "eightd" && (
-                        <p>
-                          <span className="font-extrabold">
-                            {reviewReportType === "idletime" ? "Section Incharge:" : "Shift Incharge:"}
-                          </span>{" "}
-                          {selectedReport.shiftInchargeName ||
-                            selectedReport.shiftInchargeSignature ||
-                            (reviewReportType === "idletime" ? "Section Incharge" : "Shift Incharge")}
-                        </p>
+                        <div className="flex justify-between items-center pt-1">
+                          <span className="text-xs font-bold text-gray-400 uppercase">
+                            {reviewReportType === "idletime" ? "Section Incharge" : "Shift Incharge"}
+                          </span>
+                          <span className="text-gray-300 font-medium">
+                            {selectedReport.shiftInchargeName ||
+                              selectedReport.shiftInchargeSignature ||
+                              (reviewReportType === "idletime" ? "Section Incharge" : "Shift Incharge")}
+                          </span>
+                        </div>
                       )}
                   </div>
+                </div>
 
-                  {/* ===========================================
-                      VERIFICATION MESSAGE
-                  =========================================== */}
-
-                  <div className="mb-6 bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                    <p className="text-sm text-gray-600 leading-relaxed">
-                      Please review the complete report shown on the left before
-                      approving this record.
-                    </p>
-                  </div>
-
-                  <p className="text-xs text-gray-500 leading-5 mb-6">
-                    By clicking <strong>APPROVE REPORT</strong>, you confirm that
-                    you have reviewed the report and verified the information
-                    provided.
-                  </p>
-
-                  {/* ===========================================
-                      APPROVE BUTTON
-                  =========================================== */}
-
-                  <div className="mt-auto">
-                    <button
-                      onClick={submitPESignature}
-                      disabled={
-                        isPdfLoading || !pdfUrl || isApproving
-                      }
-                      className="w-full bg-[#10b981] hover:bg-[#059669] text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isPdfLoading
-                        ? "LOADING..."
-                        : isApproving
-                        ? "APPROVING..."
-                        : "APPROVE REPORT"}
-                    </button>
-                  </div>
+                <div className="pt-6">
+                  <button
+                    onClick={submitPESignature}
+                    disabled={isPdfLoading || !pdfUrl || isApproving}
+                    className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 active:scale-98 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-900/40 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPdfLoading ? (
+                      <>
+                        <Loader className="w-4 h-4 animate-spin" />
+                        LOADING...
+                      </>
+                    ) : isApproving ? (
+                      <>
+                        <Loader className="w-4 h-4 animate-spin" />
+                        APPROVING...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        APPROVE REPORT
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>

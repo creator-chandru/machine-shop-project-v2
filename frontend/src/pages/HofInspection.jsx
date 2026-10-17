@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import Header from "../components/Header";
-import { ClipboardCheck, RefreshCw, Loader, X } from "lucide-react";
+import { 
+  ClipboardCheck, 
+  RefreshCw, 
+  Loader, 
+  X,
+  Building2,
+  UserCheck,
+  CheckCircle2,
+  FileText
+} from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -12,9 +21,22 @@ const HofInspection = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const currentUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
   const currentRoleName = currentUser.username || currentUser.employeeId || "HOF Inspection";
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "";
@@ -45,12 +67,15 @@ const HofInspection = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shopId]);
 
-  const refreshData = () => {
+  const refreshData = async () => {
+    setIsRefreshing(true);
     toast.info("Refreshing data...", { autoClose: 1000 });
-    fetchPendingReports();
+    await fetchPendingReports();
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
   const handleOpenReviewModal = async (report) => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     setSelectedReport(report);
     setPdfUrl(null);
     setIsPdfLoading(true);
@@ -112,6 +137,7 @@ const HofInspection = () => {
       toast.success("Report approved successfully!", { autoClose: 2000 });
 
       setTimeout(() => {
+        if (pdfUrl) URL.revokeObjectURL(pdfUrl);
         setSelectedReport(null);
         setPdfUrl(null);
         fetchPendingReports();
@@ -122,134 +148,174 @@ const HofInspection = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen w-full bg-[#2d2d2d] font-sans text-gray-100 pb-16 selection:bg-[#ff9100]/30 selection:text-white">
       <Header />
-      <ToastContainer position="top-right" autoClose={2000} />
+      <ToastContainer position="top-right" autoClose={2000} theme="dark" />
 
-      <div className="p-6">
-        {/* PAGE HEADER */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-extrabold text-gray-800 uppercase tracking-tight">
-              HOF Inspection Dashboard
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Machine Shop-{shopId || 3} Pending Authorizations
-            </p>
-          </div>
+      {/* Main Page Content */}
+      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+        
+        {/* Primary Verification Workspace Card */}
+        <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden text-gray-800">
           
-          <div className="flex items-center gap-4">
-            <span className="bg-indigo-100 text-indigo-800 px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-sm">
-              Logged in: {currentRoleName}
-            </span>
-            <button
-              onClick={refreshData}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors cursor-pointer shadow-sm"
-            >
-              <RefreshCw className="w-4 h-4" /> Refresh
-            </button>
+          {/* Card Topbar: Header, Logged In Info, and Controls */}
+          <div className="px-6 py-5 border-b border-gray-200 bg-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl md:text-2xl font-black text-gray-900 uppercase tracking-tight">
+                  HOF Inspection Dashboard
+                </h1>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm">
+                  <Building2 className="w-3.5 h-3.5" />
+                  Machine Shop - {shopId || 3}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 font-medium">
+                Review and authorize line job setup verifications for machine shop operations.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 self-start md:self-auto">
+              <div className="flex items-center gap-2.5 bg-white border border-gray-300 px-3.5 py-1.5 rounded-xl shadow-sm text-xs">
+                <UserCheck className="w-4 h-4 text-indigo-600" />
+                <span className="font-semibold text-gray-500">HOF-INSPN:</span>
+                <span className="font-extrabold text-gray-800 uppercase">{currentRoleName}</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={refreshData}
+                className="p-2.5 bg-white hover:bg-gray-100 text-gray-600 hover:text-indigo-600 rounded-xl border border-gray-300 shadow-sm transition-all cursor-pointer group"
+                title="Refresh Records"
+              >
+                <RefreshCw className={`w-4 h-4 transition-transform duration-500 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* CONTENT CONTAINER */}
-        <div className="bg-white rounded-xl shadow-sm p-6 border-t-4 border-indigo-600 min-h-[400px]">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Job Setup Verification</h2>
+          {/* Section Body */}
+          <div className="p-6 md:p-8">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center pb-2">
+                <div>
+                  <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                    Job Setup Verification Authorizations
+                  </h3>
+                  <p className="text-xs text-gray-500">Inspector verification and sign-off required prior to production runs.</p>
+                </div>
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                  Total: {pendingReports.length}
+                </span>
+              </div>
 
-          {pendingReports.length === 0 ? (
-            <div className="text-center py-16 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-              <ClipboardCheck className="w-14 h-14 mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-500 font-semibold text-lg">
-                No reports pending your review.
-              </p>
-              <p className="text-gray-400 text-sm mt-1">
-                Pending records will appear here once submitted.
-              </p>
+              {pendingReports.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                    <CheckCircle2 className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-base font-bold text-gray-800">No Job Setup Authorizations Pending</h4>
+                  <p className="text-xs text-gray-500 max-w-sm">All pending job setup records for this shop have been verified.</p>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                          <th className="py-3.5 px-4 font-bold w-16 text-center">ID</th>
+                          <th className="py-3.5 px-4 font-bold">Date</th>
+                          <th className="py-3.5 px-4 font-bold">Part Name</th>
+                          <th className="py-3.5 px-4 font-bold">Operation No</th>
+                          <th className="py-3.5 px-4 font-bold">Shift</th>
+                          <th className="py-3.5 px-4 font-bold">Setter</th>
+                          <th className="py-3.5 px-4 font-bold">Inspector (QC)</th>
+                          <th className="py-3.5 px-4 font-bold text-right pr-6">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 text-sm">
+                        {pendingReports.map((report) => (
+                          <tr key={`js-${report.id}`} className="hover:bg-indigo-50/30 transition-colors">
+                            <td className="py-4 px-4 text-center font-bold text-gray-400 font-mono text-xs">
+                              #{report.id}
+                            </td>
+                            <td className="py-4 px-4 font-medium text-gray-800 text-xs">
+                              {formatDate(report.reportDate)}
+                            </td>
+                            <td className="py-4 px-4 font-bold text-gray-900">
+                              {report.partName || "N/A"}
+                            </td>
+                            <td className="py-4 px-4 font-semibold text-gray-700 text-xs">
+                              {report.operationNo || "N/A"}
+                            </td>
+                            <td className="py-4 px-4 font-semibold text-gray-700 text-xs">
+                              {report.shift || "1st"}
+                            </td>
+                            <td className="py-4 px-4 text-gray-600 text-xs">
+                              {report.shiftInchargeName || "Shift Incharge"}
+                            </td>
+                            <td className="py-4 px-4">
+                              {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                  ✓ QC Verified
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                  Pending QC
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-4 px-4 text-right pr-6">
+                              <button
+                                onClick={() => handleOpenReviewModal(report)}
+                                className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                Review & Sign
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-gray-300">
-                <thead className="bg-gray-800 text-white text-xs uppercase tracking-wider">
-                  <tr>
-                    <th className="p-3 border border-gray-300 w-16 text-center">ID</th>
-                    <th className="p-3 border border-gray-300">Date</th>
-                    <th className="p-3 border border-gray-300">Part Name</th>
-                    <th className="p-3 border border-gray-300">Operation No</th>
-                    <th className="p-3 border border-gray-300">Shift</th>
-                    <th className="p-3 border border-gray-300">Setter</th>
-                    <th className="p-3 border border-gray-300">Inspector (QC)</th>
-                    <th className="p-3 border border-gray-300 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm">
-                  {pendingReports.map((report) => (
-                    <tr key={`js-${report.id}`} className="hover:bg-indigo-50/40 transition-colors">
-                      <td className="p-3 border border-gray-300 text-center font-bold text-gray-400">
-                        #{report.id}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-bold">
-                        {formatDate(report.reportDate)}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-bold">
-                        {report.partName || "N/A"}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-semibold">
-                        {report.operationNo || "N/A"}
-                      </td>
-                      <td className="p-3 border border-gray-300 font-semibold">
-                        {report.shift || "1st"}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {report.shiftInchargeName || "Shift Incharge"}
-                      </td>
-                      <td className="p-3 border border-gray-300">
-                        {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
-                          <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">
-                            ✓ QC Verified
-                          </span>
-                        ) : (
-                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-bold">
-                            Pending QC
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 border border-gray-300 text-center">
-                        <button
-                          onClick={() => handleOpenReviewModal(report)}
-                          className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow transition-colors cursor-pointer"
-                        >
-                          Review & Sign
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          </div>
         </div>
       </div>
 
       {/* FULL-SCREEN SPLIT REVIEW MODAL */}
       {selectedReport && (
-        <div className="fixed inset-0 z-[9999] bg-white flex flex-col overflow-hidden animate-fade-in">
-          <div className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md z-10">
-            <h3 className="font-bold text-xl uppercase tracking-wider">
-              Review & Sign Job Setup Verification (HOF-INSPN)
-            </h3>
+        <div className="fixed inset-0 z-[8000] bg-slate-950/90 backdrop-blur-md flex flex-col overflow-hidden animate-fade-in">
+          <div className="bg-slate-900 text-white px-8 py-4 flex justify-between items-center shrink-0 border-b border-slate-800 shadow-xl z-10">
+            <div className="flex items-center gap-3">
+              <span className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400">
+                <ClipboardCheck className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-lg tracking-wide uppercase text-indigo-400 leading-tight">
+                  Review & Sign Job Setup Verification (HOF-INSPN)
+                </h3>
+                <p className="text-xs text-gray-400">Examine PDF report details before recording official inspection authorization</p>
+              </div>
+            </div>
             <button
               onClick={() => {
+                if (pdfUrl) URL.revokeObjectURL(pdfUrl);
                 setSelectedReport(null);
                 setPdfUrl(null);
               }}
-              className="text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
+              className="text-gray-400 hover:text-white bg-slate-800 hover:bg-slate-700 p-2 rounded-xl transition-colors cursor-pointer"
             >
-              <X size={28} />
+              <X size={20} />
             </button>
           </div>
+
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-            <div className="flex-1 h-full bg-[#525659] relative flex items-center justify-center">
+            <div className="flex-1 h-full bg-[#3d4144] relative flex items-center justify-center">
               {isPdfLoading && (
-                <Loader className="animate-spin text-white w-12 h-12 absolute" />
+                <Loader className="animate-spin text-white w-10 h-10 absolute" />
               )}
               {pdfUrl && (
                 <iframe
@@ -259,36 +325,50 @@ const HofInspection = () => {
                 />
               )}
             </div>
-            <div className="w-full lg:w-[400px] bg-gray-50 border-l border-gray-300 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
-              <div className="p-6 flex-1 flex flex-col">
-                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 mb-6 text-sm flex flex-col gap-2 shadow-sm text-indigo-900">
-                  <p>
-                    <span className="font-bold">Part Details:</span> {selectedReport.partName || "N/A"}
-                  </p>
-                  {selectedReport.operationNo && (
-                    <p>
-                      <span className="font-bold">Operation No:</span> {selectedReport.operationNo}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-bold">Date:</span> {formatDate(selectedReport.reportDate)}
-                  </p>
-                  {selectedReport.shift && (
-                    <p>
-                      <span className="font-bold">Shift:</span> {selectedReport.shift}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-bold">Shift Incharge:</span>{" "}
-                    {selectedReport.shiftInchargeName || "Shift Incharge"}
-                  </p>
+
+            <div className="w-full lg:w-[420px] bg-slate-900 text-gray-100 border-l border-slate-800 flex flex-col shrink-0 shadow-2xl z-10 overflow-y-auto">
+              <div className="p-7 flex-1 flex flex-col justify-between">
+                <div className="space-y-5">
+                  <h4 className="text-xs font-black text-indigo-400 tracking-widest uppercase">Report Metadata</h4>
+                  
+                  <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700/80 shadow-inner flex flex-col gap-3 text-sm">
+                    <div className="flex flex-col gap-1 border-b border-slate-700/60 pb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Part Details</span>
+                      <span className="font-bold text-gray-100 text-xs leading-relaxed">{selectedReport.partName || "N/A"}</span>
+                    </div>
+
+                    {selectedReport.operationNo && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Operation No</span>
+                        <span className="font-bold text-white">{selectedReport.operationNo}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Date</span>
+                      <span className="text-gray-300 font-medium">{formatDate(selectedReport.reportDate)}</span>
+                    </div>
+
+                    {selectedReport.shift && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Shift</span>
+                        <span className="text-white font-bold">{selectedReport.shift}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center pt-1">
+                      <span className="text-xs font-bold text-gray-400 uppercase">Shift Incharge</span>
+                      <span className="text-gray-300 font-medium">{selectedReport.shiftInchargeName || "Shift Incharge"}</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="mt-auto">
+                <div className="pt-6">
                   <button
                     onClick={submitSignature}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-black text-lg uppercase tracking-wider shadow-lg transition-transform hover:-translate-y-1 cursor-pointer"
+                    className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 active:scale-98 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-900/40 transition-all cursor-pointer flex items-center justify-center gap-2"
                   >
+                    <CheckCircle2 className="w-4 h-4" />
                     Approve Report
                   </button>
                 </div>

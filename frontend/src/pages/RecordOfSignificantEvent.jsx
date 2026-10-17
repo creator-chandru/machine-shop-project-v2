@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, FileDown, Clipboard, Copy, ArrowRight, Sparkles } from "lucide-react";
 import Header from "../components/Header";
 
@@ -77,6 +77,8 @@ const Toast = ({ message, type, onClose }) => {
 export default function RecordOfSignificantEvent() {
   const { shopId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const incomingState = location.state || {};
 
   const [machineDetails, setMachineDetails] = useState([]);
   const [lineMappings, setLineMappings] = useState([]);
@@ -100,17 +102,17 @@ export default function RecordOfSignificantEvent() {
     }, 4000);
   };
 
-  // 1. Header Information
+  // 1. Header Information (Pre-filled using incomingState if available)
   const [header, setHeader] = useState({
     machineShop: parseInt(shopId, 10) || 3,
     month: "",
-    lineCode: "",
-    partName: "",
+    lineCode: incomingState.lineCode || "",
+    partName: incomingState.partName || "",
     event: "",
-    mcNo: "",
+    mcNo: incomingState.mcNo || "",
     opNo: "",
-    date: getTodayISODate(),
-    shift: "I",
+    date: incomingState.date || getTodayISODate(),
+    shift: incomingState.shift || "I",
     from: "",
     to: "",
   });
@@ -298,10 +300,10 @@ export default function RecordOfSignificantEvent() {
 
   // Reset form to blank state
   const resetFormState = (
-    retainingLine = "",
-    retainingMc = "",
-    retainingDate = getTodayISODate(),
-    retainingShift = "I"
+    retainingLine = incomingState.lineCode || "",
+    retainingMc = incomingState.mcNo || "",
+    retainingDate = incomingState.date || getTodayISODate(),
+    retainingShift = incomingState.shift || "I"
   ) => {
     setIsSavedRecord(false);
     setHeader((prev) => ({
@@ -431,6 +433,10 @@ export default function RecordOfSignificantEvent() {
     }
   };
 
+  useEffect(() => {
+    checkExistingRecord(header.lineCode, header.mcNo, header.date, header.shift);
+  }, [shopId, header.lineCode, header.mcNo, header.date, header.shift]);
+
   const handleHeaderChange = (field, val) => {
     let nextHeader = { ...header, [field]: val };
 
@@ -445,10 +451,6 @@ export default function RecordOfSignificantEvent() {
     }
 
     setHeader(nextHeader);
-
-    if (["lineCode", "mcNo", "date", "shift"].includes(field)) {
-      checkExistingRecord(nextHeader.lineCode, nextHeader.mcNo, nextHeader.date, nextHeader.shift);
-    }
   };
 
   const handleTraceabilityChange = (type, timing, part, val) => {
@@ -1443,11 +1445,6 @@ export default function RecordOfSignificantEvent() {
               </tr>
             </tbody>
           </table>
-        </div>
-
-        {/* Dynamic QF Footer Display */}
-        <div className="text-xs text-gray-600 font-semibold pt-1">
-          {qfValue}
         </div>
 
         {/* Save Button */}

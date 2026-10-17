@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { FileDown, Calendar, X } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -40,6 +40,7 @@ const emptyRow = (dateVal = getTodayISODate(), shiftVal = "I", mcVal = "") => ({
 
 export default function FourMChangeMonitoringCheckSheet() {
   const { shopId } = useParams();
+  const navigate = useNavigate();
 
   const [headerInfo, setHeaderInfo] = useState({
     machineShop: shopId || "",
@@ -401,7 +402,27 @@ export default function FourMChangeMonitoringCheckSheet() {
       }
 
       setIsSavedRecord(true);
-      triggerToast("4M CheckSheet saved successfully!", "success");
+
+      // Check if Retro Checking requires redirection to Significant Event Record
+      const requiresSignificantEvent = rows.some(r => r.retroChecking === "✓");
+
+      if (requiresSignificantEvent) {
+        triggerToast("4M CheckSheet saved! Redirecting to Significant Event...", "success");
+        setTimeout(() => {
+          // Fixed navigation route based on the Shift Incharge dashboard configuration
+          navigate(`/shift-incharge/${shopId || 3}/significant-event-record`, {
+            state: {
+              lineCode: headerInfo.lineCode,
+              partName: headerInfo.partName,
+              mcNo: selectedMachineNo,
+              date: firstRowDate || getTodayISODate(),
+              shift: firstRowShift || "I"
+            }
+          });
+        }, 2000);
+      } else {
+        triggerToast("4M CheckSheet saved successfully!", "success");
+      }
     } catch (err) {
       triggerToast(err.message || "Failed to save checksheet.", "error");
     } finally {
@@ -637,9 +658,6 @@ export default function FourMChangeMonitoringCheckSheet() {
         </div>
 
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mt-5 pt-3 gap-3">
-          {/* Dynamic QF Footer Display */}
-          <div className="text-xs text-gray-600 font-semibold">{qfValue}</div>
-          
           {/* HOD DROP DOWN */}
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-800 text-sm">HOD Sign :</span>

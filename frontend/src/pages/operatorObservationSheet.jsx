@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
-import { FileDown } from 'lucide-react';
+import { FileDown, X, CheckCircle2, Info, ArrowLeft } from 'lucide-react';
 
 const initialFormData = {
   formCode: "QF / 07 / MPD - 15",
@@ -130,10 +130,10 @@ const Toast = ({ message, type, onClose }) => {
   const bgColor = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-orange-600';
 
   return (
-    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}>
-      <span className="text-sm font-semibold">{message}</span>
-      <button onClick={onClose} className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none">
-        ×
+    <div className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3.5 rounded-xl shadow-2xl flex items-center gap-3 transition-all animate-bounce border border-black/10`}>
+      <span className="text-sm font-semibold tracking-wide">{message}</span>
+      <button onClick={onClose} className="ml-2 p-1 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none transition-colors">
+        <X className="w-4 h-4" />
       </button>
     </div>
   );
@@ -530,7 +530,7 @@ export default function OperatorObservationSheet() {
   };
 
   return (
-    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-start p-3 sm:p-6 lg:p-8 font-sans antialiased">
       <Header />
 
       <Toast 
@@ -540,271 +540,310 @@ export default function OperatorObservationSheet() {
       />
 
       {(isSaving || saveSuccess) && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 sm:px-12 py-8 text-center border border-gray-100 max-w-sm w-full">
             {isSaving ? (
               <>
-                <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-                <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
-                <p className="text-gray-500 mt-2">Please wait</p>
+                <div className="w-12 h-12 border-4 border-gray-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-4"></div>
+                <h2 className="text-lg font-bold text-gray-900 tracking-wide">Saving Observation...</h2>
+                <p className="text-xs text-gray-500 mt-1 font-medium">Please wait while the sheet is being saved</p>
               </>
             ) : (
               <>
-                <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
-                <p className="text-gray-500 mt-2">Redirecting...</p>
+                <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <h2 className="text-lg font-bold text-green-800 tracking-wide">Data Saved Successfully</h2>
+                <p className="text-xs text-gray-500 mt-1 font-medium">Redirecting to operator dashboard...</p>
               </>
             )}
           </div>
         </div>
       )}
 
-      <div className="bg-white w-full max-w-[92rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100">
+      {/* Main Container Card */}
+      <div className="bg-white w-full max-w-7xl rounded-2xl p-4 sm:p-8 lg:p-10 shadow-2xl border border-gray-200/80 space-y-7 my-4">
         
-        <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
-          <div>
-            <span className="text-xs font-bold text-orange-600 tracking-wider uppercase block mb-1">
-              {initialFormData.company}
-            </span>
-            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
-              {initialFormData.title}
-            </h2>
-            <div className="text-xs text-gray-500 mt-1 font-bold">
-              <span>{qfValue}</span>
+        {/* HEADER SECTION */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-5 gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all cursor-pointer border border-gray-200 shadow-sm"
+              title="Go Back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <span className="text-xs font-black text-orange-600 tracking-widest uppercase block mb-0.5">
+                {initialFormData.company}
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-gray-900 uppercase tracking-wide">
+                {initialFormData.title}
+              </h2>
+              <div className="text-xs text-gray-500 font-semibold mt-1">
+                <span>{qfValue}</span>
+              </div>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleDownloadPDF}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-xs shadow-md transition-colors"
-            >
-              <FileDown className="w-4 h-4" /> Download PDF
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleDownloadPDF}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider shadow hover:shadow-md transition-all cursor-pointer self-stretch sm:self-auto justify-center"
+          >
+            <FileDown className="w-4 h-4" /> Download PDF
+          </button>
         </div>
 
-        <div className="border-2 border-gray-800 mb-6 bg-white">
-          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800">
-            
-            <div className="p-3 space-y-2 text-sm font-semibold">
-              <div className="flex items-center">
-                <label className="w-36 text-gray-700">Employee Code</label>
-                <span className="mr-2">:</span>
-                <input
-                  type="text"
-                  placeholder="e.g. 710125"
-                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
-                  value={headerInfo.employeeCode}
-                  onChange={(e) => handleHeaderChange('employeeCode', e.target.value)}
-                />
-              </div>
+        {/* 1. EMPLOYEE & EVALUATION DETAILS */}
+        <div className="bg-white rounded-xl border border-gray-300 p-5 space-y-4 shadow-sm">
+          <div className="flex items-center justify-between border-b border-gray-200 pb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+              <span className="font-extrabold text-gray-900 text-xs sm:text-sm uppercase tracking-wide">
+                Operator Evaluation Details
+              </span>
+            </div>
+          </div>
 
-              <div className="flex items-center">
-                <label className="w-36 text-gray-700">Employee Name</label>
-                <span className="mr-2">:</span>
-                <input
-                  type="text"
-                  placeholder="e.g. M. NAGARAJAN"
-                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
-                  value={headerInfo.employeeName}
-                  onChange={(e) => handleHeaderChange('employeeName', e.target.value)}
-                />
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs sm:text-sm">
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Employee Code</label>
+              <input
+                type="text"
+                placeholder="e.g. 710125"
+                className="border border-gray-300 rounded-lg p-2.5 font-medium bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
+                value={headerInfo.employeeCode}
+                onChange={(e) => handleHeaderChange('employeeCode', e.target.value)}
+              />
+            </div>
 
-              <div className="flex items-center">
-                <label className="w-36 text-gray-700">Department</label>
-                <span className="mr-2">:</span>
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Employee Name</label>
+              <input
+                type="text"
+                placeholder="e.g. M. NAGARAJAN"
+                className="border border-gray-300 rounded-lg p-2.5 font-medium bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
+                value={headerInfo.employeeName}
+                onChange={(e) => handleHeaderChange('employeeName', e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Department</label>
+              <input
+                type="text"
+                placeholder="Production"
+                className="border border-gray-300 rounded-lg p-2.5 font-medium bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
+                value={headerInfo.department}
+                onChange={(e) => handleHeaderChange('department', e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Test Date</label>
+              <input
+                type="date"
+                className="border border-gray-300 rounded-lg p-2.5 font-medium bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all cursor-pointer"
+                value={headerInfo.testDate}
+                onChange={(e) => handleHeaderChange('testDate', e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Overall Marks (%)</label>
+              <div className="relative">
                 <input
                   type="text"
-                  placeholder="Production"
-                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
-                  value={headerInfo.department}
-                  onChange={(e) => handleHeaderChange('department', e.target.value)}
+                  inputMode="decimal"
+                  placeholder="e.g. 82.4"
+                  className="w-full border border-gray-300 rounded-lg p-2.5 pr-8 font-extrabold text-gray-900 bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
+                  value={headerInfo.marksPercentage}
+                  onChange={(e) => handleHeaderChange('marksPercentage', e.target.value)}
                 />
+                <span className="absolute right-3 top-2.5 font-bold text-gray-500 text-sm">%</span>
               </div>
             </div>
 
-            <div className="p-3 space-y-2 text-sm font-semibold">
-              <div className="flex items-center">
-                <label className="w-32 text-gray-700">Test Date</label>
-                <span className="mr-2">:</span>
-                <input
-                  type="date"
-                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5 bg-transparent"
-                  value={headerInfo.testDate}
-                  onChange={(e) => handleHeaderChange('testDate', e.target.value)}
-                />
-              </div>
-
-              <div className="flex items-center">
-                <label className="w-32 text-gray-700">Marks</label>
-                <span className="mr-2">:</span>
-                <div className="flex items-center flex-1">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="e.g. 82.4"
-                    className="w-28 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5 font-extrabold text-gray-800"
-                    value={headerInfo.marksPercentage}
-                    onChange={(e) => handleHeaderChange('marksPercentage', e.target.value)}
-                  />
-                  <span className="ml-1 font-bold text-gray-700">%</span>
-                </div>
-              </div>
-
-              <div className="flex items-center">
-                <label className="w-32 text-gray-700">Method</label>
-                <span className="mr-2">:</span>
-                <input
-                  type="text"
-                  placeholder="Practical & Demo"
-                  className="flex-1 border-b border-gray-400 focus:border-orange-500 outline-none px-2 py-0.5"
-                  value={headerInfo.method}
-                  onChange={(e) => handleHeaderChange('method', e.target.value)}
-                />
-              </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Method</label>
+              <input
+                type="text"
+                placeholder="Practical & Demo"
+                className="border border-gray-300 rounded-lg p-2.5 font-medium bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
+                value={headerInfo.method}
+                onChange={(e) => handleHeaderChange('method', e.target.value)}
+              />
             </div>
-
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse border-2 border-gray-800 text-sm">
-            
-            <thead className="bg-gray-100 text-gray-900 font-bold text-center">
-              <tr>
-                <th className="border border-gray-800 p-2 w-16">S.NO.</th>
-                <th className="border border-gray-800 p-2 text-left px-4">PARAMETERS</th>
-                {RATING_COLUMNS.map((col) => (
-                  <th key={col.key} className="border border-gray-800 p-2 w-32 font-bold text-gray-900">
-                    {col.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+        {/* 2. OBSERVATION TABLE */}
+        <div className="bg-white rounded-xl border border-gray-300 p-5 space-y-4 shadow-sm">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-gray-200 pb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+              <span className="font-extrabold text-gray-900 text-xs sm:text-sm uppercase tracking-wide">
+                Evaluation Criteria & Ratings
+              </span>
+            </div>
+            <span className="text-xs text-gray-500 font-medium">Select ✓ for observed parameter performance</span>
+          </div>
 
-            <tbody>
-              {sections.map((sec, secIdx) => {
-                return (
+          <div className="overflow-x-auto border border-gray-200 rounded-lg">
+            <table className="w-full border-collapse text-xs sm:text-sm text-left min-w-[700px]">
+              <thead className="bg-gray-100/80 text-gray-900 font-extrabold border-b border-gray-200 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th className="p-3 w-16 text-center">S.NO.</th>
+                  <th className="p-3 px-4 border-l border-gray-200">PARAMETERS</th>
+                  {RATING_COLUMNS.map((col) => (
+                    <th key={col.key} className="p-3 w-32 text-center border-l border-gray-200 font-black">
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-200">
+                {sections.map((sec, secIdx) => (
                   <React.Fragment key={`sec-${sec.id}`}>
-                    <tr className="bg-gray-100 font-extrabold text-gray-900 text-sm">
-                      <td colSpan={2} className="border border-gray-800 px-3 py-1.5 uppercase tracking-wide">
+                    {/* Section Header Row */}
+                    <tr className="bg-gray-100 font-black text-gray-900 text-xs sm:text-sm tracking-wide">
+                      <td colSpan={2} className="px-4 py-2.5 uppercase bg-gray-200/60 border-t border-gray-300">
                         {sec.title}
                       </td>
                       {RATING_COLUMNS.map((col) => (
-                        <td key={`sec-pt-${sec.id}-${col.key}`} className="border border-gray-800 p-1 text-center font-extrabold text-gray-900">
-                          {col.defaultPoints}
+                        <td key={`sec-pt-${sec.id}-${col.key}`} className="p-2 text-center font-black text-gray-700 bg-gray-200/60 border-l border-gray-300">
+                          {col.defaultPoints} Pts
                         </td>
                       ))}
                     </tr>
 
+                    {/* Section Question Rows */}
                     {sec.items.map((item, itemIdx) => (
-                      <tr key={`item-${sec.id}-${item.slNo}`} className="hover:bg-gray-50">
-                        <td className="border border-gray-800 p-2 text-center font-medium">
+                      <tr key={`item-${sec.id}-${item.slNo}`} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="p-2.5 text-center font-bold text-gray-600 bg-gray-50/40">
                           {item.slNo}
                         </td>
-                        <td className="border border-gray-800 px-4 py-2 text-gray-800 font-medium">
+                        <td className="px-4 py-2 text-gray-800 font-medium border-l border-gray-200 text-xs sm:text-sm">
                           {item.parameter}
                         </td>
                         {RATING_COLUMNS.map((col) => (
-                          <td key={`cell-${sec.id}-${item.slNo}-${col.key}`} className="border border-gray-800 p-0 text-center">
+                          <td key={`cell-${sec.id}-${item.slNo}-${col.key}`} className="p-1 border-l border-gray-200 text-center">
                             <select
                               value={item[col.key] || ""}
                               onChange={(e) => handleCellChange(secIdx, itemIdx, col.key, e.target.value)}
-                              className="w-full h-full min-h-[36px] text-center font-bold text-base text-gray-900 bg-transparent outline-none cursor-pointer"
+                              className="w-full h-9 text-center font-extrabold text-sm text-gray-900 bg-transparent rounded-lg outline-none focus:bg-orange-50/50 cursor-pointer transition-all"
                             >
                               <option value=""></option>
-                              <option value="✓" className="text-gray-900 font-bold">✓</option>
-                              <option value="X" className="text-gray-900 font-bold">X</option>
+                              <option value="✓" className="text-green-700 font-black">✓</option>
+                              <option value="X" className="text-red-700 font-black">X</option>
                             </select>
                           </td>
                         ))}
                       </tr>
                     ))}
 
-                    <tr className="bg-gray-50 font-bold text-xs text-gray-800">
-                      <td className="border border-gray-800 px-2 py-1.5 text-center font-bold">
-                        Marks :
+                    {/* Section Subtotal Row */}
+                    <tr className="bg-gray-50/90 font-bold text-xs text-gray-800 border-b-2 border-gray-300">
+                      <td className="p-2 text-center font-bold text-gray-700 bg-gray-100/70">
+                        Marks:
                       </td>
-                      <td className="border border-gray-800 px-4 py-1.5 flex justify-between items-center">
+                      <td className="px-4 py-2 flex justify-between items-center border-l border-gray-200">
+                        <span className="uppercase text-gray-600 font-black text-[11px] tracking-wider">
+                          Section Score
+                        </span>
                         <input
                           type="text"
                           placeholder="Marks"
                           value={sec.sectionMarks || ""}
                           onChange={(e) => handleSectionMarksChange(secIdx, e.target.value)}
-                          className="w-24 border border-gray-300 rounded px-2 py-0.5 text-sm font-extrabold text-gray-900 bg-white outline-none focus:ring-1 focus:ring-orange-500"
+                          className="w-24 border border-gray-300 rounded-lg px-2.5 py-1 text-xs font-black text-gray-900 bg-white outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-right"
                         />
-                        <span className="uppercase text-gray-700 font-bold text-xs">Total</span>
                       </td>
                       {RATING_COLUMNS.map((col) => (
-                        <td key={`col-tot-${sec.id}-${col.key}`} className="border border-gray-800 p-0 text-center">
+                        <td key={`col-tot-${sec.id}-${col.key}`} className="p-1 border-l border-gray-200 text-center">
                           <input
                             type="text"
-                            placeholder="Total"
+                            placeholder="0"
                             value={sec.columnTotals[col.key] || ""}
                             onChange={(e) => handleColumnTotalChange(secIdx, col.key, e.target.value)}
-                            className="w-full h-full text-center px-1 py-1 font-bold text-gray-900 bg-transparent outline-none"
+                            className="w-full text-center py-1 font-black text-gray-900 bg-transparent outline-none text-xs"
                           />
                         </td>
                       ))}
                     </tr>
                   </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <div className="mt-6 border-2 border-gray-800 bg-white relative">
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x-2 divide-gray-800 p-3 text-sm font-semibold">
-            <div className="flex items-center gap-2">
-              <label className="text-gray-700">Date:</label>
+        {/* 3. SIGN-OFF & REVIEW SECTION */}
+        <div className="bg-white rounded-xl border border-gray-300 p-5 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+            <span className="font-extrabold text-gray-900 text-xs sm:text-sm uppercase tracking-wide">
+              Sign-off & Verification
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs sm:text-sm">
+            {/* Review Date */}
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Review Date</label>
               <input
                 type="date"
-                className="border-b border-gray-400 outline-none px-2 py-0.5 bg-transparent"
+                className="border border-gray-300 rounded-lg p-2.5 font-medium bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all cursor-pointer"
                 value={footerInfo.reviewDate}
                 onChange={(e) => handleFooterChange('reviewDate', e.target.value)}
               />
             </div>
             
-            <div className="flex items-center gap-2 px-2">
-              <label className="text-gray-700">Reviewed By:</label>
+            {/* Reviewed By */}
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Reviewed By</label>
               {footerInfo.reviewedBy ? (
-                <input
-                  type="text"
-                  className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase font-bold bg-transparent"
-                  value={footerInfo.reviewedBy}
-                  readOnly
-                />
+                <div className="flex items-center justify-between border border-green-300 bg-green-50 rounded-lg p-2.5">
+                  <span className="text-green-800 font-extrabold uppercase text-xs">
+                    {footerInfo.reviewedBy}
+                  </span>
+                  <CheckCircle2 className="w-4 h-4 text-green-600" />
+                </div>
               ) : (
                 <button
                   type="button"
                   onClick={handleApproveReview}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs font-bold shadow-sm transition-colors"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm transition-all cursor-pointer"
                 >
-                  Approve
+                  Approve Review
                 </button>
               )}
             </div>
             
-            <div className="flex items-center gap-2 px-2">
-              <label className="text-gray-700">Approved By:</label>
+            {/* Approved By */}
+            <div className="flex flex-col gap-1.5">
+              <label className="font-bold text-gray-700 uppercase tracking-wider text-[11px]">Approved By (HOF)</label>
               {footerInfo.approvedBy && footerInfo.approvedBy.includes('(Verified)') ? (
-                <input
-                  type="text"
-                  className="flex-1 border-b border-gray-400 outline-none px-2 py-0.5 text-green-700 uppercase font-bold bg-transparent"
-                  value={footerInfo.approvedBy.replace(' (Verified)', '')}
-                  readOnly
-                />
+                <div className="flex items-center justify-between border border-green-300 bg-green-50 rounded-lg p-2.5">
+                  <span className="text-green-800 font-extrabold uppercase text-xs">
+                    {footerInfo.approvedBy.replace(' (Verified)', '')}
+                  </span>
+                  <span className="text-[10px] font-black uppercase text-green-700 bg-green-200/50 px-2 py-0.5 rounded">
+                    Verified
+                  </span>
+                </div>
               ) : (
-                <div className="flex-1 flex items-center gap-2">
+                <div className="relative flex items-center">
                   <select
-                    className="w-full border-b border-gray-400 outline-none px-2 py-0.5 text-orange-700 font-bold bg-transparent cursor-pointer"
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-orange-700 font-bold bg-gray-50/50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none cursor-pointer text-xs transition-all"
                     value={footerInfo.approvedBy}
                     onChange={(e) => handleFooterChange('approvedBy', e.target.value)}
                   >
-                    <option value="">Select HOF...</option>
+                    <option value="">Select HOF Incharge...</option>
                     {hofUsers.map((user, idx) => (
                       <option key={idx} value={user.username}>
                         {user.username} ({user.employeeId})
@@ -813,7 +852,7 @@ export default function OperatorObservationSheet() {
                   </select>
                   
                   {footerInfo.approvedBy && isSavedRecord && (
-                    <span className="bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded font-bold whitespace-nowrap shadow-sm">
+                    <span className="absolute right-2 top-2.5 bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider shadow-sm">
                       Pending
                     </span>
                   )}
@@ -822,34 +861,36 @@ export default function OperatorObservationSheet() {
             </div>
           </div>
 
-          <div className="border-t-2 border-gray-800 bg-gray-50 px-4 py-2 text-xs font-bold text-gray-800">
-            NOTE:- 75% More than score = GOOD
+          <div className="bg-orange-50/60 rounded-lg border border-orange-200/70 p-3 flex items-center gap-2 text-xs font-bold text-orange-900">
+            <Info className="w-4 h-4 text-orange-600 flex-shrink-0" />
+            <span>CRITERIA BENCHMARK: 75% or higher overall score = GOOD (Standard Passed)</span>
           </div>
 
-          <div className="border-t-2 border-gray-800 p-3">
-            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-              Operator feed back :
+          <div className="pt-2">
+            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+              Operator Feedback & General Remarks:
             </label>
             <textarea
               rows={3}
               placeholder="Enter operator feedback or remarks..."
-              className="w-full border border-gray-300 p-2 text-sm rounded outline-none focus:ring-1 focus:ring-orange-500 font-medium"
+              className="w-full border border-gray-300 p-3 text-sm rounded-lg outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50/40 focus:bg-white font-medium resize-y transition-all"
               value={footerInfo.operatorFeedback}
               onChange={(e) => handleFooterChange('operatorFeedback', e.target.value)}
             />
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 pt-4 border-t border-gray-300">
-          <span className="text-xs text-gray-500 font-semibold">
-            {qfValue}
+        {/* 4. FOOTER & SUBMIT BUTTON */}
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-5 border-t border-gray-200">
+          <span className="text-xs text-gray-500 font-semibold text-center sm:text-left">
+            Form Ref: {qfValue}
           </span>
 
           <button
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess}
-            className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg hover:cursor-pointer"
+            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-9 py-3.5 rounded-xl font-black transition-all shadow-lg hover:shadow-orange-500/25 cursor-pointer uppercase tracking-wider text-xs sm:text-sm active:scale-95"
           >
             {isSaving
               ? "SAVING..."

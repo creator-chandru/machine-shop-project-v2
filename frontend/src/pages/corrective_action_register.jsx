@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FileDown, Plus, Trash2, ArrowLeft, Calendar, X } from 'lucide-react';
+import { FileDown, Plus, Trash2, ArrowLeft, Calendar, X, CheckCircle2, Info } from 'lucide-react';
 import Header from '../components/Header';
 
 const formMeta = {
@@ -42,14 +42,14 @@ const Toast = ({ message, type, onClose }) => {
 
   return (
     <div
-      className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3 rounded-lg shadow-2xl flex items-center gap-3 transition-all transform animate-bounce`}
+      className={`fixed bottom-6 right-6 z-50 ${bgColor} text-white px-5 py-3.5 rounded-xl shadow-2xl flex items-center gap-3 transition-all animate-bounce border border-black/10`}
     >
-      <span className="text-sm font-semibold">{message}</span>
+      <span className="text-sm font-semibold tracking-wide">{message}</span>
       <button
         onClick={onClose}
-        className="ml-2 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none"
+        className="ml-2 p-1 font-bold text-lg leading-none hover:text-gray-200 focus:outline-none transition-colors"
       >
-        ×
+        <X className="w-4 h-4" />
       </button>
     </div>
   );
@@ -74,7 +74,7 @@ export default function CorrectiveActionRegister() {
   const [pdfToDate, setPdfToDate] = useState("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  // --- Dynamic QF States ---
+  // Dynamic QF States
   const [qfHistory, setQfHistory] = useState([]);
   const [qfValue, setQfValue] = useState("QF/08/MRO-04, Rev. No.:03 dt 20.08.2024");
 
@@ -134,7 +134,7 @@ export default function CorrectiveActionRegister() {
     fetchPartNames();
   }, [actualShopId]);
 
-  // --- Fetch QF History on Mount ---
+  // Fetch QF History on Mount
   useEffect(() => {
     const fetchQfHistory = async () => {
       try {
@@ -155,7 +155,7 @@ export default function CorrectiveActionRegister() {
     fetchQfHistory();
   }, []);
 
-  // --- Calculate QF based on selected Date (Effective Date Logic) ---
+  // Calculate QF based on selected Date (Effective Date Logic)
   useEffect(() => {
     let currentQf = "QF/08/MRO-04, Rev. No.:03 dt 20.08.2024";
     const targetRowDate = entries[0]?.date;
@@ -181,7 +181,7 @@ export default function CorrectiveActionRegister() {
     setQfValue(currentQf);
   }, [entries, qfHistory]);
 
-  // Fetch the Product Engineers that can receive a register for approval.
+  // Fetch Product Engineers
   useEffect(() => {
     const fetchProductEngineers = async () => {
       try {
@@ -394,7 +394,7 @@ export default function CorrectiveActionRegister() {
   };
 
   return (
-    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-center p-6 pb-20">
+    <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-start p-3 sm:p-6 lg:p-8 font-sans antialiased">
       <Header />
 
       <Toast
@@ -403,49 +403,57 @@ export default function CorrectiveActionRegister() {
         onClose={() => setToast({ message: '', type: '' })}
       />
 
+      {/* Progress / Save Modal */}
       {(isSaving || saveSuccess) && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 sm:px-12 py-8 text-center border border-gray-100 max-w-sm w-full">
             {isSaving ? (
               <>
-                <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
-                <h2 className="text-xl font-bold text-gray-800">Saving Register Data...</h2>
-                <p className="text-gray-500 mt-2 text-sm">Validating entries and routing approval</p>
+                <div className="w-12 h-12 border-4 border-gray-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-4"></div>
+                <h2 className="text-lg font-bold text-gray-900 tracking-wide">Saving Register Data...</h2>
+                <p className="text-xs text-gray-500 mt-1 font-medium">Validating entries and routing for approval</p>
               </>
             ) : (
               <>
-                <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
-                <p className="text-gray-500 mt-2 text-sm">Redirecting to dashboard...</p>
+                <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <h2 className="text-lg font-bold text-green-800 tracking-wide">Data Saved Successfully</h2>
+                <p className="text-xs text-gray-500 mt-1 font-medium">Redirecting to dashboard...</p>
               </>
             )}
           </div>
         </div>
       )}
 
-      <div className="bg-white w-full max-w-[98rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-        {/* Header Block & PDF Export */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <button
-                type="button"
-                onClick={() => navigate(-1)}
-                className="p-1 text-gray-600 hover:text-orange-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
-                title="Back"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <span className="text-xs font-bold text-orange-600 tracking-wider uppercase">
+      {/* Main Container Card */}
+      <div className="bg-white w-full max-w-[98rem] rounded-2xl p-4 sm:p-8 lg:p-10 shadow-2xl border border-gray-200/80 space-y-7 my-4">
+        
+        {/* TOP HEADER */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-5 gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all cursor-pointer border border-gray-200 shadow-sm"
+              title="Back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <span className="text-xs font-black text-orange-600 tracking-widest uppercase block mb-0.5">
                 {formMeta.company}
               </span>
-            </div>
-            <h2 className="text-xl md:text-2xl font-bold text-gray-800 uppercase tracking-wide">
-              {formMeta.title}
-            </h2>
-            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 items-center font-bold">
-              <span>{qfValue}</span>
-              <span>|</span>
-              <span className="text-orange-600">Shop ID: {actualShopId}</span>
+              <h2 className="text-xl sm:text-2xl font-black text-gray-900 uppercase tracking-wide">
+                {formMeta.title}
+              </h2>
+              <div className="text-xs text-gray-500 font-semibold mt-1 flex flex-wrap items-center gap-2">
+                <span>{qfValue}</span>
+                <span>•</span>
+                <span className="bg-orange-50 text-orange-800 font-bold px-2 py-0.5 rounded border border-orange-200">
+                  Shop ID: {actualShopId}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -457,227 +465,252 @@ export default function CorrectiveActionRegister() {
               setPdfToDate(today);
               setShowPdfModal(true);
             }}
-            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+            className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider shadow hover:shadow-md transition-all cursor-pointer self-stretch sm:self-auto justify-center"
           >
-            <FileDown className="w-4 h-4" /> Download PDF
+            <FileDown className="w-4 h-4 text-orange-400" /> Download PDF
           </button>
         </div>
 
-        {/* Entries Table Toolbar */}
-        <div className="flex justify-between items-center mb-1 px-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">
-              Action Register Entries
-            </span>
-            <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-semibold">
-              {entries.length} Rows
-            </span>
-          </div>
+        {/* Action Register Table Section */}
+        <div className="bg-white rounded-xl border border-gray-300 p-5 space-y-4 shadow-sm">
+          
+          {/* Entries Toolbar */}
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-gray-200 pb-2">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
+              <span className="font-extrabold text-gray-900 text-xs sm:text-sm uppercase tracking-wide">
+                Action Register Entries
+              </span>
+              <span className="text-[11px] bg-orange-100 text-orange-800 px-2.5 py-0.5 rounded-full font-bold">
+                {entries.length} {entries.length === 1 ? "Record" : "Records"}
+              </span>
+            </div>
 
-          {!isSavedRecord && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleAddRow}
-                className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Row
-              </button>
-
-              {entries.length > 1 && (
+            {!isSavedRecord && (
+              <div className="flex items-center gap-2 self-end sm:self-auto">
                 <button
                   type="button"
-                  onClick={handleDeleteLastRow}
-                  className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded transition-colors shadow cursor-pointer"
+                  onClick={handleAddRow}
+                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow hover:shadow-md cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" /> Delete Row
+                  <Plus className="w-3.5 h-3.5" /> Add Row
                 </button>
-              )}
-            </div>
-          )}
-        </div>
 
-        {/* Main Register Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse border-2 border-gray-800 text-xs text-center min-w-[1300px]">
-            <thead>
-              <tr className="bg-gray-100 text-gray-800 font-bold">
-                <th className="border border-gray-800 p-2 w-28">DATE</th>
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[200px]">PART NAME</th>
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[180px]">PROBLEM DESCRIPTION</th>
-                <th className="border border-gray-800 p-2 w-32">PROBLEM CATEGORY (A/B/C/D/E)</th>
-                <th className="border border-gray-800 p-2 w-16">QTY</th>
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[180px]">ROOT CAUSE</th>
-                <th className="border border-gray-800 p-2 text-left px-3 min-w-[180px]">CORRECTIVE ACTION</th>
-                <th className="border border-gray-800 p-2 w-24">RESULT</th>
-                <th className="border border-gray-800 p-2 w-32">SIGNATURE</th>
-              </tr>
-            </thead>
+                {entries.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteLastRow}
+                    className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow hover:shadow-md cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete Row
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
-            <tbody>
-              {entries.map((row, idx) => (
-                <tr key={`entry-${idx}`} className="hover:bg-gray-50 h-12">
-                  <td className="border border-gray-800 p-1">
-                    <input
-                      type="date"
-                      disabled={isSavedRecord}
-                      className="w-full text-center bg-transparent outline-none p-1 font-medium disabled:text-gray-700"
-                      value={row.date || ''}
-                      onChange={(e) => handleRowChange(idx, 'date', e.target.value)}
-                    />
-                  </td>
+          {/* Main Register Table */}
+          <div className="overflow-x-auto border border-gray-200 rounded-lg">
+            <table className="w-full border-collapse text-xs text-center min-w-[1300px]">
+              <thead className="bg-gray-100/80 text-gray-800 font-extrabold border-b border-gray-200 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th className="p-3 w-32 text-center">DATE</th>
+                  <th className="p-3 text-left px-3 min-w-[210px] border-l border-gray-200">PART NAME</th>
+                  <th className="p-3 text-left px-3 min-w-[200px] border-l border-gray-200">PROBLEM DESCRIPTION</th>
+                  <th className="p-3 w-32 border-l border-gray-200 text-center">CATEGORY (A-E)</th>
+                  <th className="p-3 w-20 border-l border-gray-200 text-center">QTY</th>
+                  <th className="p-3 text-left px-3 min-w-[200px] border-l border-gray-200">ROOT CAUSE</th>
+                  <th className="p-3 text-left px-3 min-w-[200px] border-l border-gray-200">CORRECTIVE ACTION</th>
+                  <th className="p-3 w-24 border-l border-gray-200 text-center">RESULT</th>
+                  <th className="p-3 w-36 border-l border-gray-200 text-center">SIGNATURE</th>
+                </tr>
+              </thead>
 
-                  <td className="border border-gray-800 p-1 text-left">
-                    <select
-                      disabled={isSavedRecord}
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 font-semibold uppercase cursor-pointer disabled:text-gray-700"
-                      value={
-                        typeof row.partName === 'object'
-                          ? row.partName?.partName || ''
-                          : row.partName || ''
-                      }
-                      onChange={(e) => handleRowChange(idx, 'partName', e.target.value)}
-                    >
-                      <option value="">Select Part Name</option>
-                      {partNameOptions.map((part, pIdx) => {
-                        const partNameStr =
-                          typeof part === 'object' && part !== null ? part.partName || '' : String(part);
-                        if (!partNameStr) return null;
-                        return (
-                          <option key={`${partNameStr}-${pIdx}`} value={partNameStr}>
-                            {partNameStr}
-                          </option>
-                        );
-                      })}
-                    </select>
-                    {loadingPartNames && (
-                      <div className="text-[9px] text-gray-400 px-2">Loading parts...</div>
-                    )}
-                  </td>
+              <tbody className="divide-y divide-gray-200">
+                {entries.map((row, idx) => (
+                  <tr key={`entry-${idx}`} className="hover:bg-gray-50/60 transition-colors">
+                    {/* Date */}
+                    <td className="p-1.5">
+                      <input
+                        type="date"
+                        disabled={isSavedRecord}
+                        className="w-full text-center bg-transparent outline-none p-1.5 font-medium rounded-lg focus:bg-white border border-transparent focus:border-gray-300 disabled:text-gray-700 cursor-pointer"
+                        value={row.date || ''}
+                        onChange={(e) => handleRowChange(idx, 'date', e.target.value)}
+                      />
+                    </td>
 
-                  <td className="border border-gray-800 p-1">
-                    <textarea
-                      rows={2}
-                      disabled={isSavedRecord}
-                      placeholder="Enter description"
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 resize-none uppercase disabled:text-gray-700"
-                      value={row.problemDescription || ''}
-                      onChange={(e) => handleRowChange(idx, 'problemDescription', e.target.value)}
-                    />
-                  </td>
-
-                  <td className="border border-gray-800 p-1">
-                    <select
-                      disabled={isSavedRecord}
-                      className="w-full text-center bg-transparent outline-none p-1 font-bold cursor-pointer disabled:text-gray-700"
-                      value={row.problemCategory || ""}
-                      onChange={(e) => handleRowChange(idx, 'problemCategory', e.target.value)}
-                    >
-                      <option value="">Select</option>
-                      <option value="A">A</option>
-                      <option value="B">B</option>
-                      <option value="C">C</option>
-                      <option value="D">D</option>
-                      <option value="E">E</option>
-                    </select>
-                  </td>
-
-                  <td className="border border-gray-800 p-1">
-                    <input
-                      type="number"
-                      min={1}
-                      disabled={isSavedRecord}
-                      className="w-full text-center bg-transparent outline-none p-1 font-medium disabled:text-gray-700"
-                      value={row.quantity ?? 1}
-                      onChange={(e) =>
-                        handleRowChange(idx, 'quantity', parseInt(e.target.value, 10) || 1)
-                      }
-                    />
-                  </td>
-
-                  <td className="border border-gray-800 p-1">
-                    <textarea
-                      rows={2}
-                      disabled={isSavedRecord}
-                      placeholder="Root cause"
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 resize-none uppercase disabled:text-gray-700"
-                      value={row.rootCause || ''}
-                      onChange={(e) => handleRowChange(idx, 'rootCause', e.target.value)}
-                    />
-                  </td>
-
-                  <td className="border border-gray-800 p-1">
-                    <textarea
-                      rows={2}
-                      disabled={isSavedRecord}
-                      placeholder="Corrective action"
-                      className="w-full text-left px-2 bg-transparent outline-none p-1 resize-none uppercase disabled:text-gray-700"
-                      value={row.correctiveAction || ''}
-                      onChange={(e) => handleRowChange(idx, 'correctiveAction', e.target.value)}
-                    />
-                  </td>
-
-                  <td className="border border-gray-800 p-1">
-                    <select
-                      disabled={isSavedRecord}
-                      className="w-full text-center bg-transparent outline-none p-1 font-bold cursor-pointer disabled:text-gray-700"
-                      value={row.result || "OK"}
-                      onChange={(e) => handleRowChange(idx, 'result', e.target.value)}
-                    >
-                      <option value="OK">OK</option>
-                      <option value="NOT OK">NOT OK</option>
-                    </select>
-                  </td>
-
-                  <td className="border border-gray-800 p-1 text-center bg-gray-50/40">
-                    {row.signature ? (
-                      <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                        <span className="text-[10px] font-bold text-green-600 leading-tight">
-                          Approved ✓
-                        </span>
-                        <span
-                          className="text-xs font-black text-gray-900 uppercase truncate max-w-[100px]"
-                          title={row.signature}
-                        >
-                          {row.signature}
-                        </span>
-                      </div>
-                    ) : (
+                    {/* Part Name */}
+                    <td className="p-1.5 text-left border-l border-gray-200">
                       <select
                         disabled={isSavedRecord}
-                        value={row.productEngineer || ''}
-                        onChange={(e) => handleRowChange(idx, 'productEngineer', e.target.value)}
-                        className="w-full min-w-[140px] text-center bg-transparent outline-none p-1 text-[10px] font-bold text-orange-700 cursor-pointer disabled:text-gray-700"
+                        className="w-full text-left px-2 bg-transparent outline-none p-1.5 font-bold uppercase rounded-lg focus:bg-white border border-transparent focus:border-gray-300 cursor-pointer disabled:text-gray-700"
+                        value={
+                          typeof row.partName === 'object'
+                            ? row.partName?.partName || ''
+                            : row.partName || ''
+                        }
+                        onChange={(e) => handleRowChange(idx, 'partName', e.target.value)}
                       >
-                        <option value="">Select Product Engineer</option>
-                        {productEngineers.map((engineer, peIndex) => {
-                          const username = engineer.username || engineer.employeeId || engineer.name || '';
-                          return username ? <option key={`${username}-${peIndex}`} value={username}>{engineer.name || username}</option> : null;
+                        <option value="">Select Part Name</option>
+                        {partNameOptions.map((part, pIdx) => {
+                          const partNameStr =
+                            typeof part === 'object' && part !== null ? part.partName || '' : String(part);
+                          if (!partNameStr) return null;
+                          return (
+                            <option key={`${partNameStr}-${pIdx}`} value={partNameStr}>
+                              {partNameStr}
+                            </option>
+                          );
                         })}
                       </select>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      {loadingPartNames && (
+                        <div className="text-[10px] text-gray-400 px-2 italic">Loading available parts...</div>
+                      )}
+                    </td>
+
+                    {/* Problem Description */}
+                    <td className="p-1.5 border-l border-gray-200">
+                      <textarea
+                        rows={2}
+                        disabled={isSavedRecord}
+                        placeholder="Enter description..."
+                        className="w-full text-left px-2 bg-transparent outline-none p-1.5 resize-y uppercase rounded-lg focus:bg-white border border-transparent focus:border-gray-300 disabled:text-gray-700 font-medium"
+                        value={row.problemDescription || ''}
+                        onChange={(e) => handleRowChange(idx, 'problemDescription', e.target.value)}
+                      />
+                    </td>
+
+                    {/* Problem Category */}
+                    <td className="p-1.5 border-l border-gray-200">
+                      <select
+                        disabled={isSavedRecord}
+                        className="w-full text-center bg-transparent outline-none p-1.5 font-black text-gray-900 rounded-lg focus:bg-white border border-transparent focus:border-gray-300 cursor-pointer disabled:text-gray-700"
+                        value={row.problemCategory || ""}
+                        onChange={(e) => handleRowChange(idx, 'problemCategory', e.target.value)}
+                      >
+                        <option value="">Select</option>
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="D">D</option>
+                        <option value="E">E</option>
+                      </select>
+                    </td>
+
+                    {/* Quantity */}
+                    <td className="p-1.5 border-l border-gray-200">
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={isSavedRecord}
+                        className="w-full text-center bg-transparent outline-none p-1.5 font-black text-gray-900 rounded-lg focus:bg-white border border-transparent focus:border-gray-300 disabled:text-gray-700"
+                        value={row.quantity ?? 1}
+                        onChange={(e) =>
+                          handleRowChange(idx, 'quantity', parseInt(e.target.value, 10) || 1)
+                        }
+                      />
+                    </td>
+
+                    {/* Root Cause */}
+                    <td className="p-1.5 border-l border-gray-200">
+                      <textarea
+                        rows={2}
+                        disabled={isSavedRecord}
+                        placeholder="Detail root cause..."
+                        className="w-full text-left px-2 bg-transparent outline-none p-1.5 resize-y uppercase rounded-lg focus:bg-white border border-transparent focus:border-gray-300 disabled:text-gray-700 font-medium"
+                        value={row.rootCause || ''}
+                        onChange={(e) => handleRowChange(idx, 'rootCause', e.target.value)}
+                      />
+                    </td>
+
+                    {/* Corrective Action */}
+                    <td className="p-1.5 border-l border-gray-200">
+                      <textarea
+                        rows={2}
+                        disabled={isSavedRecord}
+                        placeholder="Detail corrective action..."
+                        className="w-full text-left px-2 bg-transparent outline-none p-1.5 resize-y uppercase rounded-lg focus:bg-white border border-transparent focus:border-gray-300 disabled:text-gray-700 font-medium"
+                        value={row.correctiveAction || ''}
+                        onChange={(e) => handleRowChange(idx, 'correctiveAction', e.target.value)}
+                      />
+                    </td>
+
+                    {/* Result */}
+                    <td className="p-1.5 border-l border-gray-200">
+                      <select
+                        disabled={isSavedRecord}
+                        className={`w-full text-center bg-transparent outline-none p-1.5 font-black rounded-lg focus:bg-white border border-transparent focus:border-gray-300 cursor-pointer disabled:text-gray-700 ${
+                          row.result === 'OK' ? 'text-green-700' : 'text-red-700'
+                        }`}
+                        value={row.result || "OK"}
+                        onChange={(e) => handleRowChange(idx, 'result', e.target.value)}
+                      >
+                        <option value="OK">OK</option>
+                        <option value="NOT OK">NOT OK</option>
+                      </select>
+                    </td>
+
+                    {/* Signature */}
+                    <td className="p-1.5 text-center bg-gray-50/50 border-l border-gray-200">
+                      {row.signature ? (
+                        <div className="flex flex-col items-center justify-center p-1 bg-green-50 border border-green-200 rounded-lg">
+                          <span className="text-[10px] font-bold text-green-700 uppercase tracking-wider">
+                            Approved ✓
+                          </span>
+                          <span
+                            className="text-xs font-black text-gray-900 uppercase truncate max-w-[110px]"
+                            title={row.signature}
+                          >
+                            {row.signature}
+                          </span>
+                        </div>
+                      ) : (
+                        <select
+                          disabled={isSavedRecord}
+                          value={row.productEngineer || ''}
+                          onChange={(e) => handleRowChange(idx, 'productEngineer', e.target.value)}
+                          className="w-full min-w-[130px] text-center bg-white border border-gray-300 outline-none p-1.5 rounded-lg text-xs font-bold text-orange-700 cursor-pointer disabled:text-gray-700 focus:ring-1 focus:ring-orange-500 shadow-sm"
+                        >
+                          <option value="">Select PE Incharge</option>
+                          {productEngineers.map((engineer, peIndex) => {
+                            const username = engineer.username || engineer.employeeId || engineer.name || '';
+                            return username ? (
+                              <option key={`${username}-${peIndex}`} value={username}>
+                                {engineer.name || username}
+                              </option>
+                            ) : null;
+                          })}
+                        </select>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Date Range Modal for PDF Download */}
         {showPdfModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100 animate-in fade-in">
-              <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-orange-500" />
-                  <h3 className="text-lg font-bold text-gray-800 uppercase tracking-wide">
-                    Download PDF by Date Range
-                  </h3>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-7 w-full max-w-md border border-gray-100">
+              <div className="flex justify-between items-center mb-5 pb-3 border-b border-gray-200">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-orange-50 rounded-lg">
+                    <Calendar className="w-5 h-5 text-orange-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 uppercase tracking-wide">
+                      Download PDF by Date Range
+                    </h3>
+                    <p className="text-xs text-gray-500">Filter register records by date range</p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPdfModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -685,35 +718,35 @@ export default function CorrectiveActionRegister() {
 
               <div className="space-y-4 mb-6">
                 <div>
-                  <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">
+                  <label className="font-semibold text-gray-700 block mb-1 text-xs uppercase tracking-wider">
                     From Date
                   </label>
                   <input
                     type="date"
-                    className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                    className="w-full border border-gray-300 p-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm font-semibold bg-white transition-all shadow-sm"
                     value={pdfFromDate}
                     onChange={(e) => setPdfFromDate(e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label className="font-bold text-gray-700 block mb-1 text-xs uppercase tracking-wider">
+                  <label className="font-semibold text-gray-700 block mb-1 text-xs uppercase tracking-wider">
                     To Date
                   </label>
                   <input
                     type="date"
-                    className="w-full border border-gray-300 p-2.5 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm font-semibold bg-white"
+                    className="w-full border border-gray-300 p-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm font-semibold bg-white transition-all shadow-sm"
                     value={pdfToDate}
                     onChange={(e) => setPdfToDate(e.target.value)}
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex justify-end items-center gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowPdfModal(false)}
-                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -721,7 +754,7 @@ export default function CorrectiveActionRegister() {
                   type="button"
                   onClick={handleDownloadPdfRange}
                   disabled={isDownloadingPdf}
-                  className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-5 py-2 rounded font-bold text-xs uppercase tracking-wider shadow transition-colors cursor-pointer"
+                  className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 text-white px-5 py-2.5 rounded-lg font-bold text-xs uppercase tracking-wider shadow hover:shadow-md transition-all cursor-pointer"
                 >
                   <FileDown className="w-4 h-4" />
                   {isDownloadingPdf ? "Downloading..." : "Download PDF"}
@@ -731,33 +764,38 @@ export default function CorrectiveActionRegister() {
           </div>
         )}
 
-        {/* Legend */}
-        <div className="border-2 border-gray-800 rounded-lg overflow-hidden mt-6">
-          <div className="px-3 py-1.5 font-bold text-gray-800 text-xs border-b border-gray-800 bg-gray-100 uppercase tracking-wide">
-            Note: The Problem Category to be mentioned as A or B or C or D or E
+        {/* Legend Card */}
+        <div className="bg-gray-50/70 rounded-xl border border-gray-200 p-4 space-y-2.5">
+          <div className="flex items-center gap-1.5 text-gray-800">
+            <Info className="w-4 h-4 text-orange-500" />
+            <span className="font-extrabold text-xs uppercase tracking-wider">
+              Problem Category Definition (Codes A - E)
+            </span>
           </div>
-          <div className="p-3 text-xs text-gray-700 space-y-1.5 bg-white font-medium">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-700 font-medium">
             {formMeta.categoryLegend.map((item) => (
-              <div key={item.code} className="flex gap-2">
-                <span className="font-bold text-gray-900 w-6">{item.code} -</span>
-                <span>{item.description}</span>
+              <div key={item.code} className="flex items-start gap-2 bg-white p-2 rounded-lg border border-gray-200/80 shadow-xs">
+                <span className="font-black text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200/70 text-[11px]">
+                  {item.code}
+                </span>
+                <span className="leading-snug pt-0.5">{item.description}</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* Footer Save Actions */}
-        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-300">
-          <span className="text-xs text-gray-500 font-bold">{qfValue}</span>
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-gray-200">
+          <span className="text-xs text-gray-500 font-semibold text-center sm:text-left">{qfValue}</span>
 
           <button
             type="button"
             onClick={handleSave}
             disabled={isSaving || saveSuccess || isSavedRecord}
-            className={`px-10 py-3 rounded font-bold transition-colors shadow-lg uppercase tracking-wider text-sm flex items-center gap-2 ${
+            className={`w-full sm:w-auto px-9 py-3.5 rounded-xl font-black transition-all shadow-lg uppercase tracking-wider text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 ${
               isSavedRecord
                 ? 'bg-gray-400 text-white cursor-not-allowed'
-                : 'bg-orange-500 hover:bg-orange-600 text-white cursor-pointer'
+                : 'bg-orange-500 hover:bg-orange-600 hover:shadow-orange-500/25 text-white cursor-pointer'
             }`}
           >
             {isSaving

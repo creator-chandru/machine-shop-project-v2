@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useLineSet } from "../context/LineSetContext.jsx";
 import { FileDown, Calendar, X } from 'lucide-react';
@@ -61,6 +62,143 @@ const Toast = ({ message, type, onClose }) => {
         ×
       </button>
     </div>
+  );
+};
+
+// Search-as-you-type input backed by the ErrorProofMaster table.
+// Rendered via a portal so the table's overflow-x-auto wrapper can't clip the dropdown.
+const SuggestInput = ({
+  field,            // 'errorProofNo' | 'errorProofName'
+  value,
+  lineCode,
+  machineNo,
+  disabled,
+  ariaLabel,
+  className,
+  onChange,         // (text) => void
+  onSelect          // (item) => void
+}) => {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [active, setActive] = useState(-1);
+  const [pos, setPos] = useState(null);
+  const inputRef = useRef(null);
+  const seqRef = useRef(0);
+
+  const canSuggest = !!lineCode && !!machineNo && !disabled;
+
+  const updatePos = () => {
+    const r = inputRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom, left: r.left, width: Math.max(r.width, 300) });
+  };
+
+  // Keep dropdown anchored while open
+  useEffect(() => {
+    if (!open) return;
+    updatePos();
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+    };
+  }, [open]);
+
+  // Debounced fetch (latest 10 when empty, matches when typing)
+  useEffect(() => {
+    if (!open || !canSuggest) return;
+
+    const seq = ++seqRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const params = new URLSearchParams({
+          lineCode,
+          machineNo,
+          field,
+          q: value || ""
+        });
+        const res = await fetch(
+          `${process.env.REACT_APP_API_URL || ""}/api/error-proofing-checksheet/suggestions?${params.toString()}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (seq !== seqRef.current) return;
+        if (res.ok) {
+          const data = await res.json();
+          setItems(Array.isArray(data) ? data : []);
+          setActive(-1);
+        }
+      } catch (err) {
+        console.error("Suggestion fetch error:", err);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [open, value, lineCode, machineNo, field, canSuggest]);
+
+  const pick = (item) => {
+    onSelect(item);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open || items.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((p) => (p + 1) % items.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((p) => (p <= 0 ? items.length - 1 : p - 1));
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      pick(items[active]);
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        autoComplete="off"
+        className={className}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          onChange(e.target.value);
+          if (canSuggest) setOpen(true);
+        }}
+        onFocus={() => canSuggest && setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+      />
+
+      {open && canSuggest && items.length > 0 && pos &&
+        createPortal(
+          <ul
+            onMouseDown={(e) => e.preventDefault()}  // keep input focus so click registers
+            style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
+            className="z-[60] max-h-60 overflow-y-auto bg-white border border-gray-300 rounded shadow-xl text-left text-sm"
+          >
+            {items.map((item, idx) => (
+              <li
+                key={`${item.errorProofNo}-${item.errorProofName}-${idx}`}
+                onClick={() => pick(item)}
+                className={`px-3 py-1.5 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                  idx === active ? 'bg-orange-100' : 'hover:bg-orange-50'
+                }`}
+              >
+                <span className="font-bold text-gray-800">{item.errorProofNo}</span>
+                <span className="text-gray-500"> — {item.errorProofName}</span>
+              </li>
+            ))}
+          </ul>,
+          document.body
+        )}
+    </>
   );
 };
 
@@ -332,6 +470,19 @@ export default function ErrorProofingCheckSheet() {
       next[rowIdx] = {
         ...next[rowIdx],
         [field]: val
+      };
+      return next;
+    });
+  };
+
+  // Fill both Error Proof No and Name when a suggestion is picked
+  const handleSuggestionSelect = (rowIdx, item) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[rowIdx] = {
+        ...next[rowIdx],
+        errorProofNo: item.errorProofNo,
+        errorProofName: item.errorProofName
       };
       return next;
     });
@@ -751,24 +902,30 @@ export default function ErrorProofingCheckSheet() {
                   </td>
 
                   <td className="border border-gray-800 p-0">
-                    <input
-                      type="text"
+                    <SuggestInput
+                      field="errorProofNo"
                       className="w-full h-full text-center outline-none bg-transparent py-2"
-                      aria-label={`Row ${rIdx + 1} Error Proof No`}
+                      ariaLabel={`Row ${rIdx + 1} Error Proof No`}
                       value={row.errorProofNo}
-                      onChange={(e) => handleRowChange(rIdx, 'errorProofNo', e.target.value)}
+                      lineCode={headerInfo.lineCode}
+                      machineNo={row.machineNo}
                       disabled={isSavedRecord}
+                      onChange={(val) => handleRowChange(rIdx, 'errorProofNo', val)}
+                      onSelect={(item) => handleSuggestionSelect(rIdx, item)}
                     />
                   </td>
 
                   <td className="border border-gray-800 p-0">
-                    <input
-                      type="text"
+                    <SuggestInput
+                      field="errorProofName"
                       className="w-full h-full text-left px-3 outline-none bg-transparent py-2"
-                      aria-label={`Row ${rIdx + 1} Error Proof Name`}
+                      ariaLabel={`Row ${rIdx + 1} Error Proof Name`}
                       value={row.errorProofName}
-                      onChange={(e) => handleRowChange(rIdx, 'errorProofName', e.target.value)}
+                      lineCode={headerInfo.lineCode}
+                      machineNo={row.machineNo}
                       disabled={isSavedRecord}
+                      onChange={(val) => handleRowChange(rIdx, 'errorProofName', val)}
+                      onSelect={(item) => handleSuggestionSelect(rIdx, item)}
                     />
                   </td>
 

@@ -4,9 +4,14 @@ const router = express.Router();
 const {
     saveErrorProofingChecksheet,
     getErrorProofingRecord,
-    generateErrorProofingReport
+    generateErrorProofingReport,
+    getErrorProofSuggestions          
 } = require('../controllers/errorProofingCheckSheetController.js');
 
+// ...existing routes...
+
+// Dropdown suggestions (master table)
+router.get('/error-proofing-checksheet/suggestions', getErrorProofSuggestions);
 // Save / update checksheet
 router.post('/error-proofing-checksheet', saveErrorProofingChecksheet);
 

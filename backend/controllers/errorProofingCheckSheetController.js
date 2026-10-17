@@ -69,6 +69,41 @@ const saveErrorProofingChecksheet = async (req, res) => {
                 `);
         }
 
+                // Upsert distinct (lineCode, machineNo, errorProofNo, errorProofName) into master
+        const seenCombos = new Set();
+        for (const row of rows) {
+            const mNo = String(row.machineNo || '').trim();
+            const epNo = String(row.errorProofNo || '').trim();
+            const epName = String(row.errorProofName || '').trim();
+            const lc = String(lineCode || '').trim();
+
+            if (!lc || !mNo || !epNo || !epName) continue;
+
+            const comboKey = [lc, mNo, epNo, epName].join('||').toLowerCase();
+            if (seenCombos.has(comboKey)) continue;
+            seenCombos.add(comboKey);
+
+            await transaction.request()
+                .input('lineCode', sql.NVarChar(100), lc)
+                .input('machineNo', sql.NVarChar(100), mNo)
+                .input('errorProofNo', sql.NVarChar(100), epNo)
+                .input('errorProofName', sql.NVarChar(255), epName)
+                .query(`
+                    IF EXISTS (
+                        SELECT 1 FROM ErrorProofMaster WITH (UPDLOCK, HOLDLOCK)
+                        WHERE lineCode = @lineCode AND machineNo = @machineNo
+                          AND errorProofNo = @errorProofNo AND errorProofName = @errorProofName
+                    )
+                        UPDATE ErrorProofMaster
+                        SET lastUsedAt = GETDATE()
+                        WHERE lineCode = @lineCode AND machineNo = @machineNo
+                          AND errorProofNo = @errorProofNo AND errorProofName = @errorProofName
+                    ELSE
+                        INSERT INTO ErrorProofMaster (lineCode, machineNo, errorProofNo, errorProofName)
+                        VALUES (@lineCode, @machineNo, @errorProofNo, @errorProofName)
+                `);
+        }
+
         await transaction.commit();
         res.status(201).json({ message: 'CheckSheet saved successfully!' });
 
@@ -495,8 +530,51 @@ const generateErrorProofingReport = async (req, res) => {
     }
 };
 
+// ============================================================
+// 4. SUGGESTIONS FROM MASTER (search-as-you-type)
+// ============================================================
+const getErrorProofSuggestions = async (req, res) => {
+    const { lineCode, machineNo, field, q } = req.query;
+
+    if (!lineCode || !machineNo) {
+        return res.status(200).json([]);
+    }
+
+    // whitelist column to avoid SQL injection
+    const column = field === 'errorProofName' ? 'errorProofName' : 'errorProofNo';
+    const term = String(q || '').trim();
+    const escaped = term.replace(/[\[\]%_]/g, (m) => `[${m}]`);
+
+    try {
+        const request = new sql.Request();
+        request.input('lineCode', sql.NVarChar(100), String(lineCode).trim());
+        request.input('machineNo', sql.NVarChar(100), String(machineNo).trim());
+        request.input('contains', sql.NVarChar(300), `%${escaped}%`);
+        request.input('prefix', sql.NVarChar(300), `${escaped}%`);
+        request.input('hasTerm', sql.Bit, term ? 1 : 0);
+
+        const result = await request.query(`
+            SELECT TOP (10) errorProofNo, errorProofName
+            FROM ErrorProofMaster
+            WHERE lineCode = @lineCode
+              AND machineNo = @machineNo
+              AND (@hasTerm = 0 OR ${column} LIKE @contains)
+            ORDER BY
+                CASE WHEN @hasTerm = 1 AND ${column} LIKE @prefix THEN 0 ELSE 1 END,
+                lastUsedAt DESC,
+                id DESC
+        `);
+
+        return res.status(200).json(result.recordset || []);
+    } catch (err) {
+        console.error('Error fetching error-proof suggestions:', err);
+        return res.status(500).json({ error: 'Failed to fetch suggestions' });
+    }
+};
+
 module.exports = {
     saveErrorProofingChecksheet,
     getErrorProofingRecord,
-    generateErrorProofingReport
+    generateErrorProofingReport,
+    getErrorProofSuggestions
 };

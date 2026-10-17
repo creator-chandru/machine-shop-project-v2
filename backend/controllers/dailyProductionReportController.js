@@ -523,6 +523,7 @@ const generateReport = async (req, res) => {
       const headerH = 34;
       const tableHeaderH = 15;
       const sigH = 38;
+      const qfH = 20;
       let rowsH = 0;
 
       doc.font("Helvetica").fontSize(fontSize);
@@ -545,7 +546,7 @@ const generateReport = async (req, res) => {
         rowsH += rowH;
       });
 
-      return headerH + 4 + tableHeaderH + rowsH + sigH + 10;
+      return headerH + 4 + tableHeaderH + rowsH + sigH + qfH + 10;
     };
 
     const drawEntry = (groupRecords, entryY) => {
@@ -571,9 +572,8 @@ const generateReport = async (req, res) => {
       doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("DAILY PRODUCTION REPORT (MACHINE SHOP)", startX + 90, entryY + 12, { width: titleW, align: "center" });
 
       doc.rect(startX + totalWidth - rightBoxW, entryY, rightBoxW, headerH).stroke();
-      doc.font("Helvetica-Bold").fontSize(7).fillColor('black').text(effectiveQf, startX + totalWidth - rightBoxW, entryY + 4, { width: rightBoxW, align: "center" });
-      doc.font("Helvetica-Bold").fontSize(7.5).text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - rightBoxW, entryY + 14, { width: rightBoxW, align: "center" });
-      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - rightBoxW, entryY + 24, { width: rightBoxW, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor('black').text(`LINE: ${first.lineCode} | SHIFT: ${first.Shift || 'I'}`, startX + totalWidth - rightBoxW, entryY + 8, { width: rightBoxW, align: "center" });
+      doc.font("Helvetica").fontSize(7).text(`DATE: ${displayDate}`, startX + totalWidth - rightBoxW, entryY + 20, { width: rightBoxW, align: "center" });
 
       let currY = entryY + headerH + 3;
 
@@ -646,7 +646,12 @@ const generateReport = async (req, res) => {
       doc.rect(hofX + 8, sigY + 10, sigColWidth - 16, 20).stroke();
       doc.fillColor(hofSig ? '#16a34a' : 'red').font('Helvetica-Bold').fontSize(7).text(hofSig ? `APPROVED` : "Pending", hofX + 8, sigY + 16, { width: sigColWidth - 16, align: "center" });
 
-      return sigY + 34;
+      // Print QF Value below signatures
+      let qfY = sigY + 34;
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+        .text(effectiveQf, startX, qfY + 4, { align: 'left' });
+
+      return qfY + 16;
     };
 
     let currentY = topMargin;

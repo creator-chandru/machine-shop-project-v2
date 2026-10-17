@@ -64,7 +64,7 @@ const getMachineShop3LineDetails = async (req, res) => {
 };
 
 // ============================================================
-// SAVE PRE-OPERATION CHECKLIST (With Safe Re-submission)
+// SAVE PRE-OPERATION CHECKLIST (Allows multiple entries per day)
 // ============================================================
 const savePreOperationChecklist = async (req, res) => {
   const {
@@ -93,19 +93,10 @@ const savePreOperationChecklist = async (req, res) => {
     const operatorSignature = signatures?.Operator || '';
     const shiftInchargeSignature = signatures?.["Shift Incharge"] || '';
 
-    // Remove existing rows for this compound key to prevent duplication
-    await transaction.request()
-      .input('machineShop', sql.Int, parseInt(machineShop, 10))
-      .input('lineCode', sql.NVarChar(50), lineCode)
-      .input('machineNo', sql.NVarChar(50), machineNo)
-      .input('checklistDate', sql.Date, checklistDate)
-      .query(`
-        DELETE FROM PreOperationChecklist
-        WHERE machineShop = @machineShop
-          AND lineCode = @lineCode
-          AND machineNo = @machineNo
-          AND CONVERT(date, checklistDate) = CONVERT(date, @checklistDate)
-      `);
+    // Create a shared submission timestamp for this batch
+    const submissionTime = new Date();
+
+    // NOTE: The DELETE block is removed to support multiple entries on the same day.
 
     for (const param of parameters) {
       const specVal = specifications?.[param.slNo] !== undefined 
@@ -131,18 +122,19 @@ const savePreOperationChecklist = async (req, res) => {
             .input('value', sql.NVarChar(100), val)
             .input('operatorSignature', sql.NVarChar(100), operatorSignature)
             .input('shiftInchargeSignature', sql.NVarChar(100), shiftInchargeSignature)
+            .input('createdAt', sql.DateTime, submissionTime)
             .query(`
               INSERT INTO PreOperationChecklist
               (
                 machineShop, lineCode, partName, partNo, month, machineNo, opNo,
                 checklistDate, slNo, specification, subRow, value,
-                operatorSignature, shiftInchargeSignature
+                operatorSignature, shiftInchargeSignature, createdAt
               )
               VALUES
               (
                 @machineShop, @lineCode, @partName, @partNo, @month, @machineNo, @opNo,
                 @checklistDate, @slNo, @specification, @subRow, @value,
-                @operatorSignature, @shiftInchargeSignature
+                @operatorSignature, @shiftInchargeSignature, @createdAt
               )
             `);
         }
@@ -163,18 +155,19 @@ const savePreOperationChecklist = async (req, res) => {
           .input('value', sql.NVarChar(100), val)
           .input('operatorSignature', sql.NVarChar(100), operatorSignature)
           .input('shiftInchargeSignature', sql.NVarChar(100), shiftInchargeSignature)
+          .input('createdAt', sql.DateTime, submissionTime)
           .query(`
             INSERT INTO PreOperationChecklist
             (
               machineShop, lineCode, partName, partNo, month, machineNo, opNo,
               checklistDate, slNo, specification, value,
-              operatorSignature, shiftInchargeSignature
+              operatorSignature, shiftInchargeSignature, createdAt
             )
             VALUES
             (
               @machineShop, @lineCode, @partName, @partNo, @month, @machineNo, @opNo,
               @checklistDate, @slNo, @specification, @value,
-              @operatorSignature, @shiftInchargeSignature
+              @operatorSignature, @shiftInchargeSignature, @createdAt
             )
           `);
       }
@@ -352,13 +345,14 @@ const generatePreOperationReport = async (req, res) => {
       SELECT
         id, machineShop, lineCode, partName, partNo, machineNo, opNo,
         FORMAT(checklistDate, 'yyyy-MM-dd') AS checklistDate,
+        FORMAT(createdAt, 'yyyy-MM-dd HH:mm:ss') AS createdTimeFormatted,
         slNo, specification, subRow, value,
         operatorSignature, shiftInchargeSignature
       FROM PreOperationChecklist
       WHERE machineShop = @machineShop
         AND CONVERT(date, checklistDate) >= CONVERT(date, @fromDate)
         AND CONVERT(date, checklistDate) <= CONVERT(date, @toDate)
-      ORDER BY checklistDate ASC, lineCode ASC, machineNo ASC, slNo ASC, id ASC
+      ORDER BY checklistDate ASC, createdAt ASC, lineCode ASC, machineNo ASC, slNo ASC, id ASC
     `;
 
     const result = await request.query(query);
@@ -368,9 +362,10 @@ const generatePreOperationReport = async (req, res) => {
       return res.status(404).send("No records found for the selected date range.");
     }
 
+    // Group each submission instance separately using createdTimeFormatted
     const groupedMap = new Map();
     records.forEach((r) => {
-      const groupKey = `${r.lineCode}_${r.machineNo}_${r.checklistDate}`;
+      const groupKey = `${r.lineCode}_${r.machineNo}_${r.checklistDate}_${r.createdTimeFormatted}`;
       if (!groupedMap.has(groupKey)) {
         groupedMap.set(groupKey, []);
       }

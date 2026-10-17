@@ -73,7 +73,6 @@ export default function PreOperationChecklist() {
   const [toast, setToast] = useState({ message: '', type: '' });
 
   const [isSavedRecord, setIsSavedRecord] = useState(false);
-  const lookupSeqRef = useRef(0);
 
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfFromDate, setPdfFromDate] = useState('');
@@ -204,59 +203,6 @@ export default function PreOperationChecklist() {
     fetchLatestParams();
   }, [shopId, headerInfo.lineCode, headerInfo.machineNo]);
 
-  useEffect(() => {
-    const checkExistingRecord = async () => {
-      if (!headerInfo.lineCode || !headerInfo.machineNo || !headerInfo.date) {
-        return;
-      }
-
-      const seq = ++lookupSeqRef.current;
-      try {
-        const token = localStorage.getItem('token');
-        const params = new URLSearchParams({
-          machineShop: shopId || '3',
-          lineCode: headerInfo.lineCode,
-          machineNo: headerInfo.machineNo,
-          date: headerInfo.date
-        });
-
-        const res = await fetch(
-          `${process.env.REACT_APP_API_URL || ""}/api/pre-operation-checklist/record?${params.toString()}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        if (seq !== lookupSeqRef.current) return;
-
-        if (res.ok) {
-          const record = await res.json();
-          if (seq !== lookupSeqRef.current) return;
-
-          if (record && record.values && Object.keys(record.values).length > 0) {
-            setIsSavedRecord(true);
-            setValues(record.values || {});
-            if (record.specifications) {
-              setSpecifications(prev => ({ ...prev, ...record.specifications }));
-            }
-            if (record.signatures) {
-              setSignatures(record.signatures || {});
-            }
-            if (record.header?.opNo) {
-              setHeaderInfo(prev => ({ ...prev, opNo: record.header.opNo }));
-            }
-            triggerToast("Existing record loaded for this date.", "success");
-          } else {
-            setIsSavedRecord(false);
-            setValues({});
-            setSignatures({});
-          }
-        }
-      } catch (err) {
-        console.error('Check existing checklist record error:', err);
-      }
-    };
-
-    checkExistingRecord();
-  }, [shopId, headerInfo.lineCode, headerInfo.machineNo, headerInfo.date]);
 
   useEffect(() => {
     setHeaderInfo((prev) => ({
@@ -504,6 +450,11 @@ export default function PreOperationChecklist() {
       setSaveSuccess(true);
       await new Promise(resolve => setTimeout(resolve, 2000));
       
+      if (isOperatorRoute) {
+        navigate(`/operator/${shopId}`);
+      } else {
+        navigate(`/shift-incharge/${shopId}`);
+      }
       // Reset the machine details to allow next entry on the same page
       setValues({});
       setSignatures({});

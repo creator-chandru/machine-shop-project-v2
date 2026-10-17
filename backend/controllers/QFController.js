@@ -1,6 +1,6 @@
 const sql = require("../db");
 
-// Configuration: Map each form name to its dedicated SQL table[cite: 1]
+// Map each form name to its dedicated SQL table[cite: 1]
 const FORM_QF_TABLES = {
   "pre-operation-checklist": "PreOperationQFvalues",
   "error-proofing-checksheet": "ErrorProofingQFvalues",
@@ -17,7 +17,7 @@ const FORM_QF_TABLES = {
   "eight-d-report": "EightDReportQFvalues",
   "job-setup-verification": "JobSetupVerificationQFvalues",
   "operator-allotment": "OperatorAllotmentQFvalues",
-  "operator-observation-plan": "OperatorObservationPlanQFvalues" // <-- Added
+  "operator-observation-plan": "OperatorObservationQFvalues" // Unified Table Name
 };
 
 // GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]
@@ -94,7 +94,7 @@ const updateFormSettings = async (req, res) => {
   }
 };
 
-// GET /api/qf-values/history/:formName: Returns history for the form to calculate QF by effective date[cite: 1]
+// GET /api/qf-values/history/:formName[cite: 1]
 const getFormQfHistory = async (req, res) => {
   const { formName } = req.params;
   const tableName = FORM_QF_TABLES[formName];

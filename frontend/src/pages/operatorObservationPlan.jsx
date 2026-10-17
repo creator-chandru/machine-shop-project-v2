@@ -20,7 +20,6 @@ const API = process.env.REACT_APP_API_URL || "";
 // ---------- helpers ----------
 const pad2 = (n) => String(n).padStart(2, "0");
 
-// "2026-10-12T09:30" + 6 months -> "2027-04-12T09:30" (day clamped to month length)
 const addMonths = (dt, months) => {
   const m = String(dt || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!m) return "";
@@ -36,9 +35,9 @@ const createPlan = (planNo, planDateTime = "") => ({
   planNo,
   planDateTime,
   actualStatus: "",
-  isSaved: false, // plan date/time came from DB -> uneditable
-  actualLocked: false, // actual already saved as COMPLETED / NOT COMPLETED -> uneditable
-  manual: false, // edited/cleared by the shift incharge (excluded from auto-regeneration)
+  isSaved: false,
+  actualLocked: false,
+  manual: false,
 });
 
 const createEmptyRow = () => ({
@@ -81,7 +80,6 @@ export default function OperatorObservationPlan() {
   const { shopId } = useParams();
   const navigate = useNavigate();
 
-  // Role extraction
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
   const currentUserRole = (currentUser?.role || "").toLowerCase();
@@ -98,7 +96,6 @@ export default function OperatorObservationPlan() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // PDF modal
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfEmpNo, setPdfEmpNo] = useState("");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -107,12 +104,10 @@ export default function OperatorObservationPlan() {
   const toastTimer = useRef(null);
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
-  // Emp No Dropdown State
   const [openDropdownRow, setOpenDropdownRow] = useState(null);
   const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0 });
   const dropdownRef = useRef(null);
 
-  // QF History & Dynamic QF Value State
   const [qfHistory, setQfHistory] = useState([]);
   const [qfValue, setQfValue] = useState("QF/XX/MPD-XX, Revision 00 dt 01.01.2024");
 
@@ -126,7 +121,6 @@ export default function OperatorObservationPlan() {
 
   useEffect(() => () => toastTimer.current && clearTimeout(toastTimer.current), []);
 
-  // Close dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
@@ -141,7 +135,6 @@ export default function OperatorObservationPlan() {
     };
   }, [openDropdownRow]);
 
-  // Close dropdown on scroll or resize
   useEffect(() => {
     const handleScrollOrResize = () => {
       if (openDropdownRow !== null) {
@@ -156,7 +149,6 @@ export default function OperatorObservationPlan() {
     };
   }, [openDropdownRow]);
 
-  // Load dropdown options & QF History
   useEffect(() => {
     const loadMasterData = async () => {
       try {
@@ -191,7 +183,6 @@ export default function OperatorObservationPlan() {
     loadMasterData();
   }, [shopId]);
 
-  // Compute active QF value based on effective date
   useEffect(() => {
     let currentQf = "QF/XX/MPD-XX, Revision 00 dt 01.01.2024";
     const baseDate = rows[0]?.plans?.[0]?.planDateTime || rows[0]?.doj;
@@ -217,7 +208,6 @@ export default function OperatorObservationPlan() {
     setQfValue(currentQf);
   }, [rows, qfHistory]);
 
-  // Toggle Dropdown Menu
   const toggleDropdown = (rIdx, buttonEl) => {
     if (openDropdownRow === rIdx) {
       setOpenDropdownRow(null);
@@ -235,9 +225,6 @@ export default function OperatorObservationPlan() {
     }
   };
 
-  // ==========================================================
-  // EMP NO LOOKUP -> load last 3 saved plans (locked) + next 3 generated
-  // ==========================================================
   const lookupEmployee = async (rIdx, empNoRaw) => {
     const empNo = String(empNoRaw || "").trim();
     const current = rows[rIdx];
@@ -285,7 +272,6 @@ export default function OperatorObservationPlan() {
             };
           }
 
-          // New employee: keep typed name/DOJ unless they came from a previous lookup
           return {
             ...r,
             empNo,
@@ -305,15 +291,12 @@ export default function OperatorObservationPlan() {
     }
   };
 
-  // ==========================================================
-  // HANDLERS
-  // ==========================================================
   const handleRowField = (rIdx, field, val) => {
     if (isReadOnly) return;
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== rIdx) return r;
-        if (r.isExisting && (field === "empName" || field === "doj")) return r; // locked
+        if (r.isExisting && (field === "empName" || field === "doj")) return r;
         return { ...r, [field]: val };
       })
     );
@@ -338,7 +321,6 @@ export default function OperatorObservationPlan() {
         target.manual = true;
         if (!val) target.actualStatus = "";
 
-        // New employee: first date drives the next 3 (+6, +12, +18 months)
         if (!r.isExisting && pIdx === 0) {
           target.manual = false;
           if (val) {
@@ -536,9 +518,6 @@ export default function OperatorObservationPlan() {
     }
   };
 
-  // ==========================================================
-  // RENDER
-  // ==========================================================
   const maxPlans = Math.max(1, ...rows.map((r) => r.plans.length));
   const isApproved = Boolean(signature && signature !== "Pending");
 
@@ -559,7 +538,6 @@ export default function OperatorObservationPlan() {
 
     return (
       <React.Fragment key={`plan-${rIdx}-${pIdx}`}>
-        {/* PLAN */}
         <td className={`border border-gray-800 p-0 ${p.isSaved ? "bg-gray-50" : ""}`}>
           <div className="flex items-center">
             <input
@@ -582,7 +560,6 @@ export default function OperatorObservationPlan() {
           </div>
         </td>
 
-        {/* ACTUAL */}
         <td className="border border-gray-800 p-0">
           {actualLocked ? (
             <div
@@ -623,7 +600,6 @@ export default function OperatorObservationPlan() {
 
       <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "" })} />
 
-      {/* Dropdown Popup for Saved Emp Nos */}
       {openDropdownRow !== null && (
         <div
           ref={dropdownRef}
@@ -676,7 +652,6 @@ export default function OperatorObservationPlan() {
         </div>
       )}
 
-      {/* PDF modal (by Emp No) */}
       {showPdfModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md border-2 border-gray-100">
@@ -747,7 +722,6 @@ export default function OperatorObservationPlan() {
       )}
 
       <div className="bg-white w-full max-w-[98rem] rounded-xl p-8 shadow-2xl overflow-x-auto border-4 border-gray-100 space-y-6">
-        {/* Card header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -778,7 +752,6 @@ export default function OperatorObservationPlan() {
           </button>
         </div>
 
-        {/* MAIN TABLE */}
         <div className="pt-2">
           {!isReadOnly && (
             <div className="flex justify-between items-center mb-2 px-1">
@@ -850,7 +823,6 @@ export default function OperatorObservationPlan() {
                       />
                     </td>
 
-                    {/* Emp No with input & dropdown toggle */}
                     <td className="border border-gray-800 p-0">
                       <div className="flex items-center h-full">
                         <input
@@ -898,7 +870,6 @@ export default function OperatorObservationPlan() {
           </div>
         </div>
 
-        {/* SIGNATURE TABLE */}
         <div className="overflow-x-auto mt-6">
           <table className="w-full max-w-md border-collapse border-2 border-gray-800 text-xs text-center">
             <thead>
@@ -931,7 +902,6 @@ export default function OperatorObservationPlan() {
           </table>
         </div>
 
-        {/* Submit */}
         {!isReadOnly && (
           <div className="flex justify-end items-end mt-6 pt-4 border-t border-gray-300">
             <button

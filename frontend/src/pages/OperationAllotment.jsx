@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FileDown } from 'lucide-react';
 import Header from '../components/Header';
 
-const API_BASE = 'http://localhost:5000/api'; // move to an env variable for deployment
+const API_BASE = `${process.env.REACT_APP_API_URL}`; // move to an env variable for deployment
 
 const DEFAULT_QF_VALUE = 'QF/07/MPD-06, Revision 05 dt 10.07.2026';
 
@@ -84,7 +84,7 @@ const OperatorAllotment = () => {
                 setLoading(true);
                 const opts = { headers: { Accept: 'application/json' }, signal: controller.signal };
 
-                const lineResponse = await fetch(`${API_BASE}/operator-allotment/lines`, opts);
+                const lineResponse = await fetch(`${API_BASE}/api/operator-allotment/lines`, opts);
                 if (!lineResponse.ok) throw new Error(await readError(lineResponse, 'Failed to fetch Line Codes'));
                 const lineData = await lineResponse.json();
                 const rawLines = lineData.lines || lineData.lineCodes || [];
@@ -92,7 +92,7 @@ const OperatorAllotment = () => {
                     rawLines.map((line) => (typeof line === 'string' ? line : line.lineCode || '')).filter(Boolean)
                 );
 
-                const peResponse = await fetch(`${API_BASE}/operator-allotment/product-managers`, opts);
+                const peResponse = await fetch(`${API_BASE}/api/operator-allotment/product-managers`, opts);
                 if (!peResponse.ok) throw new Error(await readError(peResponse, 'Failed to fetch Product Engineers'));
                 const peData = await peResponse.json();
                 setProductEngineers(peData.peList || peData.productManagers || peData.productEngineers || []);
@@ -116,8 +116,8 @@ const OperatorAllotment = () => {
         const loadQf = async () => {
             try {
                 const url = recordDate
-                    ? `${API_BASE}/operator-allotment/qf-value?date=${encodeURIComponent(recordDate)}`
-                    : `${API_BASE}/operator-allotment/qf-value`;
+                    ? `${API_BASE}/api/operator-allotment/qf-value?date=${encodeURIComponent(recordDate)}`
+                    : `${API_BASE}/api/operator-allotment/qf-value`;
                 const response = await fetch(url, {
                     headers: { Accept: 'application/json' },
                     signal: controller.signal
@@ -155,7 +155,7 @@ const OperatorAllotment = () => {
         const fetchRecord = async () => {
             try {
                 const response = await fetch(
-                    `${API_BASE}/operator-allotment?date=${encodeURIComponent(recordDate)}&lineCode=${encodeURIComponent(lineCode)}`,
+                    `${API_BASE}/api/operator-allotment?date=${encodeURIComponent(recordDate)}&lineCode=${encodeURIComponent(lineCode)}`,
                     { headers: { Accept: 'application/json' }, signal: controller.signal }
                 );
                 if (!response.ok) throw new Error(await readError(response, 'Failed to fetch record'));
@@ -207,7 +207,7 @@ const OperatorAllotment = () => {
 
         try {
             setSaving(true);
-            const response = await fetch(`${API_BASE}/operator-allotment`, {
+            const response = await fetch(`${API_BASE}/api/operator-allotment`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(form)
@@ -234,7 +234,7 @@ const OperatorAllotment = () => {
 
         try {
             const response = await fetch(
-                `${API_BASE}/operator-allotment/report?date=${encodeURIComponent(form.recordDate)}&lineCode=${encodeURIComponent(form.lineCode)}`
+                `${API_BASE}/api/operator-allotment/report?date=${encodeURIComponent(form.recordDate)}&lineCode=${encodeURIComponent(form.lineCode)}`
             );
 
             if (!response.ok) throw new Error(await readError(response, 'Failed to generate report'));

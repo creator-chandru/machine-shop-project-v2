@@ -17,7 +17,8 @@ const FORM_QF_TABLES = {
   "eight-d-report": "EightDReportQFvalues",
   "job-setup-verification": "JobSetupVerificationQFvalues",
   "operator-allotment": "OperatorAllotmentQFvalues",
-  "operator-observation-plan": "OperatorObservationQFvalues" // Unified Table Name
+  "operator-observation-plan": "OperatorObservationQFvalues",
+  "tool-change-record" : "ToolChangeRecordQFvalues" // Unified Table Name
 };
 
 // GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]

@@ -87,11 +87,10 @@ const getShiftIncharges = async (req, res) => {
         try {
             const userResult = await request.query(`
                 SELECT DISTINCT 
-                    COALESCE(NULLIF(fullName, ''), username) AS inchargeName
-                FROM Users 
+                    username AS inchargeName
+                FROM MachineShopUsers 
                 WHERE LOWER(role) LIKE '%shift%' 
-                   OR LOWER(role) LIKE '%incharge%'
-                   OR LOWER(designation) LIKE '%shift%'
+                 
                 ORDER BY inchargeName ASC
             `);
             inchargeList = userResult.recordset
@@ -356,42 +355,89 @@ const getCompetencyExam = async (req, res) => {
 // ============================================================
 // 8. FETCH PENDING EXAMS FOR SUPERVISOR QUEUE
 // ============================================================
+// ============================================================
+// 8. FETCH PENDING EXAMS FOR SUPERVISOR QUEUE
+// ============================================================
+
 const getCompetencyReports = async (req, res) => {
     try {
         await ensureCompetencyColumns();
+
         const { shiftIncharge } = req.query;
         const request = new sql.Request();
 
         let query = `
-            SELECT 
+            SELECT
                 id,
                 employeeNo,
                 employeeName,
                 line,
-                FORMAT(doj, 'yyyy-MM-dd') AS doj,
-                FORMAT(CONVERT(date, examDate), 'yyyy-MM-dd') AS examDate,
+
+                CONVERT(
+                    VARCHAR(10),
+                    TRY_CONVERT(DATE, doj, 23),
+                    23
+                ) AS doj,
+
+                CONVERT(
+                    VARCHAR(10),
+                    TRY_CONVERT(DATE, examDate, 23),
+                    23
+                ) AS examDate,
+
                 qualification,
                 score,
                 evaluatedBy,
-                ISNULL(status, 'Pending Verification') AS status,
+
+                ISNULL(
+                    status,
+                    'Pending Verification'
+                ) AS status,
+
                 verifiedBy,
-                FORMAT(verifiedAt, 'yyyy-MM-dd HH:mm') AS verifiedAt
+
+                CONVERT(
+                    VARCHAR(16),
+                    verifiedAt,
+                    120
+                ) AS verifiedAt
+
             FROM CompetencyQualificationExam
-            WHERE ISNULL(status, 'Pending Verification') = 'Pending Verification'
+
+            WHERE ISNULL(
+                status,
+                'Pending Verification'
+            ) = 'Pending Verification'
         `;
 
         if (shiftIncharge) {
-            request.input('shiftIncharge', sql.NVarChar(100), shiftIncharge.trim());
-            query += ` AND (LOWER(evaluatedBy) = LOWER(@shiftIncharge) OR evaluatedBy IS NULL OR evaluatedBy = '')`;
+            request.input(
+                'shiftIncharge',
+                sql.NVarChar(100),
+                shiftIncharge.trim()
+            );
+
+            query += `
+                AND (
+                    LOWER(evaluatedBy) = LOWER(@shiftIncharge)
+                    OR evaluatedBy IS NULL
+                    OR evaluatedBy = ''
+                )
+            `;
         }
 
         query += ` ORDER BY id DESC`;
 
         const result = await request.query(query);
+
         return res.status(200).json(result.recordset);
+
     } catch (err) {
         console.error("Fetch reports error:", err);
-        return res.status(500).json({ error: 'Failed to fetch exam reports' });
+
+        return res.status(500).json({
+            error: 'Failed to fetch exam reports'
+        });
     }
 };
 

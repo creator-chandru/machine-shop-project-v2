@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const qfController = require("../controllers/QFController");
+const qfController = require("../controllers/QFController.js");
 
 // --- FORM SETTINGS (QF VALUES) ROUTES ---
 router.get("/qf-values", qfController.getFormSettings);

@@ -15,7 +15,7 @@ const {
   getFormSettings,
   updateFormSettings,
   getFormQfHistory,
-} = require('../controllers/qfController.js');
+} = require('../controllers/QFController.js');
 
 // ============================================================
 // SAVE OPERATOR OBSERVATION SHEET

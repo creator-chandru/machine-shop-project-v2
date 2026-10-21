@@ -14,7 +14,7 @@ const {
   getFormSettings,
   updateFormSettings,
   getFormQfHistory,
-} = require('../controllers/qfController.js');
+} = require('../controllers/QFController.js');
 
 // 1. Save or submit Breakdown Intimation Report
 router.post('/breakdown-intimation-report', saveBreakdownIntimationReport);

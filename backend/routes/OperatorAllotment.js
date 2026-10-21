@@ -4,6 +4,7 @@ const router = express.Router();
 const {
     getOperatorAllotmentLines,
     getProductManagers,
+    getOperatorAllotmentQfValue,
     getOperatorAllotment,
     saveOperatorAllotment,
     getPendingPEOperatorAllotment,
@@ -13,14 +14,15 @@ const {
 
 router.get('/operator-allotment/lines', getOperatorAllotmentLines);
 router.get('/operator-allotment/product-managers', getProductManagers);
+router.get('/operator-allotment/qf-value', getOperatorAllotmentQfValue);
+router.get('/operator-allotment/report', generateOperatorAllotmentReport);
 router.get('/operator-allotment', getOperatorAllotment);
 router.post('/operator-allotment', saveOperatorAllotment);
 
-// FIX: Split routes or use :name* to prevent path-to-regexp PathError
+// Split routes (instead of an optional param) to avoid the path-to-regexp PathError
 router.get('/operator-allotment/pe/pending', getPendingPEOperatorAllotment);
 router.get('/operator-allotment/pe/pending/:name', getPendingPEOperatorAllotment);
 
 router.post('/operator-allotment/pe/sign', signPEOperatorAllotment);
-router.get('/operator-allotment/report', generateOperatorAllotmentReport);
 
 module.exports = router;

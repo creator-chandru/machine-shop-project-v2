@@ -173,7 +173,10 @@ const ShiftIncharge = () => {
     { name: "8D Problem Solving Report", path: `/shift-incharge/${shopId}/8d-problem-solving-report`, icon: Clock },
     { name: "Operator Allotment", path: `/shift-incharge/${shopId}/operator-allotment`, icon: ClipboardCheck },
     { name: "Job Setup Verification", path: `/shift-incharge/${shopId}/job-setup-verification`, icon: ShieldCheck },
-    { name: "Operator Observation Plan", path :`/shift-incharge/${shopId}/operator-observation-plan`, icon : FileCheck}
+    { name: "Operator Observation Plan", path :`/shift-incharge/${shopId}/operator-observation-plan`, icon : FileCheck},
+    { name: "Layered Process And Audit Bottom Level", path :`/shift-incharge/${shopId}/layered-process-audit`, icon : FileCheck},
+    { name: "Robot Manual Transition CheckSheet", path :`/shift-incharge/${shopId}/robot-manual-transition`, icon : FileCheck},
+    { name: "Robot Controls Verification CheckSheet", path :`/shift-incharge/${shopId}/robot-control-verification`, icon : FileCheck}
   ];
 
   return (

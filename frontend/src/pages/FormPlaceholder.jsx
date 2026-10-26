@@ -21,6 +21,9 @@ import JobSetupVerification from "./jobSetupVerification.jsx";
 import CompetencyExam from "./CompetencyExam.jsx";
 import Level1MaintenanceChecksheet from "./Level1MaintenanceCheckSheet.jsx";
 import OperatorObservationPlan from "./operatorObservationPlan.jsx";
+import LayeredProcessAuditBottomLevel from "./layeredProcessAuditBottomLevel.jsx";
+import RobotManualTransitionCheckSheet from "./RobotManualTransitionCheckSheet.jsx";
+import RobotControlsVerificationCheckSheet from "./robotControlsVerificationCheckSheet.jsx";
 /**
  * Central map for operator forms
  *
@@ -69,7 +72,13 @@ const formMap = {
 
     "level1-maintenance" : <Level1MaintenanceChecksheet/>,
 
-    "operator-observation-plan" : <OperatorObservationPlan />
+    "operator-observation-plan" : <OperatorObservationPlan />,
+
+    "layered-process-audit" : <LayeredProcessAuditBottomLevel />,
+
+    "robot-manual-transition" : <RobotManualTransitionCheckSheet />,
+
+    "robot-control-verification" : <RobotControlsVerificationCheckSheet />
 
   // Future forms:
   // "some-form": <SomeForm />,

@@ -29,6 +29,9 @@ const qfRoutes = require("./routes/qfRoutes.js"); // ✅ Added QF Routes
 const Level1Routes = require("./routes/Level1MaintenanceRoutes.js"); // ✅ Added Level 1 Routes
 const breakDownReportRoutes = require("./routes/breakDownReportRoutes.js");
 const operatorObservationPlanRoutes = require("./routes/operatorObservationPlanRoutes.js");
+const layeredProcessAuditRoutes = require("./routes/layeredProcessAuditRoutes.js");
+const robotControlsRoutes = require("./routes/robotControlsRoutes.js");
+const robotManualTransitionRoutes = require("./routes/robotManualTransitionRoutes.js");
 
 const app = express();
 
@@ -68,6 +71,10 @@ app.use('/api', qfRoutes); // ✅ Registered QF Routes
 app.use('/api', Level1Routes); // ✅ Registered Level 1 Routes
 app.use('/api', breakDownReportRoutes);
 app.use('/api', operatorObservationPlanRoutes);
+app.use('/api', layeredProcessAuditRoutes);
+app.use('/api', robotControlsRoutes);
+app.use('/api', robotManualTransitionRoutes);
+
 app.use(express.json({ limit: "25mb"}));
 
 const PORT = process.env.PORT || 5000;

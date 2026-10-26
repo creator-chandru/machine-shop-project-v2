@@ -14,13 +14,13 @@ import {
   ClipboardCheck, 
   Settings2, 
   Layers, 
-  ChevronRight,
-  BookOpen, 
-  UserCheck,
-  Building2,
-  SlidersHorizontal,
-  CheckCircle2,
-  Plus
+  ChevronRight, 
+  UserCheck, 
+  Building2, 
+  SlidersHorizontal, 
+  CheckCircle2, 
+  Plus,
+  ClipboardList
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -30,11 +30,16 @@ const API_URL = process.env.REACT_APP_API_URL || "";
 const Hof = () => {
   const { shopId } = useParams();
 
-  const [activeFormType, setActiveFormType] = useState("daily-production"); // "daily-production" | "significant" | "8d-report" | "job-setup" | "job-setup-master" | "operator-observation"
+  const [activeFormType, setActiveFormType] = useState("daily-production"); 
+  // "daily-production" | "significant" | "8d-report" | "job-setup" | "operator-observation" | "lpa-bottom" | "job-setup-master"
+  
   const [pendingReports, setPendingReports] = useState([]);
   const [pendingSignificantReports, setPendingSignificantReports] = useState([]);
   const [pendingEightDReports, setPendingEightDReports] = useState([]);
   const [pendingJobSetupReports, setPendingJobSetupReports] = useState([]);
+  const [pendingObservationReports, setPendingObservationReports] = useState([]);
+  const [pendingLpaBottomReports, setPendingLpaBottomReports] = useState([]);
+
   const [selectedReport, setSelectedReport] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
@@ -54,8 +59,6 @@ const Hof = () => {
     }
   })();
   const currentHOF = currentUser.username || currentUser.employeeId || "hof";
-
-  const [pendingObservationReports, setPendingObservationReports] = useState([]);
 
   useEffect(() => {
     return () => {
@@ -160,7 +163,24 @@ const Hof = () => {
     }
   };
 
-  // Fetch QF Settings
+const fetchPendingLpaBottomReports = async () => {
+  try {
+    const token = localStorage.getItem("token");
+    const res = await fetch(
+      `${API_URL}/api/lpa-bottom/hof/pending/${encodeURIComponent(currentHOF)}?shopId=${shopId || 3}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      setPendingLpaBottomReports(Array.isArray(data) ? data : []);
+    } else {
+      setPendingLpaBottomReports([]);
+    }
+  } catch (err) {
+    toast.error("Failed to load Pending LPA Bottom Level Reports.");
+    setPendingLpaBottomReports([]);
+  }
+};
   const fetchQfSettings = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -176,7 +196,6 @@ const Hof = () => {
     }
   };
 
-  // Update specific QF Setting
   const handleSaveSingleQfSetting = async (setting) => {
     setSavingId(setting.formName);
     try {
@@ -212,6 +231,8 @@ const Hof = () => {
       fetchPendingReports();
     } else if (activeFormType === "operator-observation") {
       fetchPendingObservationReports();
+    } else if (activeFormType === "lpa-bottom") {
+      fetchPendingLpaBottomReports();
     }
   }, [shopId, activeFormType]);
 
@@ -222,7 +243,7 @@ const Hof = () => {
     setIsPdfLoading(true);
 
     try {
-      const rawDate = report.reportDate || report.checkDate || report.recordDate;
+      const rawDate = report.reportDate || report.checkDate || report.recordDate || report.date;
       let isoDate = rawDate;
       if (rawDate && rawDate.includes("/")) {
         const parts = rawDate.split("/");
@@ -263,7 +284,13 @@ const Hof = () => {
         params.append("employeeCode", report.employeeCode);
         params.append("testDate", isoDate);
         reportPath = `${API_URL}/api/operator-observation-sheet/report?${params.toString()}`;
-      } else {
+      } else if (activeFormType === "lpa-bottom") {
+        params.append("lineCode", report.lineCode || "");
+        params.append("date", isoDate);
+        params.append("shopId", String(report.machineShop || shopId || 3));
+        reportPath = `${API_URL}/api/lpa-bottom/report?${params.toString()}`;
+      }
+      else {
         params.append("lineCode", report.lineCode);
         params.append("date", isoDate);
         params.append("shopId", String(report.machineShop || shopId || 3));
@@ -289,13 +316,15 @@ const Hof = () => {
 
   const submitHofSignature = async () => {
     try {
-      const rawDate = selectedReport.reportDate || selectedReport.checkDate || selectedReport.recordDate;
+      const rawDate = selectedReport.reportDate || selectedReport.checkDate || selectedReport.recordDate || selectedReport.date;
       let isoDate = rawDate;
       if (rawDate && rawDate.includes("/")) {
         const parts = rawDate.split("/");
         if (parts.length === 3) {
           isoDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
         }
+      } else if (rawDate && rawDate.includes("T")) {
+        isoDate = rawDate.split("T")[0];
       }
 
       let signEndpoint = "";
@@ -335,7 +364,24 @@ const Hof = () => {
           date: isoDate,
           signature: currentHOF,
         };
-      } else {
+      } else if (activeFormType === "lpa-bottom") {
+        signEndpoint = `${API_URL}/api/lpa-bottom/sign-hof`;
+        payload = {
+          lineCode: selectedReport.lineCode,
+          date: isoDate,
+          machineShop: selectedReport.machineShop || shopId || 3,
+          signature: currentHOF,
+          hofUsername: currentHOF
+        };
+      } else if (activeFormType === "lpa-bottom") {
+        signEndpoint = `${API_URL}/api/lpa-bottom/hof/sign`;
+        payload = {
+          lineCode: selectedReport.lineCode,
+          date: isoDate,
+          signature: currentHOF
+        };
+      } 
+      else {
         signEndpoint = `${API_URL}/api/daily-production-report/sign-hof`;
         payload = {
           lineCode: selectedReport.lineCode,
@@ -369,6 +415,8 @@ const Hof = () => {
           fetchPendingJobSetupReports();
         } else if (activeFormType === "operator-observation") {
           fetchPendingObservationReports();
+        } else if (activeFormType === "lpa-bottom") {
+          fetchPendingLpaBottomReports();
         } else {
           fetchPendingReports();
         }
@@ -385,7 +433,8 @@ const Hof = () => {
       fetchPendingSignificantReports(),
       fetchPendingEightDReports(),
       fetchPendingJobSetupReports(),
-      fetchPendingObservationReports()
+      fetchPendingObservationReports(),
+      fetchPendingLpaBottomReports()
     ]);
     setTimeout(() => setIsRefreshing(false), 500);
   };
@@ -414,7 +463,7 @@ const Hof = () => {
                 </span>
               </div>
               <p className="text-xs text-gray-500 font-medium">
-                Review and digitally verify daily production reports, significant events, 8D analyses, and job setup checks.
+                Review and digitally verify daily production reports, significant events, 8D analyses, job setup checks, and layered process audits.
               </p>
             </div>
 
@@ -532,6 +581,26 @@ const Hof = () => {
                     activeFormType === "operator-observation" ? "bg-white text-orange-600" : "bg-gray-300 text-gray-800"
                   }`}>
                     {pendingObservationReports.length}
+                  </span>
+                )}
+              </button>
+
+              {/* NEW LPA BOTTOM LEVEL TAB */}
+              <button
+                onClick={() => setActiveFormType("lpa-bottom")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg font-bold text-xs md:text-sm transition-all cursor-pointer ${
+                  activeFormType === "lpa-bottom"
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-200/60"
+                }`}
+              >
+                <ClipboardList className="w-4 h-4" />
+                LPA Bottom Level
+                {pendingLpaBottomReports.length > 0 && (
+                  <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ml-1 ${
+                    activeFormType === "lpa-bottom" ? "bg-white text-orange-600" : "bg-gray-300 text-gray-800"
+                  }`}>
+                    {pendingLpaBottomReports.length}
                   </span>
                 )}
               </button>
@@ -992,6 +1061,93 @@ const Hof = () => {
               </div>
             )}
 
+            {/* TAB CONTENT: LPA Bottom Level Reports */}
+            {activeFormType === "lpa-bottom" && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-2">
+                  <div>
+                    <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wide">
+                      Pending Layered Process Audit (Bottom Level) Reports
+                    </h3>
+                    <p className="text-xs text-gray-500">Floor level audit adherence, checkpoints, and supervisor sign-offs awaiting HOF approval.</p>
+                  </div>
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                    Total: {pendingLpaBottomReports.length}
+                  </span>
+                </div>
+
+                {pendingLpaBottomReports.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 px-4 bg-gray-50/70 rounded-2xl border border-dashed border-gray-300 text-center space-y-3">
+                    <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-bold text-gray-800">No LPA Bottom Level Reports Pending</h4>
+                    <p className="text-xs text-gray-500 max-w-sm">All Bottom Level LPA sheets for this shop have been verified.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm bg-white">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider font-semibold">
+                            <th className="py-3.5 px-4 font-bold">Date</th>
+                            <th className="py-3.5 px-4 font-bold">Line Code</th>
+                            <th className="py-3.5 px-4 font-bold">Part Details</th>
+                            <th className="py-3.5 px-4 font-bold">Supervisor Sign</th>
+                            <th className="py-3.5 px-4 font-bold">Status</th>
+                            <th className="py-3.5 px-4 font-bold text-right pr-6">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 text-sm">
+                          {pendingLpaBottomReports.map((report, idx) => (
+                            <tr key={`lpa-bot-${idx}`} className="hover:bg-orange-50/30 transition-colors">
+                              <td className="py-4 px-4 font-medium text-gray-800 text-xs">
+                                {formatDate(report.date || report.reportDate)}
+                              </td>
+                              <td className="py-4 px-4 font-extrabold text-gray-900">
+                                <span className="px-2.5 py-1 rounded-md bg-gray-100 border border-gray-300 font-mono text-xs">
+                                  {report.lineCode}
+                                </span>
+                              </td>
+                              <td className="py-4 px-4">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-gray-800 text-xs">{report.partName || "N/A"}</span>
+                                  {report.partNo && <span className="font-mono text-[10px] text-gray-500">{report.partNo}</span>}
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 text-xs font-semibold text-gray-700">
+                                {report.supervisorSignature ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                                    ✓ {report.supervisorSignature}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400 italic">None</span>
+                                )}
+                              </td>
+                              <td className="py-4 px-4">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                  Pending HOF Verification
+                                </span>
+                              </td>
+                              <td className="py-4 px-4 text-right pr-6">
+                                <button
+                                  onClick={() => handleOpenReviewModal(report)}
+                                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase shadow-md shadow-orange-500/20 transition-all cursor-pointer"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  Review & Sign
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* TAB CONTENT: Set Job Verification Set Up */}
             {activeFormType === "job-setup-master" && (
               <div className="pt-2">
@@ -1030,7 +1186,7 @@ const Hof = () => {
             </div>
           </div>
 
-          {/* Component 2: Part Set Registration Card (Matching White Enterprise Theme) */}
+          {/* Component 2: Part Set Registration Card */}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden text-gray-800">
             <div className="px-6 py-5 bg-gray-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -1174,6 +1330,8 @@ const Hof = () => {
                       ? "Job Setup Verification (HOF-PRODN)"
                       : activeFormType === "operator-observation"
                       ? "Operator Observation Sheet"
+                      : activeFormType === "lpa-bottom"
+                      ? "Layered Process Audit - Bottom Level"
                       : "Daily Production Report (HOF)"
                   }
                 </h3>
@@ -1242,7 +1400,9 @@ const Hof = () => {
                     )}
                     <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
                       <span className="text-xs font-bold text-gray-400 uppercase">Date</span>
-                      <span className="text-gray-300 font-medium">{formatDate(selectedReport.reportDate || selectedReport.recordDate)}</span>
+                      <span className="text-gray-300 font-medium">
+                        {formatDate(selectedReport.reportDate || selectedReport.recordDate || selectedReport.date)}
+                      </span>
                     </div>
                     {selectedReport.shift && (
                       <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
@@ -1256,7 +1416,13 @@ const Hof = () => {
                         <span className="text-gray-200 text-xs leading-relaxed">{selectedReport.event}</span>
                       </div>
                     )}
-                    {activeFormType !== "significant" && (
+                    {activeFormType === "lpa-bottom" && (
+                      <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+                        <span className="text-xs font-bold text-gray-400 uppercase">Supervisor Sign</span>
+                        <span className="font-bold text-emerald-400 text-xs">{selectedReport.supervisorSignature || "Signed"}</span>
+                      </div>
+                    )}
+                    {activeFormType !== "significant" && activeFormType !== "lpa-bottom" && (
                       <div className="flex justify-between items-center pt-1">
                         <span className="text-xs font-bold text-gray-400 uppercase">Shift Incharge</span>
                         <span className="text-gray-300 font-medium">{selectedReport.shiftInchargeName || "Shift Incharge"}</span>

@@ -18,7 +18,8 @@ const FORM_QF_TABLES = {
   "job-setup-verification": "JobSetupVerificationQFvalues",
   "operator-allotment": "OperatorAllotmentQFvalues",
   "operator-observation-plan": "OperatorObservationQFvalues",
-  "tool-change-record" : "ToolChangeRecordQFvalues" // Unified Table Name
+  "tool-change-record" : "ToolChangeRecordQFvalues",
+  "lpa-bottom": "LPAQFvalues" // Unified Table Name
 };
 
 // GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]

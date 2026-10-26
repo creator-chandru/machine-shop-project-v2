@@ -22,7 +22,7 @@ router.get('/lpa-bottom/hof/pending/:name', getPendingHOFLPAData);
 
 // 4. HOF Signature Approval endpoint
 router.post('/lpa-bottom/hof/sign', signHOFApproval);
-
+router.post('/lpa-bottom/sign-hof', signHOFApproval);
 // 5. Get Saved LPA Bottom Level Checksheet Data
 router.get('/lpa-bottom', getLPABottomLevel);
 

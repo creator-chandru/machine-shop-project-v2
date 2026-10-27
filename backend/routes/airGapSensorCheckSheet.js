@@ -3,6 +3,7 @@ const router = express.Router();
 
 const {
     getPEUsers,
+    getLastMachineMeta,
     saveAirGapSensor,
     getPendingPEAirGapData,
     signPEApproval,
@@ -14,6 +15,9 @@ const {
 
 // 1. Get PE Users for Dropdown
 router.get('/air-gap-sensor/pe/users', getPEUsers);
+
+// 1.1 Get Last Saved Master Unique ID & Error Proof No for machine
+router.get('/air-gap-sensor/last-machine-meta', getLastMachineMeta);
 
 // 2. Save Checksheet
 router.post('/air-gap-sensor', saveAirGapSensor);

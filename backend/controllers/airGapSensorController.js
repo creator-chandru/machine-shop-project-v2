@@ -189,6 +189,47 @@ const getPEUsers = async (req, res) => {
 };
 
 // ============================================================
+// GET LAST ENTERED MASTER UNIQUE ID & ERROR PROOF NO
+// ============================================================
+const getLastMachineMeta = async (req, res) => {
+    const { machineShop, lineCode, partNo, machineNo } = req.query;
+    try {
+        const request = new sql.Request();
+        let query = `
+            SELECT TOP 1 masterUniqueId, errorProofNo
+            FROM AirGapSensorCheckSheet
+            WHERE (NULLIF(masterUniqueId, '') IS NOT NULL OR NULLIF(errorProofNo, '') IS NOT NULL)
+        `;
+        if (machineShop) {
+            query += ` AND machineShop = @machineShop`;
+            request.input('machineShop', sql.Int, parseInt(machineShop, 10));
+        }
+        if (lineCode) {
+            query += ` AND lineCode = @lineCode`;
+            request.input('lineCode', sql.NVarChar(50), lineCode);
+        }
+        if (partNo) {
+            query += ` AND partNo = @partNo`;
+            request.input('partNo', sql.NVarChar(100), partNo);
+        }
+        if (machineNo) {
+            query += ` AND machineNo = @machineNo`;
+            request.input('machineNo', sql.NVarChar(50), machineNo);
+        }
+        query += ` ORDER BY checkDate DESC, id DESC`;
+
+        const result = await request.query(query);
+        if (result.recordset.length > 0) {
+            return res.status(200).json(result.recordset[0]);
+        }
+        return res.status(200).json({ masterUniqueId: '', errorProofNo: '' });
+    } catch (err) {
+        console.error("Failed to fetch previous machine metadata:", err);
+        return res.status(500).json({ error: 'Failed to fetch previous machine metadata' });
+    }
+};
+
+// ============================================================
 // SAVE AIR GAP SENSOR CHECK SHEET
 // ============================================================
 const saveAirGapSensor = async (req, res) => {
@@ -470,7 +511,6 @@ const generateAirGapReport = async (req, res) => {
             return res.status(404).json({ error: "No records found for the selected date range." });
         }
 
-        // Fetch dynamic QF values for Air Gap Sensor
         const qfHistory = await fetchQfHistory();
 
         const groupedMap = new Map();
@@ -584,7 +624,6 @@ const generateAirGapReport = async (req, res) => {
 
             const uniqueBlocks = Object.values(blocksMap);
 
-            // 1. Header Box
             const headerH = 65;
             const metaBoxWidth = 290;
             const logoBoxWidth = 130;
@@ -592,7 +631,6 @@ const generateAirGapReport = async (req, res) => {
 
             doc.lineWidth(0.6).strokeColor('black');
 
-            // Logo
             doc.rect(startX, entryY, logoBoxWidth, headerH).stroke();
             const logoPath = path.join(__dirname, 'logo.jpg');
             if (fs.existsSync(logoPath)) {
@@ -601,11 +639,9 @@ const generateAirGapReport = async (req, res) => {
                 doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("SAKTHI AUTO", startX, entryY + 25, { width: logoBoxWidth, align: "center" });
             }
 
-            // Title Box
             doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerH).stroke();
             doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("AIR GAP SENSOR CHECK SHEET", startX + logoBoxWidth, entryY + 26, { width: titleBoxWidth, align: "center" });
 
-            // Metadata Box
             const metaX = startX + logoBoxWidth + titleBoxWidth;
             doc.rect(metaX, entryY, metaBoxWidth, headerH).stroke();
             doc.moveTo(metaX, entryY + 16).lineTo(metaX + metaBoxWidth, entryY + 16).stroke();
@@ -623,7 +659,6 @@ const generateAirGapReport = async (req, res) => {
 
             let currY = entryY + headerH + 4;
 
-            // 2. Table Headers
             const headerH1 = 15, headerH2 = 13;
             doc.rect(startX, currY, wMach, headerH1 + headerH2).fillAndStroke('#f3f4f6', 'black');
             doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Machine No", startX, currY + 9, { width: wMach, align: "center" });
@@ -655,7 +690,6 @@ const generateAirGapReport = async (req, res) => {
 
             currY += headerH1 + headerH2;
 
-            // 3. Table Rows
             const rowH = 22;
             doc.font("Helvetica").fontSize(7.5);
 
@@ -708,7 +742,6 @@ const generateAirGapReport = async (req, res) => {
                     currY += rowH;
                 }
 
-                // Line Incharge Signature Row
                 const signRowH = 24;
                 doc.rect(startX, currY, leftTotal, signRowH).fillAndStroke('#f9fafb', 'black');
                 doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Line Incharge Signature", startX + 10, currY + 7);
@@ -727,7 +760,6 @@ const generateAirGapReport = async (req, res) => {
                 currY += signRowH;
             });
 
-            // 4. PE Signature Row
             const prodRowH = 26;
             doc.rect(startX, currY, leftTotal, prodRowH).fillAndStroke('#f9fafb', 'black');
             doc.fillColor('black').font("Helvetica-Bold").fontSize(8).text("Shift Production Incharge Signature (PE)", startX + 10, currY + 8);
@@ -750,7 +782,6 @@ const generateAirGapReport = async (req, res) => {
             drawProdSign('I'); drawProdSign('II'); drawProdSign('III');
             currY += prodRowH;
 
-            // 5. Notes Box
             currY += 5;
             const noteBoxHeight = 68;
             doc.rect(startX, currY, totalWidth, noteBoxHeight).stroke();
@@ -770,7 +801,6 @@ const generateAirGapReport = async (req, res) => {
 
             currY += noteBoxHeight;
 
-            // 6. Print QF Value below Notes Box
             doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
                 .text(effectiveQf, startX, currY + 4, { align: 'left' });
 
@@ -868,14 +898,12 @@ const generateAirGapDayReport = async (req, res) => {
             return res.status(404).json({ error: "No records found for the selected date." });
         }
 
-        // Fetch dynamic QF values for Air Gap Sensor
         const qfHistory = await fetchQfHistory();
 
         const first = records[0];
         const displayDate = first.displayDateStr || formatDateDisplay(first.checkDate);
         const effectiveQf = getEffectiveQfValue(qfHistory, first.checkDate);
 
-        // Group by machine
         const blocksMap = {};
         const prodSigns = {};
         records.forEach(r => {
@@ -1084,6 +1112,7 @@ const generateAirGapDayReport = async (req, res) => {
 
 module.exports = {
     getPEUsers,
+    getLastMachineMeta,
     saveAirGapSensor,
     getPendingPEAirGapData,
     signPEApproval,

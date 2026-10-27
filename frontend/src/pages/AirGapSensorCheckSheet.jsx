@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLineSet } from "../context/LineSetContext.jsx";
 import { FileDown, Calendar, X } from "lucide-react";
@@ -104,6 +104,42 @@ export default function AirGapSensorCheckSheet() {
     setToast({ message, type });
     setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
+
+  // Helper to fetch and auto-fill previous masterUniqueId & errorProofNo
+  const fetchPreviousMeta = useCallback(async (machineNo, blockIndex) => {
+    if (!machineNo || !headerInfo.lineCode) return;
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({
+        machineShop: shopId || '',
+        lineCode: headerInfo.lineCode || '',
+        partNo: headerInfo.partNo || '',
+        machineNo: machineNo
+      });
+
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/air-gap-sensor/last-machine-meta?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (data && (data.masterUniqueId || data.errorProofNo)) {
+        setBlocks((prev) => {
+          const next = [...prev];
+          if (next[blockIndex]) {
+            next[blockIndex] = {
+              ...next[blockIndex],
+              masterUniqueId: next[blockIndex].masterUniqueId || data.masterUniqueId || '',
+              errorProofNo: next[blockIndex].errorProofNo || data.errorProofNo || ''
+            };
+          }
+          return next;
+        });
+      }
+    } catch (e) {
+      console.warn("Could not prefill previous machine meta:", e);
+    }
+  }, [headerInfo.lineCode, headerInfo.partNo, shopId]);
 
   // Fetch QF History on Mount
   useEffect(() => {
@@ -242,6 +278,9 @@ export default function AirGapSensorCheckSheet() {
         setLockedShifts({ I: false, II: false, III: false });
         setBlocks([createEmptyBlock(headerInfo.machineNo || '')]);
         setShiftProdSignatures({});
+        if (headerInfo.machineNo) {
+          fetchPreviousMeta(headerInfo.machineNo, 0);
+        }
         return;
       }
 
@@ -267,6 +306,8 @@ export default function AirGapSensorCheckSheet() {
           setLockedShifts({ I: false, II: false, III: false });
           setBlocks([createEmptyBlock(headerInfo.machineNo || '')]);
           setShiftProdSignatures({});
+          // Auto-fetch from previous dates if no data saved for today
+          fetchPreviousMeta(headerInfo.machineNo, 0);
           return;
         }
 
@@ -307,7 +348,15 @@ export default function AirGapSensorCheckSheet() {
           }
         }
 
-        setBlocks(Array.from(blockMap.values()));
+        const loadedBlocks = Array.from(blockMap.values());
+        // If loaded records lack masterUniqueId or errorProofNo, fetch them
+        loadedBlocks.forEach((blk, idx) => {
+          if (!blk.masterUniqueId || !blk.errorProofNo) {
+            fetchPreviousMeta(blk.machineNo, idx);
+          }
+        });
+
+        setBlocks(loadedBlocks);
         setLockedShifts(shiftsFound);
         setShiftProdSignatures({ [headerInfo.date]: productionSigns });
       } catch (err) {
@@ -316,7 +365,7 @@ export default function AirGapSensorCheckSheet() {
     };
 
     fetchSavedAirGapData();
-  }, [shopId, headerInfo.lineCode, headerInfo.partNo, headerInfo.date, headerInfo.machineNo]);
+  }, [shopId, headerInfo.lineCode, headerInfo.partNo, headerInfo.date, headerInfo.machineNo, fetchPreviousMeta]);
 
   const handleAddBlock = () => setBlocks(prev => [...prev, createEmptyBlock(headerInfo.machineNo || "")]);
   const handleRemoveBlock = () => setBlocks((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
@@ -349,6 +398,11 @@ export default function AirGapSensorCheckSheet() {
         setLockedShifts({ I: false, II: false, III: false });
         setShiftProdSignatures({});
         setLineSet({ machineShop: shopId, lineCode: headerInfo.lineCode, partName: headerInfo.partName, partNo: headerInfo.partNo, machineNo: val });
+      }
+
+      // Auto-fetch metadata from previous records for this machine
+      if (val) {
+        fetchPreviousMeta(val, blockIdx);
       }
       return;
     }
@@ -654,7 +708,6 @@ export default function AirGapSensorCheckSheet() {
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
               {initialFormData.title}
             </h2>
-            {/* Dynamic QF Display */}
             <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2 font-bold">
               <span>{qfValue}</span>
             </div>

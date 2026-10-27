@@ -434,8 +434,12 @@ const getToolChangeRecords = async (req, res) => {
             query += ` AND machineShop = @machineShop`;
         }
         if (lineCode) {
-            request.input('lineCode', sql.NVarChar(100), lineCode);
-            query += ` AND lineCode = @lineCode`;
+            request.input('lineCode', sql.NVarChar(100), lineCode.trim());
+            query += ` AND LTRIM(RTRIM(lineCode)) = @lineCode`;
+        }
+        if (machineNo) {
+            request.input('machineNo', sql.NVarChar(100), machineNo.trim());
+            query += ` AND LTRIM(RTRIM(machineNo)) = @machineNo`;
         }
         if (partName) {
             request.input('partName', sql.NVarChar(100), `%${partName}%`);
@@ -451,11 +455,11 @@ const getToolChangeRecords = async (req, res) => {
             query += ` AND (CONVERT(date, checkDate) = CONVERT(date, @checkDate) OR FORMAT(checkDate, 'yyyy-MM-dd') = @checkDate)`;
         }
         if (shift) {
-            request.input('shift', sql.NVarChar(20), shift);
-            query += ` AND shift = @shift`;
+            request.input('shift', sql.NVarChar(20), shift.trim());
+            query += ` AND LTRIM(RTRIM(shift)) = @shift`;
         }
 
-        query += ` ORDER BY checkDate DESC, id ASC`;
+        query += ` ORDER BY machineNo ASC, checkDate DESC, id ASC`;
 
         const result = await request.query(query);
         const rows = result.recordset;
@@ -464,10 +468,14 @@ const getToolChangeRecords = async (req, res) => {
             return res.status(200).json([]);
         }
 
+        // Group rows into sections: a new section starts when machineNo changes, shift changes, or slNo === 1
         const sectionList = [];
         let current = null;
+        let lastKey = null;
+
         rows.forEach((r) => {
-            if (!current || Number(r.slNo) === 1) {
+            const rowKey = `${r.machineNo}_${r.shift}_${r.opNo || ''}`;
+            if (!current || Number(r.slNo) === 1 || rowKey !== lastKey) {
                 current = {
                     partTraceability: r.partTraceability || '',
                     toolDescription: r.toolDescription || '',
@@ -483,6 +491,7 @@ const getToolChangeRecords = async (req, res) => {
                     rows: []
                 };
                 sectionList.push(current);
+                lastKey = rowKey;
             }
 
             current.rows.push({
@@ -503,7 +512,7 @@ const getToolChangeRecords = async (req, res) => {
                 lineCode: firstRow.lineCode,
                 partName: firstRow.partName,
                 partNo: firstRow.partNo,
-                machineNo: firstRow.machineNo,
+                machineNo: machineNo || firstRow.machineNo,
                 opNo: firstRow.opNo,
                 date: firstRow.checkDate,
             },
@@ -519,7 +528,7 @@ const getToolChangeRecords = async (req, res) => {
 };
 
 // ============================================================
-// 7. GET: PDF Generator Endpoint
+// 7. GET: PDF Generator Endpoint (Attractive & High-Clarity)
 // ============================================================
 const generateReport = async (req, res) => {
     try {
@@ -575,11 +584,9 @@ const generateReport = async (req, res) => {
             return res.status(404).send('No records found for the selected line, date and machine(s).');
         }
 
-        // Fetch dynamic QF value based on report date
         const qfHistory = await fetchQfHistory();
         const effectiveQf = getEffectiveQfValue(qfHistory, cleanDate);
 
-        // Each group corresponds to one frontend machine column; slNo restarts at 1 per column.
         const sections = [];
         let current = null;
         for (const row of records) {
@@ -610,21 +617,41 @@ const generateReport = async (req, res) => {
         }
 
         const first = records[0];
-        const doc = new PDFDocument({ margin: 22, size: 'A4', layout: 'landscape', bufferPages: true });
+        const doc = new PDFDocument({ margin: 20, size: 'A4', layout: 'landscape', bufferPages: true, autoPageBreak: false });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'inline; filename=Tool_Change_Record.pdf');
         doc.pipe(res);
 
-        const left = 22;
-        const tableWidth = doc.page.width - 44;
-        const pageBottom = doc.page.height - 22;
+        const left = 20;
+        const tableWidth = doc.page.width - 40;
+        const pageBottom = doc.page.height - 24;
         const cellPad = 4;
-        let y = 22;
+        let y = 20;
+
+        // Visual Theme Palette
+        const COLORS = {
+            headerDark: '#1e293b',       // Deep slate navy
+            accentNavy: '#0f172a',
+            subHeader: '#334155',
+            sectionHeader: '#0284c7',    // Sky blue accent
+            sectionBg: '#f0f9ff',        // Soft sky tint
+            tableHeader: '#e2e8f0',      // Clean slate grey
+            borderDark: '#334155',       // Crisp borders
+            borderLight: '#cbd5e1',
+            rowEven: '#ffffff',
+            rowOdd: '#f8fafc',
+            textDark: '#0f172a',
+            textMuted: '#475569',
+            badgeOk: '#16a34a',          // Emerald Green
+            badgeWarn: '#dc2626',        // Crimson Red
+            metaBg: '#f8fafc'
+        };
 
         const drawCells = (values, ratios, top, options = {}) => {
             const fontSize = options.fontSize || 8;
             const widths = ratios.map((ratio) => ratio * tableWidth);
-            let rowHeight = options.minHeight || 20;
+            let rowHeight = options.minHeight || 18;
+
             values.forEach((value, index) => {
                 const bold = options.bold || (options.boldFirst && index === 0);
                 doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize);
@@ -634,102 +661,241 @@ const generateReport = async (req, res) => {
                 });
                 rowHeight = Math.max(rowHeight, textHeight + cellPad * 2);
             });
+
             if (top + rowHeight > pageBottom) {
                 doc.addPage();
-                top = 22;
+                top = 20;
+                drawPageHeading();
             }
 
             let x = left;
             values.forEach((value, index) => {
-                const bold = options.bold || (options.boldFirst && index === 0);
-                doc.rect(x, top, widths[index], rowHeight)
-                    .fillAndStroke(options.fill || '#ffffff', '#222222');
-                doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize).fillColor('#111111');
-                doc.text(String(value ?? '-'), x + cellPad, top + cellPad, {
+                const isFirstCol = index === 0;
+                const bold = options.bold || (options.boldFirst && isFirstCol);
+                const fillColor = options.fill || COLORS.rowEven;
+                const borderColor = options.borderColor || COLORS.borderDark;
+
+                doc.lineWidth(0.5);
+                doc.rect(x, top, widths[index], rowHeight).fillAndStroke(fillColor, borderColor);
+
+                // Text styling
+                let textColor = options.textColor || COLORS.textDark;
+                if (options.colorMap && options.colorMap[index]) {
+                    textColor = options.colorMap[index];
+                }
+
+                doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
+                   .fontSize(fontSize)
+                   .fillColor(textColor);
+
+                doc.text(String(value ?? '-'), x + cellPad, top + (rowHeight - (fontSize + 4)) / 2 + 1, {
                     width: Math.max(1, widths[index] - cellPad * 2),
-                    height: rowHeight - cellPad * 2,
-                    align: options.align || (index === 0 && options.labelLeft ? 'left' : 'center'),
+                    align: options.align || (isFirstCol && options.labelLeft ? 'left' : 'center'),
                     valign: 'center',
+                    lineBreak: true
                 });
                 x += widths[index];
             });
+
             return top + rowHeight;
         };
 
         const drawPageHeading = () => {
-            y = drawCells(
-                ['SAKTHI AUTO', 'TOOL CHANGE RECORD'],
-                [0.25, 0.75], y,
-                { bold: true, fontSize: 10, minHeight: 34, fill: '#f0f0f0' }
-            );
-            y = drawCells(
-                [`LINE CODE: ${lineCode}`, `PART NO: ${first.partNo || '-'}`, `PART NAME: ${first.partName || '-'}`],
-                [0.24, 0.26, 0.50], y,
-                { boldFirst: true, fontSize: 8, minHeight: 22 }
-            );
-            y = drawCells([`DATE: ${cleanDate}`], [1], y, { bold: true, fontSize: 8, minHeight: 20, fill: '#f7f7f7' });
-        };
+            // Main Top Header Bar
+            doc.rect(left, y, tableWidth, 28).fillAndStroke(COLORS.headerDark, COLORS.headerDark);
+            
+            // Company Logo / Title
+            const logoPath = path.join(__dirname, 'logo.jpg');
+            if (fs.existsSync(logoPath)) {
+                doc.image(logoPath, left + 6, y + 4, { fit: [90, 20], align: 'left', valign: 'center' });
+            } else {
+                doc.font('Helvetica-Bold').fontSize(12).fillColor('#ffffff')
+                   .text('SAKTHI AUTO', left + 8, y + 7, { align: 'left' });
+            }
 
-        const labelValue = (label, value) => {
-            y = drawCells([label, value || '-'], [0.22, 0.78], y, {
-                boldFirst: true, labelLeft: true, fontSize: 8, minHeight: 20,
+            doc.font('Helvetica-Bold').fontSize(13).fillColor('#ffffff')
+               .text('TOOL CHANGE RECORD', left, y + 7, { width: tableWidth, align: 'center' });
+
+            y += 28;
+
+            // Info Metadata Grid
+            const metaHeights = 20;
+            const metaCols = [0.22, 0.28, 0.28, 0.22];
+
+            y = drawCells([
+                `LINE CODE: ${lineCode}`,
+                `PART NO: ${first.partNo || '-'}`,
+                `PART NAME: ${first.partName || '-'}`,
+                `DATE: ${cleanDate}`
+            ], metaCols, y, {
+                bold: true,
+                fontSize: 8,
+                minHeight: metaHeights,
+                fill: COLORS.metaBg,
+                borderColor: COLORS.borderDark,
+                align: 'center'
             });
         };
 
         drawPageHeading();
-        const measurementWidths = [0.34, 0.12, 0.18, 0.18, 0.18];
+
+        // 4 Columns for measurement data: CONTROL SPEC (wider), UNITS, BEFORE, AFTER
+        const measurementWidths = [0.46, 0.18, 0.18, 0.18];
+
         sections.forEach((section, sectionIndex) => {
-            if (y + 95 + section.rows.length * 20 > pageBottom) {
+            const requiredH = 110 + (section.rows.length * 19);
+            if (y + requiredH > pageBottom) {
                 doc.addPage();
-                y = 22;
+                y = 20;
                 drawPageHeading();
             }
 
-            y = drawCells([`MACHINE COLUMN ${sectionIndex + 1}`], [1], y, {
-                bold: true, fontSize: 8, minHeight: 21, fill: '#e8e8e8',
-            });
-            labelValue('PART TRACEABILITY:', section.partTraceability);
-            labelValue('TOOL DESCRIPTION:', section.toolDescription);
-            y = drawCells([`M/C NO: ${section.machineNo || '-'}`, `OP NO: ${section.opNo || '-'}`], [0.5, 0.5], y, { boldFirst: true, fontSize: 8 });
-            y = drawCells([`DATE: ${section.date || cleanDate}`, `SHIFT: ${section.shift || 'I'}`], [0.5, 0.5], y, { boldFirst: true, fontSize: 8 });
-            y = drawCells([`FROM: ${section.from || '-'}`, `TO: ${section.to || '-'}`], [0.5, 0.5], y, { boldFirst: true, fontSize: 8 });
-            y = drawCells(['CONTROL SPEC', 'UNITS', 'UNIT TYPE', 'BEFORE', 'AFTER'], measurementWidths, y, {
-                bold: true, fontSize: 7, minHeight: 22, fill: '#eeeeee',
-            });
-            section.rows.forEach((row) => {
-                y = drawCells([
-                    row.controlSpec || '-',
-                    row.units || '-',
-                    row.unitType || '-',
-                    row.before || '-',
-                    row.after || '-',
-                ], measurementWidths, y, { fontSize: 7, minHeight: 20 });
+            // Section Pill Header
+            y = drawCells([`MACHINE COLUMN ${sectionIndex + 1} — (M/C: ${section.machineNo || '-'}, OP: ${section.opNo || '-'})`], [1], y, {
+                bold: true,
+                fontSize: 8.5,
+                minHeight: 20,
+                fill: COLORS.sectionBg,
+                textColor: COLORS.sectionHeader,
+                borderColor: COLORS.sectionHeader,
+                align: 'center'
             });
 
-            y = drawCells(['TOOL CHANGED BY:', section.toolChangedBy || 'Pending'], [0.22, 0.78], y, {
-                boldFirst: true, labelLeft: true, fontSize: 8,
+            // Metadata rows for this column
+            const metaSplit = [0.22, 0.78];
+            y = drawCells(['PART TRACEABILITY:', section.partTraceability || '-'], metaSplit, y, {
+                boldFirst: true, labelLeft: true, fontSize: 8, minHeight: 18, fill: '#ffffff'
             });
+            y = drawCells(['TOOL DESCRIPTION:', section.toolDescription || '-'], metaSplit, y, {
+                boldFirst: true, labelLeft: true, fontSize: 8, minHeight: 18, fill: '#ffffff'
+            });
+
+            const subSplit = [0.25, 0.25, 0.25, 0.25];
+            y = drawCells([
+                `M/C NO:  ${section.machineNo || '-'}`,
+                `OP NO:  ${section.opNo || '-'}`,
+                `DATE:  ${section.date || cleanDate}`,
+                `SHIFT:  ${section.shift || 'I'}`
+            ], subSplit, y, { bold: true, fontSize: 8, minHeight: 18, fill: '#f8fafc' });
+
+            y = drawCells([
+                `FROM TIME:  ${section.from || '-'}`,
+                `TO TIME:  ${section.to || '-'}`,
+                '', ''
+            ], subSplit, y, { boldFirst: true, fontSize: 8, minHeight: 18, fill: '#ffffff' });
+
+            // Table Column Headers (Clean Slate Theme)
+            y = drawCells(['CONTROL SPEC', 'UNITS', 'BEFORE', 'AFTER'], measurementWidths, y, {
+                bold: true,
+                fontSize: 7.5,
+                minHeight: 20,
+                fill: COLORS.tableHeader,
+                textColor: COLORS.textDark,
+                borderColor: COLORS.borderDark,
+                align: 'center'
+            });
+
+            // Data Rows (Striped with Clear Formatting)
+            section.rows.forEach((row, rIdx) => {
+                const combinedControlSpec = row.unitType 
+                    ? `[${row.unitType}]  ${row.controlSpec || '-'}` 
+                    : (row.controlSpec || '-');
+
+                const rowBg = rIdx % 2 === 0 ? COLORS.rowEven : COLORS.rowOdd;
+
+                y = drawCells([
+                    combinedControlSpec,
+                    row.units || '-',
+                    row.before || '-',
+                    row.after || '-'
+                ], measurementWidths, y, {
+                    fontSize: 7.5,
+                    minHeight: 19,
+                    fill: rowBg,
+                    bold: false,
+                    align: 'center',
+                    borderColor: COLORS.borderLight
+                });
+            });
+
+            // Signatures: TOOL CHANGED BY
+            const tcApproved = Boolean(section.toolChangedBy && section.toolChangedBy.toLowerCase() !== 'pending');
+            const tcSignatureText = tcApproved ? `Approved ✓ (${section.toolChangedBy})` : 'Pending Shift Incharge';
+            const tcColor = tcApproved ? COLORS.badgeOk : COLORS.badgeWarn;
+
+            y = drawCells(
+                ['TOOL CHANGED BY:', tcSignatureText],
+                [0.25, 0.75],
+                y,
+                {
+                    bold: true,
+                    labelLeft: true,
+                    fontSize: 8,
+                    minHeight: 20,
+                    fill: '#f8fafc',
+                    colorMap: { 1: tcColor }
+                }
+            );
+
+            // Signatures: VERIFIED BY QC
             const allRowsQcApproved = section.rows.length > 0 && section.rows.every((row) => {
                 const signature = String(row.verifiedByQc || '').trim();
                 return signature !== '' && signature.toLowerCase() !== 'pending';
             });
-            const qcSignature = allRowsQcApproved ? section.rows[0].verifiedByQc : '';
+
+            const qcApproved = allRowsQcApproved || (section.rows[0]?.verifiedByQc && section.rows[0].verifiedByQc !== 'Pending');
+            const qcSignature = qcApproved 
+                ? `Verified ✓ (${section.rows[0]?.verifiedByQc || 'QC'})` 
+                : `Pending QC Review${section.assignedQc ? ` [Assigned: ${section.assignedQc}]` : ''}`;
+            const qcColor = qcApproved ? COLORS.badgeOk : COLORS.badgeWarn;
+
             y = drawCells(
-                ['VERIFIED BY QC:', qcSignature || `Pending${section.assignedQc ? ` (${section.assignedQc})` : ''}`],
-                [0.22, 0.78], y,
-                { boldFirst: true, labelLeft: true, fontSize: 8 }
+                ['VERIFIED BY QC:', qcSignature],
+                [0.25, 0.75],
+                y,
+                {
+                    bold: true,
+                    labelLeft: true,
+                    fontSize: 8,
+                    minHeight: 20,
+                    fill: '#ffffff',
+                    colorMap: { 1: qcColor }
+                }
             );
+
+            // Spacing between columns if multiple on same page
+            y += 4;
         });
 
+        // Applicable Events Box
+        if (y + 36 > pageBottom) {
+            doc.addPage();
+            y = 20;
+            drawPageHeading();
+        }
+
         y = drawCells(
-            ['APPLICABLE EVENTS:', 'New cutting tool (Tool holder, Drill, Reamer, Tap, Milling cutters, Milling inserts, Spot facing cutter etc.), Tool change after tool regrinding / tool repair.'],
-            [0.22, 0.78], y,
-            { boldFirst: true, labelLeft: true, fontSize: 7, minHeight: 28 }
+            [
+                'APPLICABLE EVENTS:',
+                'New cutting tool (Tool holder, Drill, Reamer, Tap, Milling cutters, Milling inserts, Spot facing cutter etc.), Tool change after tool regrinding / tool repair.'
+            ],
+            [0.20, 0.80],
+            y,
+            {
+                boldFirst: true,
+                labelLeft: true,
+                fontSize: 7.5,
+                minHeight: 24,
+                fill: '#f1f5f9',
+                borderColor: COLORS.borderDark
+            }
         );
 
-        // Print QF Value below table & footer
-        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
-            .text(effectiveQf, left, y + 4, { align: 'left' });
+        // QF Stamp on the footer
+        doc.font('Helvetica-Bold')
+           .fontSize(7.5)
+           .fillColor(COLORS.textMuted)
+           .text(effectiveQf, left, y + 6, { align: 'left' });
 
         doc.end();
     } catch (err) {

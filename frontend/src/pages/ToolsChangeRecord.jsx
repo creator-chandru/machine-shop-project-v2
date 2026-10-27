@@ -34,7 +34,7 @@ const createEmptySection = (
 ) => ({
   partTraceability: "",
   toolDescription: "",
-  mcNo: defaultMachineNo,
+  mcNo: defaultMachineNo || "",
   opNo: "",
   date: defaultDate || getTodayISODate(),
   shift: defaultShift || "I",
@@ -166,7 +166,7 @@ export default function ToolChangeRecord() {
 
   // Calculate QF based on selected Date
   useEffect(() => {
-    let currentQf = "QF/07/MPD-32, Rev.No: 02 dt 10.01.2023"; // Fallback
+    let currentQf = "QF/07/MPD-32, Rev.No: 02 dt 10.01.2023";
 
     if (headerInfo.date && qfHistory.length > 0) {
       const selectedDate = new Date(headerInfo.date);
@@ -190,11 +190,10 @@ export default function ToolChangeRecord() {
   }, [headerInfo.date, qfHistory]);
 
   // Helper to load record data into component state
-  const loadRecordData = (record) => {
+  const loadRecordData = (record, targetMachineNo = "") => {
     if (!record) return;
     setRecordId(record._id || record.id || null);
 
-    // Pending records remain editable by the shift incharge. Lock only after QC approval.
     const hasQcApproval = (record.sections || []).some((section) => {
       const signature = typeof section.verifiedByQc === "object"
         ? section.verifiedByQc?.signature
@@ -203,13 +202,15 @@ export default function ToolChangeRecord() {
     });
     setIsSavedRecord(hasQcApproval);
 
+    const mNo = targetMachineNo || record.header?.machineNo || "";
+
     if (record.header) {
       setHeaderInfo((prev) => ({
         ...prev,
         lineCode: record.header.lineCode || "",
         partName: record.header.partName || "",
         partNo: record.header.partNo || "",
-        machineNo: record.header.machineNo || "",
+        machineNo: mNo,
         opNo: record.header.opNo || "",
         date: record.header.date || getTodayISODate(),
         shift: record.sections?.[0]?.shift || prev.shift || "I",
@@ -219,8 +220,9 @@ export default function ToolChangeRecord() {
     if (record.sections && record.sections.length > 0) {
       setSections(
         record.sections.map((s) => ({
-          ...createEmptySection("", getTodayISODate(), "I", 0),
+          ...createEmptySection(s.mcNo || mNo, s.date || record.header?.date || getTodayISODate(), s.shift || "I", 0),
           ...s,
+          mcNo: s.mcNo || mNo,
           rows:
             s.rows && s.rows.length > 0
               ? s.rows
@@ -232,12 +234,20 @@ export default function ToolChangeRecord() {
     }
   };
 
-  // Clears form state to clean template
+  // Clears form state to clean template while preserving machineNo
   const resetToEmptyForm = (lineCode, date, machineNo = "", shift = "I") => {
     setRecordId(null);
     setIsSavedRecord(false);
+    setHeaderInfo((prev) => ({
+      ...prev,
+      machineNo: machineNo,
+      date: date || prev.date,
+      shift: shift || prev.shift
+    }));
     setSections([createEmptySection(machineNo, date, shift, INITIAL_ROWS)]);
-    fetchPartTraceability(lineCode, date, shift, 0);
+    if (lineCode && date && shift) {
+      fetchPartTraceability(lineCode, date, shift, 0);
+    }
   };
 
   // Fetch QC user accounts for the dropdown
@@ -296,7 +306,7 @@ export default function ToolChangeRecord() {
   // COMBO CHECK: date + lineCode + machineNo + shift
   // ==========================================================
   const checkExistingRecord = async (lineCode, date, machineNo = "", shift = "I") => {
-    if (!lineCode || !date || !machineNo || !shift) {
+    if (!lineCode || !date || !machineNo) {
       resetToEmptyForm(lineCode, date, machineNo, shift);
       return;
     }
@@ -328,19 +338,22 @@ export default function ToolChangeRecord() {
             return Boolean(signature && signature !== "Pending");
           });
 
-          // A supervisor selecting an already-approved machine/date starts a fresh pending submission.
           if (isShiftIncharge && (found.status === "Completed" || hasQcApproval)) {
             resetToEmptyForm(lineCode, date, machineNo, shift);
             return;
           }
-          loadRecordData(found);
-          triggerToast("Existing record loaded for this combo.", "success");
+
+          loadRecordData(found, machineNo);
+          triggerToast(`Existing record loaded for machine ${machineNo}.`, "success");
         } else {
           resetToEmptyForm(lineCode, date, machineNo, shift);
         }
+      } else {
+        resetToEmptyForm(lineCode, date, machineNo, shift);
       }
     } catch (err) {
       console.error("Check existing record error:", err);
+      resetToEmptyForm(lineCode, date, machineNo, shift);
     }
   };
 
@@ -519,6 +532,7 @@ export default function ToolChangeRecord() {
     if (secIdx === 0) {
       if (field === "mcNo") {
         setHeaderInfo((prev) => ({ ...prev, machineNo: val }));
+        setLineSet((prev) => ({ ...prev, machineNo: val }));
       }
       if (field === "shift") {
         setHeaderInfo((prev) => ({ ...prev, shift: val }));
@@ -527,10 +541,37 @@ export default function ToolChangeRecord() {
         setHeaderInfo((prev) => ({ ...prev, date: val }));
       }
 
-      // Lookup can reload/reset form state, so run it only when the record key changes.
       if (field === "mcNo" || field === "date" || field === "shift") {
         checkExistingRecord(headerInfo.lineCode, targetDate, targetMc, targetShift);
       }
+    } else if (field === "mcNo") {
+      // For subsequent columns, fetch specifically for that column's machine if available
+      const url = `${process.env.REACT_APP_API_URL || ""}/api/tool-change-record?machineShop=${shopId || 3}&lineCode=${encodeURIComponent(
+        headerInfo.lineCode
+      )}&date=${encodeURIComponent(targetDate)}&machineNo=${encodeURIComponent(val)}&shift=${encodeURIComponent(targetShift)}`;
+
+      const token = localStorage.getItem("token");
+      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0 && data[0].sections?.[0]) {
+            const secData = data[0].sections[0];
+            setSections((prev) =>
+              prev.map((sec, idx) =>
+                idx === secIdx
+                  ? {
+                      ...sec,
+                      ...secData,
+                      mcNo: val,
+                      rows: secData.rows?.length ? secData.rows : sec.rows,
+                    }
+                  : sec
+              )
+            );
+            triggerToast(`Existing record loaded for machine ${val} in column ${secIdx + 1}.`, "success");
+          }
+        })
+        .catch(() => {});
     }
 
     if (field === "date" || field === "shift") {
@@ -664,7 +705,6 @@ export default function ToolChangeRecord() {
       return;
     }
 
-    // Open synchronously from the click handler so the browser allows the PDF tab.
     const previewWindow = window.open("about:blank", "_blank");
     if (!previewWindow) {
       triggerToast("Allow pop-ups to preview the PDF.", "error");
@@ -700,7 +740,7 @@ export default function ToolChangeRecord() {
     }
   };
 
-  // Save handler: no inner table cell checks, strict signature allocation check
+  // Save handler
   const handleSave = async () => {
     if (!headerInfo.lineCode) {
       triggerToast("Please select Line Code.", "error");
@@ -996,7 +1036,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-traceability-${globalIdx}`}
-                          colSpan={5}
+                          colSpan={4}
                           className="border border-gray-800 p-1.5 text-left font-normal bg-white"
                         >
                           <div className="flex items-center gap-1">
@@ -1027,7 +1067,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-desc-${globalIdx}`}
-                          colSpan={5}
+                          colSpan={4}
                           className="border border-gray-800 p-1.5 text-left font-normal bg-white"
                         >
                           <div className="flex items-center gap-1">
@@ -1058,7 +1098,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-mcop-${globalIdx}`}
-                          colSpan={5}
+                          colSpan={4}
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
@@ -1113,7 +1153,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-dateshift-${globalIdx}`}
-                          colSpan={5}
+                          colSpan={4}
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
@@ -1158,7 +1198,7 @@ export default function ToolChangeRecord() {
                       {chunk.map(({ sec, globalIdx }) => (
                         <td
                           key={`hdr-fromto-${globalIdx}`}
-                          colSpan={5}
+                          colSpan={4}
                           className="border border-gray-800 p-1 font-normal bg-white"
                         >
                           <div className="grid grid-cols-2 divide-x divide-gray-800">
@@ -1195,18 +1235,15 @@ export default function ToolChangeRecord() {
                       ))}
                     </tr>
 
-                    {/* COLUMN HEADERS */}
+                    {/* COLUMN HEADERS - Merged Under CONTROL SPEC */}
                     <tr className="bg-gray-100 text-gray-800 font-bold">
                       {chunk.map(({ globalIdx }) => (
                         <React.Fragment key={`subcols-${globalIdx}`}>
-                          <th className="border border-gray-800 p-1.5 w-[14%]">
+                          <th className="border border-gray-800 p-1.5 w-[26%]">
                             CONTROL SPEC
                           </th>
                           <th className="border border-gray-800 p-1.5 w-[9%]">
                             UNITS
-                          </th>
-                          <th className="border border-gray-800 p-1.5 w-[12%]">
-                            UNIT TYPE
                           </th>
                           <th className="border border-gray-800 p-1.5 w-[5.5%]">
                             BEFORE
@@ -1228,10 +1265,21 @@ export default function ToolChangeRecord() {
                               <td className="border border-gray-800 p-0.5">
                                 <div className="flex items-center justify-center gap-1 w-full h-full px-1">
                                   <input
+                                    type="text"
+                                    disabled={isQC || isSavedRecord}
+                                    className="w-[28%] h-full text-center outline-none bg-transparent py-1 font-semibold border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
+                                    placeholder="Type"
+                                    title="Unit / Feature Type (e.g. Dia, Length)"
+                                    value={rowData.unitType ?? ""}
+                                    onChange={(e) =>
+                                      handleCellChange(globalIdx, rIdx, "unitType", e.target.value)
+                                    }
+                                  />
+                                  <input
                                     type="number"
                                     step="any"
                                     disabled={isQC || isSavedRecord}
-                                    className="w-[45%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
+                                    className="w-[32%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
                                     placeholder="100.5"
                                     value={rowData.nominalValue ?? ""}
                                     onChange={(e) =>
@@ -1245,7 +1293,7 @@ export default function ToolChangeRecord() {
                                   />
                                   <select
                                     disabled={isQC || isSavedRecord}
-                                    className="w-[25%] h-full text-center outline-none bg-gray-50 border border-gray-300 rounded cursor-pointer font-bold text-xs py-0.5 disabled:border-transparent disabled:bg-transparent disabled:text-gray-800"
+                                    className="w-[18%] h-full text-center outline-none bg-gray-50 border border-gray-300 rounded cursor-pointer font-bold text-xs py-0.5 disabled:border-transparent disabled:bg-transparent disabled:text-gray-800"
                                     value={rowData.operatorSymbol || "±"}
                                     onChange={(e) =>
                                       handleCellChange(
@@ -1264,7 +1312,7 @@ export default function ToolChangeRecord() {
                                     type="number"
                                     step="any"
                                     disabled={isQC || isSavedRecord}
-                                    className="w-[30%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
+                                    className="w-[22%] h-full text-center outline-none bg-transparent py-1 font-medium border-b border-gray-300 focus:border-orange-500 disabled:border-transparent disabled:text-gray-800"
                                     placeholder="5.3"
                                     value={rowData.toleranceValue ?? ""}
                                     onChange={(e) =>
@@ -1290,16 +1338,6 @@ export default function ToolChangeRecord() {
                                   <option value="cm">cm</option>
                                   <option value="radians">radians</option>
                                 </select>
-                              </td>
-                              <td className="border border-gray-800 p-0">
-                                <input
-                                  type="text"
-                                  disabled={isQC || isSavedRecord}
-                                  className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-800"
-                                  placeholder="Unit type"
-                                  value={rowData.unitType ?? ""}
-                                  onChange={(e) => handleCellChange(globalIdx, rIdx, "unitType", e.target.value)}
-                                />
                               </td>
                               <td className="border border-gray-800 p-0">
                                 <input
@@ -1346,12 +1384,12 @@ export default function ToolChangeRecord() {
                     <tr>
                       {chunk.map(({ sec, globalIdx }) => (
                         <React.Fragment key={`tc-sig-${globalIdx}`}>
-                          <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                          <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[26%]">
                             TOOL CHANGED BY
                           </td>
                           <td
-                            colSpan={4}
-                            className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
+                            colSpan={3}
+                            className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40"
                           >
                             {sec.toolChangedBy?.signature ? (
                               <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
@@ -1392,12 +1430,12 @@ export default function ToolChangeRecord() {
 
                         return (
                           <React.Fragment key={`qc-sig-${globalIdx}`}>
-                            <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[14%]">
+                            <td className="border border-gray-800 p-2 font-bold text-gray-800 bg-gray-50 align-middle w-[26%]">
                               VERIFIED BY QC
                             </td>
                             <td
-                              colSpan={4}
-                              className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40 w-[11%]"
+                              colSpan={3}
+                              className="border border-gray-800 p-2 text-center align-middle bg-gray-50/40"
                             >
                               {isQcApproved ? (
                                 <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">

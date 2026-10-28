@@ -266,7 +266,7 @@ export default function Level1MaintenanceChecksheet() {
 
         if (!response.ok) {
           throw new Error(
-            "Failed to fetch Product Engineers"
+            "Failed to fetch Production Engineers"
           );
         }
 
@@ -277,12 +277,12 @@ export default function Level1MaintenanceChecksheet() {
         );
       } catch (error) {
         console.error(
-          "Product Engineer fetch error:",
+          "Production Engineer fetch error:",
           error
         );
 
         triggerToast(
-          "Failed to load Product Engineers.",
+          "Failed to load Production Engineers.",
           "error"
         );
       } finally {
@@ -396,9 +396,9 @@ export default function Level1MaintenanceChecksheet() {
 
             setHeaderInfo((prev) => ({
               ...prev,
-              opNo: record.header?.opNo || "",
+              opNo: record.header?.opNo || prev.opNo,
               productEngineer:
-                record.header?.productEngineer || "",
+                record.header?.productEngineer || prev.productEngineer,
             }));
 
             triggerToast(
@@ -408,12 +408,6 @@ export default function Level1MaintenanceChecksheet() {
           } else {
             setValues({});
             setSignatures({});
-
-            setHeaderInfo((prev) => ({
-              ...prev,
-              opNo: "",
-              productEngineer: "",
-            }));
           }
         }
       } catch (error) {
@@ -433,18 +427,21 @@ export default function Level1MaintenanceChecksheet() {
   ]);
 
   // ============================================================
-  // LINE SET
+  // LINE SET (Load from context ONLY on mount)
   // ============================================================
 
   useEffect(() => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      lineCode: lineSet?.lineCode || "",
-      partName: lineSet?.partName || "",
-      partNo: lineSet?.partNo || "",
-      machineNo: lineSet?.machineNo || "",
-    }));
-  }, [lineSet]);
+    if (lineSet && lineSet.lineCode) {
+      setHeaderInfo((prev) => ({
+        ...prev,
+        lineCode: lineSet.lineCode,
+        partName: lineSet.partName || "",
+        partNo: lineSet.partNo || "",
+        machineNo: lineSet.machineNo || "",
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ============================================================
   // LINE CODES
@@ -511,8 +508,11 @@ export default function Level1MaintenanceChecksheet() {
 
     setHeaderInfo((prev) => ({
       ...prev,
-      opNo: "",
-      productEngineer: "",
+      lineCode,
+      partName: mapping?.partSet || "",
+      partNo: mapping?.idSet || "",
+      machineNo: "",
+      // Do not wipe opNo or PE so it stays retained across entries
     }));
 
     setLineSet({
@@ -534,17 +534,17 @@ export default function Level1MaintenanceChecksheet() {
 
     setHeaderInfo((prev) => ({
       ...prev,
-      opNo: "",
-      productEngineer: "",
+      machineNo,
     }));
 
-    setLineSet({
+    setLineSet(prev => ({
+      ...prev,
       machineShop: shopId,
       lineCode: headerInfo.lineCode,
       partName: headerInfo.partName,
       partNo: headerInfo.partNo,
       machineNo,
-    });
+    }));
   };
 
   // ============================================================
@@ -578,7 +578,7 @@ export default function Level1MaintenanceChecksheet() {
 
     if (!headerInfo.productEngineer) {
       triggerToast(
-        "Please select a Product Engineer before approval.",
+        "Please select a Production Engineer before approval.",
         "error"
       );
 
@@ -724,7 +724,7 @@ export default function Level1MaintenanceChecksheet() {
 
     if (!headerInfo.productEngineer) {
       triggerToast(
-        "Please select the Product Engineer.",
+        "Please select the Production Engineer.",
         "error"
       );
 
@@ -794,18 +794,29 @@ export default function Level1MaintenanceChecksheet() {
       }
 
       setSaveSuccess(true);
+      const assignedPE = headerInfo.productEngineer;
 
-      setTimeout(() => {
-        setSaveSuccess(false);
-      }, 2000);
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      setSignatures((prev) => ({
+      // Reset the form details but RETAIN lineCode, date, opNo, PE, and part info
+      setValues({});
+      setSignatures({});
+      setHeaderInfo(prev => ({
         ...prev,
-        PE: `Pending [${headerInfo.productEngineer}]`,
+        machineNo: "",
       }));
+      setLineSet(prev => ({
+        ...prev,
+        machineShop: shopId,
+        lineCode: headerInfo.lineCode,
+        partName: headerInfo.partName,
+        partNo: headerInfo.partNo,
+        machineNo: ""
+      }));
+      setSaveSuccess(false);
 
       triggerToast(
-        `Checklist saved successfully! Sent to ${headerInfo.productEngineer} for verification.`,
+        `Checklist saved! Sent to ${assignedPE} for verification. Ready for next machine.`,
         "success"
       );
     } catch (error) {
@@ -921,6 +932,21 @@ export default function Level1MaintenanceChecksheet() {
                   : "Download PDF"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(isSaving || saveSuccess) && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl px-10 py-8 text-center">
+            {isSaving ? (
+              <>
+                <div className="w-10 h-10 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin mx-auto mb-5"></div>
+                <h2 className="text-xl font-bold text-gray-800">Saving Data...</h2>
+              </>
+            ) : (
+              <h2 className="text-xl font-bold text-green-800">Data Saved Successfully</h2>
+            )}
           </div>
         </div>
       )}
@@ -1198,7 +1224,7 @@ export default function Level1MaintenanceChecksheet() {
                   colSpan={4}
                   className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700"
                 >
-                  Shift Incharge Signature (Submit to Product Engineer)
+                  Shift Incharge Signature (Submit to Production Engineer)
                 </td>
                 <td className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
                   {signatures["Shift Incharge"] ? (
@@ -1219,7 +1245,7 @@ export default function Level1MaintenanceChecksheet() {
               {/* PRODUCT ENGINEER - SEPARATE ROW */}
               <tr>
                 <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
-                  Product Engineer <span className="text-red-500">*</span>
+                  Production Engineer <span className="text-red-500">*</span>
                 </td>
                 <td className="border border-gray-800 p-2 bg-gray-50/30">
                   <select
@@ -1231,7 +1257,7 @@ export default function Level1MaintenanceChecksheet() {
                     disabled={loadingPE || Boolean(signatures.PE?.startsWith("Approved ("))}
                   >
                     <option value="">
-                      {loadingPE ? "Loading Product Engineers..." : "Select Product Engineer"}
+                      {loadingPE ? "Loading Production Engineers..." : "Select Production Engineer"}
                     </option>
                     {productEngineers.map((pe) => (
                       <option key={pe.id} value={pe.username}>
@@ -1275,12 +1301,14 @@ export default function Level1MaintenanceChecksheet() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || saveSuccess}
             className="bg-gray-800 hover:bg-gray-900 disabled:bg-gray-400 text-white px-10 py-3 rounded font-bold transition-colors shadow-lg cursor-pointer uppercase tracking-wider text-sm"
           >
             {isSaving
               ? "SAVING..."
-              : "SAVE & SEND TO PE"}
+              : saveSuccess
+              ? "SAVED ✓"
+              : "SAVE & ADD NEXT MACHINE"}
           </button>
         </div>
       </div>

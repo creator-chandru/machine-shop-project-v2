@@ -193,6 +193,9 @@ export default function PreOperationChecklist() {
               });
               return newSpecs;
             });
+          } else {
+            // FIX: Ensure specifications clear out if the API returns no specifications for the new machine.
+            setSpecifications({});
           }
         }
       } catch (err) {
@@ -203,16 +206,19 @@ export default function PreOperationChecklist() {
     fetchLatestParams();
   }, [shopId, headerInfo.lineCode, headerInfo.machineNo]);
 
-
+  // Load from lineSet ONLY on mount to prevent overriding manual user selections
   useEffect(() => {
-    setHeaderInfo((prev) => ({
-      ...prev,
-      lineCode: lineSet?.lineCode || "",
-      partName: lineSet?.partName || "",
-      partNo: lineSet?.partNo || "",
-      machineNo: lineSet?.machineNo || ""
-    }));
-  }, [lineSet]);
+    if (lineSet && lineSet.lineCode) {
+      setHeaderInfo(prev => ({
+        ...prev,
+        lineCode: lineSet.lineCode,
+        partName: lineSet.partName || "",
+        partNo: lineSet.partNo || "",
+        machineNo: lineSet.machineNo || ""
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ✅ FETCH QF HISTORY ON MOUNT
   useEffect(() => {
@@ -283,6 +289,16 @@ export default function PreOperationChecklist() {
     setSignatures({});
     setIsSavedRecord(false);
 
+    // Update local state explicitly
+    setHeaderInfo(prev => ({
+      ...prev,
+      lineCode,
+      partName: autoPartName,
+      partNo: autoPartNo,
+      machineNo: ""
+    }));
+
+    // Keep context matched
     setLineSet({
       machineShop: shopId,
       lineCode,
@@ -295,8 +311,16 @@ export default function PreOperationChecklist() {
   const handleMachineChange = (machineNo) => {
     setValues({});
     setSignatures({});
+    setSpecifications({}); // FIX: Clear previous specifications immediately upon machine change
     setIsSavedRecord(false);
 
+    // Update local state explicitly
+    setHeaderInfo(prev => ({
+      ...prev,
+      machineNo
+    }));
+
+    // Keep context matched
     setLineSet({
       machineShop: shopId,
       lineCode: headerInfo.lineCode,
@@ -390,7 +414,7 @@ export default function PreOperationChecklist() {
   };
 
   const handleSave = async () => {
-    if (!lineSet.lineCode || !lineSet.partNo || !lineSet.machineNo) {
+    if (!headerInfo.lineCode || !headerInfo.partNo || !headerInfo.machineNo) {
       triggerToast("Please select Line code and Machine No.", "error");
       return;
     }
@@ -418,12 +442,18 @@ export default function PreOperationChecklist() {
       header: {
         ...headerInfo,
         machineShop: shopId,
-        lineCode: lineSet.lineCode,
-        partName: lineSet.partName,
-        partNo: lineSet.partNo,
-        machineNo: lineSet.machineNo
+        lineCode: headerInfo.lineCode,
+        partName: headerInfo.partName,
+        partNo: headerInfo.partNo,
+        machineNo: headerInfo.machineNo
       },
-      lineSet: { ...lineSet },
+      lineSet: { 
+        ...lineSet, 
+        lineCode: headerInfo.lineCode, 
+        partNo: headerInfo.partNo, 
+        partName: headerInfo.partName,
+        machineNo: headerInfo.machineNo
+      },
       values,
       signatures,
       specifications,
@@ -444,25 +474,28 @@ export default function PreOperationChecklist() {
 
       if (!res.ok) throw new Error('Save failed');
 
-      setLineSet({ ...lineSet, machineShop: shopId });
-
       setIsSavedRecord(true);
       setSaveSuccess(true);
+      
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      if (isOperatorRoute) {
-        navigate(`/operator/${shopId}`);
-      } else {
-        navigate(`/shift-incharge/${shopId}`);
-      }
-      // Reset the machine details to allow next entry on the same page
+      // Reset the machine details and form values but retain Line Code, Date, OP No, Part details
       setValues({});
       setSignatures({});
       setSpecifications({});
       setHeaderInfo(prev => ({ ...prev, machineNo: "" }));
-      setLineSet(prev => ({ ...prev, machineNo: "" }));
+      
+      setLineSet({
+        machineShop: shopId,
+        lineCode: headerInfo.lineCode,
+        partName: headerInfo.partName,
+        partNo: headerInfo.partNo,
+        machineNo: ""
+      });
+
       setIsSavedRecord(false);
       setSaveSuccess(false);
+      triggerToast("Saved Successfully! Ready for the next machine.", "success");
 
     } catch (err) {
       console.error('Save error:', err);
@@ -666,7 +699,6 @@ export default function PreOperationChecklist() {
             <thead className="bg-gray-100 text-gray-800 font-bold">
               <tr>
                 <th className="border border-gray-800 p-2 w-16">Sl No</th>
-                {/* Fixed the width of the Parameters field right here (w-96) */}
                 <th className="border border-gray-800 p-2 text-left px-3 w-56">Parameters</th>
                 <th className="border border-gray-800 p-2 text-left px-3 w-56">Specification</th>
                 <th className="border border-gray-800 p-2 w-28">Unit</th>

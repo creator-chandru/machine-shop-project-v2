@@ -21,7 +21,6 @@ const saveErrorProofingChecksheet = async (req, res) => {
         const checkDate = header.date ? String(header.date).split('T')[0] : null;
         const shift = header.shift || 'I';
 
-        const operatorSignature = signatures?.Operator || '';
         const shiftInchargeSignature = signatures?.["Shift Incharge"] || '';
 
         // Purge previous records for this compound key to prevent duplicates
@@ -51,56 +50,49 @@ const saveErrorProofingChecksheet = async (req, res) => {
                 .input('errorProofNo', sql.NVarChar(50), row.errorProofNo || '')
                 .input('errorProofName', sql.NVarChar(255), row.errorProofName || '')
                 .input('value', sql.NVarChar(50), row.value || '')
-                .input('operatorSignature', sql.NVarChar(100), operatorSignature)
                 .input('shiftInchargeSignature', sql.NVarChar(100), shiftInchargeSignature)
                 .query(`
                     INSERT INTO ErrorProofingCheckSheet
                     (
                         machineShop, lineCode, partName, partNo, checkDate, shift,
                         slNo, machineNo, errorProofNo, errorProofName, value,
-                        operatorSignature, shiftInchargeSignature
+                        shiftInchargeSignature
                     )
                     VALUES
                     (
                         @machineShop, @lineCode, @partName, @partNo, @checkDate, @shift,
                         @slNo, @machineNo, @errorProofNo, @errorProofName, @value,
-                        @operatorSignature, @shiftInchargeSignature
+                        @shiftInchargeSignature
                     )
                 `);
         }
 
-                // Upsert distinct (lineCode, machineNo, errorProofNo, errorProofName) into master
+        // Upsert distinct (errorProofNo, errorProofName) into master GLOBALLY
         const seenCombos = new Set();
         for (const row of rows) {
-            const mNo = String(row.machineNo || '').trim();
             const epNo = String(row.errorProofNo || '').trim();
             const epName = String(row.errorProofName || '').trim();
-            const lc = String(lineCode || '').trim();
 
-            if (!lc || !mNo || !epNo || !epName) continue;
+            if (!epNo || !epName) continue;
 
-            const comboKey = [lc, mNo, epNo, epName].join('||').toLowerCase();
+            const comboKey = [epNo, epName].join('||').toLowerCase();
             if (seenCombos.has(comboKey)) continue;
             seenCombos.add(comboKey);
 
             await transaction.request()
-                .input('lineCode', sql.NVarChar(100), lc)
-                .input('machineNo', sql.NVarChar(100), mNo)
                 .input('errorProofNo', sql.NVarChar(100), epNo)
                 .input('errorProofName', sql.NVarChar(255), epName)
                 .query(`
                     IF EXISTS (
                         SELECT 1 FROM ErrorProofMaster WITH (UPDLOCK, HOLDLOCK)
-                        WHERE lineCode = @lineCode AND machineNo = @machineNo
-                          AND errorProofNo = @errorProofNo AND errorProofName = @errorProofName
+                        WHERE errorProofNo = @errorProofNo AND errorProofName = @errorProofName
                     )
                         UPDATE ErrorProofMaster
                         SET lastUsedAt = GETDATE()
-                        WHERE lineCode = @lineCode AND machineNo = @machineNo
-                          AND errorProofNo = @errorProofNo AND errorProofName = @errorProofName
+                        WHERE errorProofNo = @errorProofNo AND errorProofName = @errorProofName
                     ELSE
-                        INSERT INTO ErrorProofMaster (lineCode, machineNo, errorProofNo, errorProofName)
-                        VALUES (@lineCode, @machineNo, @errorProofNo, @errorProofName)
+                        INSERT INTO ErrorProofMaster (errorProofNo, errorProofName)
+                        VALUES (@errorProofNo, @errorProofName)
                 `);
         }
 
@@ -143,7 +135,7 @@ const getErrorProofingRecord = async (req, res) => {
                 id, machineShop, lineCode, partName, partNo,
                 FORMAT(checkDate, 'yyyy-MM-dd') AS checkDate,
                 shift, slNo, machineNo, errorProofNo, errorProofName, value,
-                operatorSignature, shiftInchargeSignature
+                shiftInchargeSignature
             FROM ErrorProofingCheckSheet
             WHERE lineCode = @lineCode
               AND CONVERT(date, checkDate) = CONVERT(date, @checkDate)
@@ -177,7 +169,6 @@ const getErrorProofingRecord = async (req, res) => {
             },
             rows,
             signatures: {
-                Operator: first.operatorSignature || '',
                 "Shift Incharge": first.shiftInchargeSignature || ''
             }
         };
@@ -214,7 +205,7 @@ const generateErrorProofingReport = async (req, res) => {
                 id, machineShop, lineCode, partName, partNo,
                 FORMAT(checkDate, 'yyyy-MM-dd') AS checkDate,
                 shift, slNo, machineNo, errorProofNo, errorProofName, value,
-                operatorSignature, shiftInchargeSignature
+                shiftInchargeSignature
             FROM ErrorProofingCheckSheet
             WHERE machineShop = @machineShop
               AND CONVERT(date, checkDate) >= CONVERT(date, @fromDate)
@@ -453,31 +444,20 @@ const generateErrorProofingReport = async (req, res) => {
 
             // 4. Signatures Block
             const sigY = currY + 4;
-            const sigColWidth = totalWidth / 2;
 
-            // Operator Signature
+            // Shift Incharge Signature (Centered full width)
             doc.lineWidth(0.5).strokeColor('black');
-            doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Operator Signature", startX, sigY, { width: sigColWidth - 10, align: "center" });
-            doc.rect(startX + 10, sigY + 10, sigColWidth - 20, 22).stroke();
-            const opSig = first.operatorSignature;
-            if (opSig) {
-                doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(startX + 18, sigY + 21).lineTo(startX + 21, sigY + 25).lineTo(startX + 26, sigY + 16).stroke();
-                doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(formatSigText(opSig), startX + 30, sigY + 17);
-            } else {
-                doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", startX + 10, sigY + 17, { width: sigColWidth - 20, align: "center" });
-            }
-
-            // Shift Incharge Signature
-            const inchargeX = startX + sigColWidth;
-            doc.lineWidth(0.5).strokeColor('black');
-            doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Incharge Signature", inchargeX, sigY, { width: sigColWidth - 10, align: "center" });
-            doc.rect(inchargeX + 10, sigY + 10, sigColWidth - 20, 22).stroke();
+            doc.fillColor('black').font("Helvetica-Bold").fontSize(7).text("Shift Incharge Signature", startX, sigY, { width: totalWidth, align: "center" });
+            doc.rect(startX, sigY + 10, totalWidth, 22).stroke();
             const incSig = first.shiftInchargeSignature;
+            
             if (incSig) {
-                doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(inchargeX + 18, sigY + 21).lineTo(inchargeX + 21, sigY + 25).lineTo(inchargeX + 26, sigY + 16).stroke();
-                doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(formatSigText(incSig), inchargeX + 30, sigY + 17);
+                const textWidth = doc.widthOfString(formatSigText(incSig));
+                const textStartX = startX + (totalWidth / 2) - (textWidth / 2);
+                doc.lineWidth(1.2).strokeColor('#16a34a').moveTo(textStartX - 10, sigY + 21).lineTo(textStartX - 7, sigY + 25).lineTo(textStartX - 2, sigY + 16).stroke();
+                doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7).text(formatSigText(incSig), textStartX + 2, sigY + 17);
             } else {
-                doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", inchargeX + 10, sigY + 17, { width: sigColWidth - 20, align: "center" });
+                doc.fillColor('red').font('Helvetica').fontSize(7).text("Pending", startX, sigY + 17, { width: totalWidth, align: "center" });
             }
 
             // 5. Print QF Value below signatures
@@ -531,14 +511,10 @@ const generateErrorProofingReport = async (req, res) => {
 };
 
 // ============================================================
-// 4. SUGGESTIONS FROM MASTER (search-as-you-type)
+// 4. SUGGESTIONS FROM MASTER (search-as-you-type GLOBALLY)
 // ============================================================
 const getErrorProofSuggestions = async (req, res) => {
-    const { lineCode, machineNo, field, q } = req.query;
-
-    if (!lineCode || !machineNo) {
-        return res.status(200).json([]);
-    }
+    const { field, q } = req.query;
 
     // whitelist column to avoid SQL injection
     const column = field === 'errorProofName' ? 'errorProofName' : 'errorProofNo';
@@ -547,22 +523,23 @@ const getErrorProofSuggestions = async (req, res) => {
 
     try {
         const request = new sql.Request();
-        request.input('lineCode', sql.NVarChar(100), String(lineCode).trim());
-        request.input('machineNo', sql.NVarChar(100), String(machineNo).trim());
         request.input('contains', sql.NVarChar(300), `%${escaped}%`);
         request.input('prefix', sql.NVarChar(300), `${escaped}%`);
         request.input('hasTerm', sql.Bit, term ? 1 : 0);
 
+        // Fetch distinct combinations globally across all machines/lines
         const result = await request.query(`
-            SELECT TOP (10) errorProofNo, errorProofName
-            FROM ErrorProofMaster
-            WHERE lineCode = @lineCode
-              AND machineNo = @machineNo
-              AND (@hasTerm = 0 OR ${column} LIKE @contains)
+            SELECT TOP (15) errorProofNo, errorProofName
+            FROM (
+                SELECT errorProofNo, errorProofName, MAX(lastUsedAt) as maxLastUsed, MAX(id) as maxId
+                FROM ErrorProofMaster
+                WHERE (@hasTerm = 0 OR ${column} LIKE @contains)
+                GROUP BY errorProofNo, errorProofName
+            ) t
             ORDER BY
                 CASE WHEN @hasTerm = 1 AND ${column} LIKE @prefix THEN 0 ELSE 1 END,
-                lastUsedAt DESC,
-                id DESC
+                maxLastUsed DESC,
+                maxId DESC
         `);
 
         return res.status(200).json(result.recordset || []);

@@ -33,7 +33,6 @@ setLineSet({
 
 const buttons = [
 { name: "Pre-Operation Checklist", path: `/operator/${shopId}/pre-operation-checklist`, icon: ClipboardCheck },
-{ name: "Error-Proofing CheckSheet", path: `/operator/${shopId}/error-proofing-checksheet`, icon: ShieldCheck },
 { name: "Air-Gap-Sensor CheckSheet", path: `/operator/${shopId}/air-gap-sensor`, icon: PenLine },
 { name: "4M-Change-Monitoring CheckSheet", path: `/operator/${shopId}/four-m-change-monitoring`, icon: RefreshCw },
 { name: "Record Of Significant Event", path: `/operator/${shopId}/significant-event-record`, icon: FileClock },

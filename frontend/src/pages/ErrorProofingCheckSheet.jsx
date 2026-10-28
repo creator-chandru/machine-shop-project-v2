@@ -22,7 +22,7 @@ const initialFormData = {
   },
 
   signatures: {
-    roles: ["Operator", "Shift Incharge"]
+    roles: ["Shift Incharge"]
   },
 
   notes: [
@@ -70,8 +70,6 @@ const Toast = ({ message, type, onClose }) => {
 const SuggestInput = ({
   field,            // 'errorProofNo' | 'errorProofName'
   value,
-  lineCode,
-  machineNo,
   disabled,
   ariaLabel,
   className,
@@ -85,7 +83,7 @@ const SuggestInput = ({
   const inputRef = useRef(null);
   const seqRef = useRef(0);
 
-  const canSuggest = !!lineCode && !!machineNo && !disabled;
+  const canSuggest = !disabled;
 
   const updatePos = () => {
     const r = inputRef.current?.getBoundingClientRect();
@@ -104,7 +102,7 @@ const SuggestInput = ({
     };
   }, [open]);
 
-  // Debounced fetch (latest 10 when empty, matches when typing)
+  // Debounced fetch (matches globally without lineCode/machineNo dependency)
   useEffect(() => {
     if (!open || !canSuggest) return;
 
@@ -113,8 +111,6 @@ const SuggestInput = ({
       try {
         const token = localStorage.getItem("token");
         const params = new URLSearchParams({
-          lineCode,
-          machineNo,
           field,
           q: value || ""
         });
@@ -134,7 +130,7 @@ const SuggestInput = ({
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [open, value, lineCode, machineNo, field, canSuggest]);
+  }, [open, value, field, canSuggest]);
 
   const pick = (item) => {
     onSelect(item);
@@ -488,16 +484,6 @@ export default function ErrorProofingCheckSheet() {
     });
   };
 
-  const handleApproveOperator = () => {
-    if (!validateBeforeApprove()) return;
-
-    setSignatures((prev) => ({
-      ...prev,
-      "Operator": isOperatorRoute ? currentUser : "Approved"
-    }));
-    triggerToast("Operator signature approved successfully", "success");
-  };
-
   const handleApproveShiftIncharge = () => {
     if (!validateBeforeApprove()) return;
 
@@ -567,13 +553,8 @@ export default function ErrorProofingCheckSheet() {
   };
 
   const handleSave = async () => {
-    if (isOperatorRoute && !signatures["Operator"]) {
-      triggerToast("Please approve the Operator signature before saving.", "error");
-      return;
-    }
-
-    if (!isOperatorRoute && (!signatures["Operator"] || !signatures["Shift Incharge"])) {
-      triggerToast("Please approve both signatures before saving.", "error");
+    if (!isOperatorRoute && !signatures["Shift Incharge"]) {
+      triggerToast("Please approve the Shift Incharge signature before saving.", "error");
       return;
     }
 
@@ -907,8 +888,6 @@ export default function ErrorProofingCheckSheet() {
                       className="w-full h-full text-center outline-none bg-transparent py-2"
                       ariaLabel={`Row ${rIdx + 1} Error Proof No`}
                       value={row.errorProofNo}
-                      lineCode={headerInfo.lineCode}
-                      machineNo={row.machineNo}
                       disabled={isSavedRecord}
                       onChange={(val) => handleRowChange(rIdx, 'errorProofNo', val)}
                       onSelect={(item) => handleSuggestionSelect(rIdx, item)}
@@ -921,8 +900,6 @@ export default function ErrorProofingCheckSheet() {
                       className="w-full h-full text-left px-3 outline-none bg-transparent py-2"
                       ariaLabel={`Row ${rIdx + 1} Error Proof Name`}
                       value={row.errorProofName}
-                      lineCode={headerInfo.lineCode}
-                      machineNo={row.machineNo}
                       disabled={isSavedRecord}
                       onChange={(val) => handleRowChange(rIdx, 'errorProofName', val)}
                       onSelect={(item) => handleSuggestionSelect(rIdx, item)}
@@ -945,37 +922,6 @@ export default function ErrorProofingCheckSheet() {
                 </tr>
               ))}
 
-              {/* Operator Signature Row */}
-              <tr>
-                <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
-                  Operator Signature
-                </td>
-                <td className="border border-gray-800 p-2 align-middle text-center bg-gray-50/30">
-                  {signatures["Operator"] ? (
-                    <div className="flex flex-col items-center justify-center">
-                      {signatures["Operator"] === "Approved" ? (
-                        <span className="text-xs font-bold text-green-600">Approved</span>
-                      ) : (
-                        <>
-                          <span className="text-xs font-bold text-green-600 mb-0.5">Approved By ✓</span>
-                          <span className="text-xs font-black text-gray-900 uppercase">
-                            {signatures["Operator"]}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleApproveOperator}
-                      className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-1.5 rounded shadow transition-all hover:scale-105 uppercase tracking-widest cursor-pointer"
-                    >
-                      Approve
-                    </button>
-                  )}
-                </td>
-              </tr>
-
               {/* Shift Incharge Signature Row */}
               <tr>
                 <td colSpan={4} className="border border-gray-800 p-2 text-left px-3 font-bold bg-gray-50 text-gray-700">
@@ -985,9 +931,7 @@ export default function ErrorProofingCheckSheet() {
                   {signatures["Shift Incharge"] ? (
                     <div className="flex flex-col items-center justify-center">
                       <span className="text-xs font-bold text-green-600 mb-0.5">Approved By ✓</span>
-                      <span className="text-xs font-black text-gray-900 uppercase">
-                        {signatures["Shift Incharge"]}
-                      </span>
+                      <span className="text-xs font-black text-gray-900 uppercase">{signatures["Shift Incharge"]}</span>
                     </div>
                   ) : (
                     <button

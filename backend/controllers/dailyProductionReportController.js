@@ -119,6 +119,71 @@ const getMachineShopDetails = async (req, res) => {
   }
 };
 
+// ============================================================
+// FETCH LATEST OPERATION DESCRIPTIONS FROM PREVIOUS DAYS
+// ============================================================
+const getLatestOperationDescriptions = async (req, res) => {
+  const { lineCode, shopId, date } = req.query;
+  if (!lineCode) {
+    return res.status(400).json({ error: 'lineCode is required' });
+  }
+
+  try {
+    const request = new sql.Request();
+    request.input('lineCode', sql.NVarChar(50), lineCode);
+
+    let query = `
+      WITH RankedOps AS (
+        SELECT 
+          MachineNo,
+          OperationDescription,
+          OperatorName,
+          ReportDate,
+          ROW_NUMBER() OVER (
+            PARTITION BY MachineNo 
+            ORDER BY ReportDate DESC, Id DESC
+          ) AS rn
+        FROM DailyProductionReport
+        WHERE lineCode = @lineCode
+          AND OperationDescription IS NOT NULL 
+          AND LTRIM(RTRIM(OperationDescription)) <> ''
+    `;
+
+    if (shopId) {
+      request.input('machineShop', sql.NVarChar(50), String(shopId));
+      query += ` AND MachineShop = @machineShop`;
+    }
+
+    if (date) {
+      request.input('reportDate', sql.NVarChar(50), String(date).split('T')[0]);
+      query += ` AND CONVERT(date, ReportDate) <= CONVERT(date, @reportDate)`;
+    }
+
+    query += `
+      )
+      SELECT MachineNo, OperationDescription, OperatorName
+      FROM RankedOps
+      WHERE rn = 1
+    `;
+
+    const result = await request.query(query);
+    const opMap = {};
+    result.recordset.forEach((row) => {
+      if (row.MachineNo) {
+        opMap[row.MachineNo] = {
+          operationDescription: row.OperationDescription || '',
+          operatorName: row.OperatorName || ''
+        };
+      }
+    });
+
+    return res.status(200).json(opMap);
+  } catch (err) {
+    console.error('Failed to fetch latest operations:', err);
+    return res.status(500).json({ error: 'Failed to fetch latest operation descriptions' });
+  }
+};
+
 const saveDailyProductionReport = async (req, res) => {
   const { header, rows, signatures } = req.body;
   let transaction;
@@ -418,7 +483,7 @@ const getDailyProductionRecords = async (req, res) => {
 };
 
 // ============================================================
-// 14. PDF REPORT GENERATOR (SUPPORTS RANGE OR SPECIFIC REPORT)
+// PDF REPORT GENERATOR (SUPPORTS RANGE OR SPECIFIC REPORT)
 // ============================================================
 const generateReport = async (req, res) => {
   try {
@@ -458,9 +523,6 @@ const generateReport = async (req, res) => {
     const records = result.recordset;
     if (!records || records.length === 0) return res.status(404).send("No records found for the selected criteria.");
 
-    // ========================================================
-    // FETCH DYNAMIC QF HISTORY
-    // ========================================================
     let qfHistory = [];
     try {
       const qfRes = await sql.query(`
@@ -513,10 +575,24 @@ const generateReport = async (req, res) => {
     const pageBottom = doc.page.height - 20;
     const topMargin = 20;
 
-    const headers = ["M/C No", "Part Name / No", "Operator", "Prod", "Acc", "Hold", "Casting Reason", "Machining Reason", "Time", "M/C Stop Reason"];
-    const fractions = [0.08, 0.16, 0.10, 0.05, 0.05, 0.06, 0.12, 0.12, 0.08, 0.18];
+    // Table headers including Operation Description
+    const headers = [
+      "M/C No",
+      "Part Name / No",
+      "Op Description",
+      "Operator",
+      "Prod",
+      "Acc",
+      "Hold",
+      "Casting Reason",
+      "Machining Reason",
+      "Time",
+      "M/C Stop Reason"
+    ];
+    // Fractions total 1.00 (100% of available width)
+    const fractions = [0.07, 0.13, 0.11, 0.09, 0.045, 0.045, 0.05, 0.11, 0.11, 0.08, 0.16];
     const colWidths = fractions.map((f) => f * totalWidth);
-    const pad = 3;
+    const pad = 2.5;
     const fontSize = 6.5;
 
     const computeEntryHeight = (groupRecords) => {
@@ -534,9 +610,17 @@ const generateReport = async (req, res) => {
         const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
 
         const rowCells = [
-          r.MachineNo || "-", r.PartNameNo || "-", r.OperatorName || "-",
-          r.Produced != null ? String(r.Produced) : "-", r.Accepted != null ? String(r.Accepted) : "-",
-          r.HoldNonConformance || "-", castHold, machHold, timeVal, r.McStopTimeReason || "-"
+          r.MachineNo || "-",
+          r.PartNameNo || "-",
+          r.OperationDescription || "-",
+          r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-",
+          r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-",
+          castHold,
+          machHold,
+          timeVal,
+          r.McStopTimeReason || "-"
         ];
 
         rowCells.forEach((c, i) => {
@@ -597,9 +681,17 @@ const generateReport = async (req, res) => {
         const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
 
         const rowCells = [
-          r.MachineNo || "-", r.PartNameNo || "-", r.OperatorName || "-",
-          r.Produced != null ? String(r.Produced) : "-", r.Accepted != null ? String(r.Accepted) : "-",
-          r.HoldNonConformance || "-", castHold, machHold, timeVal, r.McStopTimeReason || "-"
+          r.MachineNo || "-",
+          r.PartNameNo || "-",
+          r.OperationDescription || "-",
+          r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-",
+          r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-",
+          castHold,
+          machHold,
+          timeVal,
+          r.McStopTimeReason || "-"
         ];
 
         let rowH = 14;
@@ -722,9 +814,6 @@ const generateDailyProductionDayReport = async (req, res) => {
       return res.status(404).json({ error: "No records found for the selected date." });
     }
 
-    // ========================================================
-    // FETCH DYNAMIC QF HISTORY
-    // ========================================================
     let qfHistory = [];
     try {
       const qfRes = await sql.query(`
@@ -777,10 +866,24 @@ const generateDailyProductionDayReport = async (req, res) => {
     const pageBottom = doc.page.height - 20;
     const topMargin = 20;
 
-    const headers = ["M/C No", "Part Name / No", "Operator", "Prod", "Acc", "Hold", "Casting Reason", "Machining Reason", "Time", "M/C Stop Reason"];
-    const fractions = [0.08, 0.16, 0.10, 0.05, 0.05, 0.06, 0.12, 0.12, 0.08, 0.18];
+    // Table headers including Operation Description
+    const headers = [
+      "M/C No",
+      "Part Name / No",
+      "Op Description",
+      "Operator",
+      "Prod",
+      "Acc",
+      "Hold",
+      "Casting Reason",
+      "Machining Reason",
+      "Time",
+      "M/C Stop Reason"
+    ];
+    // Fractions total 1.00 (100% of available width)
+    const fractions = [0.07, 0.13, 0.11, 0.09, 0.045, 0.045, 0.05, 0.11, 0.11, 0.08, 0.16];
     const colWidths = fractions.map((f) => f * totalWidth);
-    const pad = 3;
+    const pad = 2.5;
     const fontSize = 6.5;
 
     const computeEntryHeight = (groupRecords) => {
@@ -797,9 +900,17 @@ const generateDailyProductionDayReport = async (req, res) => {
         const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
 
         const rowCells = [
-          r.MachineNo || "-", r.PartNameNo || "-", r.OperatorName || "-",
-          r.Produced != null ? String(r.Produced) : "-", r.Accepted != null ? String(r.Accepted) : "-",
-          r.HoldNonConformance || "-", castHold, machHold, timeVal, r.McStopTimeReason || "-"
+          r.MachineNo || "-",
+          r.PartNameNo || "-",
+          r.OperationDescription || "-",
+          r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-",
+          r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-",
+          castHold,
+          machHold,
+          timeVal,
+          r.McStopTimeReason || "-"
         ];
 
         rowCells.forEach((c, i) => {
@@ -861,9 +972,17 @@ const generateDailyProductionDayReport = async (req, res) => {
         const machHold = r.ReasonForHold_Machining ? `${r.ReasonForHold_Machining} (${r.ReasonForHold_MachiningQty || 0})` : '-';
 
         const rowCells = [
-          r.MachineNo || "-", r.PartNameNo || "-", r.OperatorName || "-",
-          r.Produced != null ? String(r.Produced) : "-", r.Accepted != null ? String(r.Accepted) : "-",
-          r.HoldNonConformance || "-", castHold, machHold, timeVal, r.McStopTimeReason || "-"
+          r.MachineNo || "-",
+          r.PartNameNo || "-",
+          r.OperationDescription || "-",
+          r.OperatorName || "-",
+          r.Produced != null ? String(r.Produced) : "-",
+          r.Accepted != null ? String(r.Accepted) : "-",
+          r.HoldNonConformance || "-",
+          castHold,
+          machHold,
+          timeVal,
+          r.McStopTimeReason || "-"
         ];
 
         let rowH = 14;
@@ -956,5 +1075,6 @@ module.exports = {
   getPartTraceability,
   getIncharges,
   getPeIncharges,
-  getHofIncharges
+  getHofIncharges,
+  getLatestOperationDescriptions
 };

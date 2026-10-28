@@ -12,11 +12,12 @@ const {
   signPeApproval,
   signHofApproval,
   generateReport,
-  generateDailyProductionDayReport, // <--- Add new single-day function
+  generateDailyProductionDayReport,
   getPartTraceability,
   getIncharges,
   getPeIncharges,
-  getHofIncharges
+  getHofIncharges,
+  getLatestOperationDescriptions // <--- Added
 } = require('../controllers/dailyProductionReportController.js');
 
 // 1. Master Data
@@ -29,6 +30,9 @@ router.get('/daily-production-report/hof-incharges', getHofIncharges);
 
 // 3. Traceability
 router.get('/daily-production-report/traceability', getPartTraceability);
+
+// 3.5 Latest Operation Descriptions from previous days
+router.get('/daily-production-report/latest-operations', getLatestOperationDescriptions); // <--- Added route
 
 // 4. Save / Update Daily Production Report
 router.post('/daily-production-report', saveDailyProductionReport);

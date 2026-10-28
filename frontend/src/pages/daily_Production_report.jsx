@@ -112,6 +112,9 @@ export default function DailyProductionReport() {
   const [hofUsers, setHofUsers] = useState([]);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
 
+  // Subsequent day operation descriptions map: { [machineNo]: { operationDescription, operatorName } }
+  const [latestOperations, setLatestOperations] = useState({});
+
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfFromDate, setPdfFromDate] = useState("");
   const [pdfToDate, setPdfToDate] = useState("");
@@ -140,7 +143,6 @@ export default function DailyProductionReport() {
     assignedHof: "",
   });
 
-  
   // Fetch QF History on Mount
   useEffect(() => {
     const fetchQfHistory = async () => {
@@ -185,7 +187,7 @@ export default function DailyProductionReport() {
 
     setQfValue(currentQf);
   }, [header.date, qfHistory]);
-  
+
   const [rows, setRows] = useState(
     Array.from({ length: INITIAL_ROWS }, () => createEmptyRow())
   );
@@ -198,11 +200,74 @@ export default function DailyProductionReport() {
   });
 
   const currentPartNameNo =
-    header.partName && header.partNo ? `${header.partName} / ${header.partNo}` : "";
+    header.partName && header.partNo
+      ? `${header.partName} / ${header.partNo}`
+      : header.partName || header.partNo || "";
 
-  const resetToEmptyForm = (lineCode, date, shift) => {
+  // Synchronize Row 1 (and any unsaved row with empty PartNameNo) when currentPartNameNo updates
+  useEffect(() => {
+    if (currentPartNameNo && !isSavedRecord) {
+      setRows((prev) => {
+        let changed = false;
+        const updated = prev.map((r, idx) => {
+          if (r.isSavedRow) return r;
+          if (idx === 0 || !r.partNameNo) {
+            if (r.partNameNo !== currentPartNameNo) {
+              changed = true;
+              return { ...r, partNameNo: currentPartNameNo };
+            }
+          }
+          return r;
+        });
+        return changed ? updated : prev;
+      });
+    }
+  }, [currentPartNameNo, isSavedRecord]);
+
+  // Fetch previous day/entry operations for lineCode
+  const fetchLatestOperations = async (lineCode, date) => {
+    if (!lineCode) return {};
+    try {
+      const token = localStorage.getItem("token");
+      const url = `${process.env.REACT_APP_API_URL || ""}/api/daily-production-report/latest-operations?lineCode=${encodeURIComponent(
+        lineCode
+      )}&shopId=${encodeURIComponent(shopId || 3)}&date=${encodeURIComponent(date || "")}`;
+
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setLatestOperations(data || {});
+        return data || {};
+      }
+    } catch (err) {
+      console.error("Failed to load previous operation descriptions:", err);
+    }
+    return {};
+  };
+
+  useEffect(() => {
+    if (header.lineCode) {
+      fetchLatestOperations(header.lineCode, header.date).then((ops) => {
+        if (ops && Object.keys(ops).length > 0 && !isSavedRecord) {
+          setRows((prev) =>
+            prev.map((r) => {
+              if (r.isSavedRow) return r;
+              if (r.machineNo && !r.operationDescription && ops[r.machineNo]) {
+                const prevOp = ops[r.machineNo]?.operationDescription || ops[r.machineNo] || "";
+                return { ...r, operationDescription: prevOp };
+              }
+              return r;
+            })
+          );
+        }
+      });
+    }
+  }, [header.lineCode, header.date, shopId]);
+
+  const resetToEmptyForm = (lineCode, date, shift, defaultPart = "") => {
     setIsSavedRecord(false);
-    setRows([createEmptyRow(currentPartNameNo)]);
+    const partToUse = defaultPart || currentPartNameNo;
+    setRows([createEmptyRow(partToUse)]);
     setSignatures({
       shiftSupervisorProduction: "",
       shiftSupervisorQuality: "",
@@ -329,9 +394,9 @@ export default function DailyProductionReport() {
     }
   };
 
-  const checkExistingRecord = async (lineCode, date, shift, machineNo) => {
+  const checkExistingRecord = async (lineCode, date, shift, machineNo, defaultPart = "") => {
     if (!lineCode || !date || !shift) {
-      resetToEmptyForm(lineCode, date, shift);
+      resetToEmptyForm(lineCode, date, shift, defaultPart);
       return;
     }
 
@@ -359,7 +424,7 @@ export default function DailyProductionReport() {
           loadRecordData(found);
           triggerToast("Existing production record loaded for this combo.", "success");
         } else {
-          resetToEmptyForm(lineCode, date, shift);
+          resetToEmptyForm(lineCode, date, shift, defaultPart);
         }
       }
     } catch (err) {
@@ -400,14 +465,14 @@ export default function DailyProductionReport() {
         setRows((prev) =>
           prev.map((r) => ({
             ...r,
-            partNameNo: r.partNameNo || defaultPartNameNo,
+            partNameNo: r.isSavedRow ? r.partNameNo : r.partNameNo || defaultPartNameNo,
             machineNo: r.machineNo || lineSet.machineNo || "",
           }))
         );
       }
 
       if (newLineCode) {
-        checkExistingRecord(newLineCode, header.date, header.shift, lineSet.machineNo || "");
+        checkExistingRecord(newLineCode, header.date, header.shift, lineSet.machineNo || "", defaultPartNameNo);
       }
     }
   }, [lineSet]);
@@ -438,6 +503,20 @@ export default function DailyProductionReport() {
     fetchData();
   }, [shopId]);
 
+  // When lineMappings load and lineCode is already chosen, populate partName / partNo if blank
+  useEffect(() => {
+    if (header.lineCode && lineMappings.length > 0 && (!header.partName || !header.partNo)) {
+      const mapping = lineMappings.find((m) => m.lineCode === header.lineCode);
+      if (mapping) {
+        setHeader((prev) => ({
+          ...prev,
+          partName: prev.partName || mapping.partSet || "",
+          partNo: prev.partNo || mapping.idSet || "",
+        }));
+      }
+    }
+  }, [header.lineCode, lineMappings]);
+
   const lineCodes =
     lineMappings.length > 0
       ? lineMappings.map((m) => m.lineCode)
@@ -452,6 +531,7 @@ export default function DailyProductionReport() {
     if (isReadOnlyApprover) return;
 
     const nextHeader = { ...header, [field]: val };
+    let newPartNameNo = currentPartNameNo;
 
     if (field === "lineCode") {
       const mapping = lineMappings.find((m) => m.lineCode === val);
@@ -459,16 +539,43 @@ export default function DailyProductionReport() {
       const autoPartNo = mapping?.idSet || "";
       nextHeader.partName = autoPartName;
       nextHeader.partNo = autoPartNo;
+      newPartNameNo = autoPartName && autoPartNo ? `${autoPartName} / ${autoPartNo}` : autoPartName || autoPartNo || "";
+
+      // Update Row 1 and all unsaved rows with new Part Name/No immediately
+      setRows((prev) =>
+        prev.map((r, idx) => {
+          if (r.isSavedRow) return r;
+          if (idx === 0 || !r.partNameNo) {
+            return { ...r, partNameNo: newPartNameNo };
+          }
+          return r;
+        })
+      );
+    } else if (field === "partName" || field === "partNo") {
+      const pName = field === "partName" ? val : nextHeader.partName;
+      const pNo = field === "partNo" ? val : nextHeader.partNo;
+      newPartNameNo = pName && pNo ? `${pName} / ${pNo}` : pName || pNo || "";
+
+      setRows((prev) =>
+        prev.map((r, idx) => {
+          if (r.isSavedRow) return r;
+          if (idx === 0 || !r.partNameNo) {
+            return { ...r, partNameNo: newPartNameNo };
+          }
+          return r;
+        })
+      );
     }
 
     setHeader(nextHeader);
 
     const firstMachineNo = rows[0]?.machineNo || "";
     if (["lineCode", "date", "shift"].includes(field)) {
-      checkExistingRecord(nextHeader.lineCode, nextHeader.date, nextHeader.shift, firstMachineNo);
+      checkExistingRecord(nextHeader.lineCode, nextHeader.date, nextHeader.shift, firstMachineNo, newPartNameNo);
     }
   };
-const handleRowChange = (rowIdx, field, subField, val) => {
+
+  const handleRowChange = (rowIdx, field, subField, val) => {
     if (isReadOnlyApprover || rows[rowIdx].isSavedRow) return;
 
     setRows((prev) => {
@@ -486,6 +593,21 @@ const handleRowChange = (rowIdx, field, subField, val) => {
         const selectedMachine = machineOptions.find((m) => m.machineNo === val);
         if (selectedMachine) {
           next[rowIdx].machineName = selectedMachine.machineType || "";
+        }
+
+        // 1. Ensure Part Name/No is filled if missing
+        if (!next[rowIdx].partNameNo) {
+          const partFromHeader = header.partName && header.partNo ? `${header.partName} / ${header.partNo}` : "";
+          const partFromMachine = selectedMachine && selectedMachine.partName && selectedMachine.partNo ? `${selectedMachine.partName} / ${selectedMachine.partNo}` : "";
+          next[rowIdx].partNameNo = partFromHeader || partFromMachine || "";
+        }
+
+        // 2. Auto-fetch and fill Operation Description from previous day / latest entries
+        if (!next[rowIdx].operationDescription && latestOperations[val]) {
+          const prevOp = latestOperations[val]?.operationDescription || latestOperations[val] || "";
+          if (prevOp) {
+            next[rowIdx].operationDescription = prevOp;
+          }
         }
       }
       return next;
@@ -1067,7 +1189,7 @@ const handleRowChange = (rowIdx, field, subField, val) => {
                         placeholder="Auto-fill"
                       />
                     </td>
-                    {/* Editable Part Name / No cell per row[cite: 1, 2] */}
+                    {/* Part Name / No cell */}
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
@@ -1078,6 +1200,7 @@ const handleRowChange = (rowIdx, field, subField, val) => {
                         placeholder="Part Name / No"
                       />
                     </td>
+                    {/* Operation Description: Auto-fetched from previous day & manually editable */}
                     <td className="border border-gray-800 p-0">
                       <input
                         type="text"
@@ -1085,6 +1208,7 @@ const handleRowChange = (rowIdx, field, subField, val) => {
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         value={row.operationDescription}
                         onChange={(e) => handleRowChange(rIdx, "operationDescription", null, e.target.value)}
+                        placeholder="Op Description"
                       />
                     </td>
                     <td className="border border-gray-800 p-0">
@@ -1094,6 +1218,7 @@ const handleRowChange = (rowIdx, field, subField, val) => {
                         className="w-full h-full text-center outline-none bg-transparent py-1 px-1 font-medium disabled:text-gray-700"
                         value={row.operatorName}
                         onChange={(e) => handleRowChange(rIdx, "operatorName", null, e.target.value)}
+                        placeholder="Operator"
                       />
                     </td>
                     <td className="border border-gray-800 p-0">

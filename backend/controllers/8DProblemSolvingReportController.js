@@ -116,6 +116,7 @@ const saveEightDReport = async (req, res) => {
     request.input('Segregation_WIP_NotOk', sql.NVarChar(50), emergencyActions?.segregationWIPNotOk || '');
     request.input('IsCustomerVisitRequired', sql.NVarChar(10), emergencyActions?.customerVisitRequired || '');
     request.input('ProblemDescription', sql.NVarChar(sql.MAX), problemDescription || '');
+    // processFlow steps are stored as { text, highlight } (legacy records hold plain strings)
     request.input('ProcessFlowSketch', sql.NVarChar(sql.MAX), JSON.stringify(processFlow || []));
 
     request.input('InterimActions', sql.NVarChar(sql.MAX), JSON.stringify(interimActions || []));
@@ -310,9 +311,9 @@ const getEightDReports = async (req, res) => {
       let parsedClosureSignOff = [];
       try {
         parsedClosureSignOff = parsedVerification.closureSignOff || [
-          { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-          { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-          { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+          { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+          { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+          { teamMembers: "", teamLeader: "", prodQualityHead: "" },
         ];
       } catch (e) {
         parsedClosureSignOff = [];
@@ -917,36 +918,39 @@ const generateEightDPdf = async (req, res) => {
     } catch (e) {
       flowSteps = [];
     }
-    const cleanFlow = flowSteps.filter(Boolean);
+    const cleanFlow = flowSteps
+      .map((s) =>
+        typeof s === "string"
+          ? { text: s, highlight: false }
+          : { text: (s && s.text) || "", highlight: Boolean(s && s.highlight) }
+      )
+      .filter((s) => String(s.text).trim());
 
     const leftLimit = startX + halfW + 14;
     const rightLimit = startX + fullWidth - 10;
     let fx = leftLimit;
     let fy = sec2Y + 18;
-    const maxBoxW = 95; // Maximum horizontal box width in PDF
+    const maxBoxW = 95;
     const minBoxW = 38;
 
     cleanFlow.slice(0, 8).forEach((st, idx) => {
-      const stepStr = String(st).trim();
+      const stepStr = String(st.text).trim();
       const textWidth = doc.font("Helvetica-Bold").fontSize(5.5).widthOfString(stepStr);
 
-      // Dynamic sizing: grow horizontally up to maxBoxW, else cap width & grow vertically
       let boxW = Math.max(minBoxW, Math.min(maxBoxW, textWidth + 10));
       let boxH = 14;
       if (textWidth + 10 > maxBoxW) {
         boxW = maxBoxW;
-        boxH = 20; // Multi-line vertical expansion
+        boxH = 20;
       }
 
-      // Check if box exceeds container boundary horizontally; if so, wrap to next line
       if (fx + boxW > rightLimit) {
         fx = leftLimit;
-        fy += 22; // Move down to next line
+        fy += 22;
       }
 
-      // Safeguard: keep strictly within the 2B container height
       if (fy + boxH <= sec2Y + 63) {
-        doc.rect(fx, fy, boxW, boxH).fillAndStroke('#ffffff', '#1f2937');
+        doc.rect(fx, fy, boxW, boxH).fillAndStroke(st.highlight ? '#fde047' : '#ffffff', '#1f2937');
         doc.font("Helvetica-Bold").fontSize(5.2).fillColor('#111827')
           .text(stepStr, fx + 2, fy + (boxH > 14 ? 2.5 : 3.5), {
             width: boxW - 4,
@@ -963,7 +967,6 @@ const generateEightDPdf = async (req, res) => {
             const arrowStartX = fx + 2;
             const arrowEndX = fx + 11;
 
-            // Draw orange right arrow using PDF vector lines
             doc.save();
             doc.lineWidth(1.2)
               .strokeColor('#ea580c')
@@ -1108,11 +1111,14 @@ const generateEightDPdf = async (req, res) => {
     const valRows = r.ValidationRows ? JSON.parse(r.ValidationRows) : [];
     let vy = valY + 26;
     valRows.slice(0, 5).forEach((v) => {
+      const causeLabel = v.category
+        ? `${String(v.category).toUpperCase()}: ${v.verification || '-'}`
+        : (v.verification || '-');
       doc.rect(startX, vy, fullWidth, 20).stroke();
       doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#1f2937');
       doc.text(v.testSimulation || '-', startX + 6, vy + 6, { width: 230, ellipsis: true });
       doc.font("Helvetica").fontSize(6.5);
-      doc.text(v.verification || '-', startX + 245, vy + 4, { width: 340, height: 14 });
+      doc.text(causeLabel, startX + 245, vy + 4, { width: 340, height: 14 });
       doc.text(v.date ? String(v.date).split('T')[0] : '-', startX + 595, vy + 6, { width: 65, align: 'center' });
       doc.font(v.significant === 'SIGNIFICANT' ? 'Helvetica-Bold' : 'Helvetica')
         .fillColor(v.significant === 'SIGNIFICANT' ? '#dc2626' : '#111827')
@@ -1205,12 +1211,12 @@ const generateEightDPdf = async (req, res) => {
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text(`Trial Run Details (Date: ${r.TrialRunDate ? new Date(r.TrialRunDate).toLocaleDateString('en-GB') : '-'}, Seq: ${r.TrialRunSequence || '-'}):`, startX + halfSolW + 8, solY + 17);
     doc.font("Helvetica").fontSize(6).fillColor('#374151').text(r.TrialRunDetails || "-", startX + halfSolW + 8, solY + 26, { width: halfSolW - 14 });
 
-    // 3. (6) PERMANENT CORRECTIVE ACTIONS (Height: 96)
+    // 3. (6) PERMANENT CORRECTIVE ACTIONS (Expanded Height: 108)
     const pcaY = 220;
-    doc.rect(startX, pcaY, fullWidth, 96).stroke();
+    doc.rect(startX, pcaY, fullWidth, 108).stroke();
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(6) Permanent Corrective Actions (PCA):", startX + 6, pcaY + 3);
 
-    doc.rect(startX, pcaY + 13, fullWidth, 12).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.rect(startX, pcaY + 13, fullWidth, 13).fillAndStroke('#f3f4f6', '#1f2937');
     doc.fillColor('black').font("Helvetica-Bold").fontSize(6.5);
     doc.text("Type", startX + 6, pcaY + 16, { width: 70 });
     doc.text("Action Plan Description", startX + 80, pcaY + 16, { width: 440 });
@@ -1220,21 +1226,21 @@ const generateEightDPdf = async (req, res) => {
     doc.text("Status", startX + 760, pcaY + 16, { width: 40, align: 'center' });
 
     const pcas = r.CorrectiveActions ? JSON.parse(r.CorrectiveActions) : [];
-    let pRowY = pcaY + 25;
+    let pRowY = pcaY + 26;
     pcas.slice(0, 5).forEach((p) => {
-      doc.rect(startX, pRowY, fullWidth, 14).stroke();
-      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text(p.type || 'Action', startX + 6, pRowY + 4);
-      doc.font("Helvetica").fontSize(6).text(p.action || '-', startX + 80, pRowY + 4, { width: 440, height: 10, ellipsis: true });
-      doc.text(p.who || '-', startX + 530, pRowY + 4);
-      doc.text(p.dueDate ? String(p.dueDate).split('T')[0] : '-', startX + 640, pRowY + 4, { width: 55, align: 'center' });
-      doc.text(p.breakPoint ? String(p.breakPoint).split('T')[0] : '-', startX + 700, pRowY + 4, { width: 55, align: 'center' });
-      doc.font("Helvetica-Bold").text(`L-${p.status || 1}`, startX + 760, pRowY + 4, { width: 40, align: 'center' });
-      pRowY += 14;
+      doc.rect(startX, pRowY, fullWidth, 15.5).stroke();
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text(p.type || 'Action', startX + 6, pRowY + 4.5);
+      doc.font("Helvetica").fontSize(6).text(p.action || '-', startX + 80, pRowY + 4.5, { width: 440, height: 11, ellipsis: true });
+      doc.text(p.who || '-', startX + 530, pRowY + 4.5);
+      doc.text(p.dueDate ? String(p.dueDate).split('T')[0] : '-', startX + 640, pRowY + 4.5, { width: 55, align: 'center' });
+      doc.text(p.breakPoint ? String(p.breakPoint).split('T')[0] : '-', startX + 700, pRowY + 4.5, { width: 55, align: 'center' });
+      doc.font("Helvetica-Bold").text(`L-${p.status || 1}`, startX + 760, pRowY + 4.5, { width: 40, align: 'center' });
+      pRowY += 15.5;
     });
 
-    // 4. (7) VERIFICATION QUESTIONS & (7a) LESSONS LEARNED (Height: 74)
-    const verY = 319;
-    doc.rect(startX, verY, fullWidth, 74).stroke();
+    // 4. (7) VERIFICATION QUESTIONS & (7a) LESSONS LEARNED (Height: 78)
+    const verY = 331;
+    doc.rect(startX, verY, fullWidth, 78).stroke();
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(7) Verification & Resolution Questions:", startX + 6, verY + 3);
 
     // Questions checklist table (left)
@@ -1249,23 +1255,22 @@ const generateEightDPdf = async (req, res) => {
     ];
 
     const qTableW = 420;
-    doc.rect(startX + 4, verY + 13, qTableW, 10).fillAndStroke('#f3f4f6', '#9ca3af');
+    doc.rect(startX + 4, verY + 13, qTableW, 11).fillAndStroke('#f3f4f6', '#9ca3af');
     doc.fillColor('black').font("Helvetica-Bold").fontSize(5.5);
-    doc.text("Question", startX + 6, verY + 15, { width: 330 });
-    doc.text("Y", startX + 345, verY + 15, { width: 20, align: 'center' });
-    doc.text("N", startX + 370, verY + 15, { width: 20, align: 'center' });
-    doc.text("N/A", startX + 395, verY + 15, { width: 25, align: 'center' });
+    doc.text("Question", startX + 6, verY + 16, { width: 330 });
+    doc.text("Y", startX + 345, verY + 16, { width: 20, align: 'center' });
+    doc.text("N", startX + 370, verY + 16, { width: 20, align: 'center' });
+    doc.text("N/A", startX + 395, verY + 16, { width: 25, align: 'center' });
 
-    let qRowY = verY + 23;
+    let qRowY = verY + 24;
     qList.forEach((q) => {
-      doc.rect(startX + 4, qRowY, qTableW, 8).stroke();
+      doc.rect(startX + 4, qRowY, qTableW, 8.5).stroke();
       doc.font("Helvetica").fontSize(5.5).fillColor('#111827').text(q.text, startX + 6, qRowY + 2, { width: 330 });
       const val = vq[q.key] || '';
 
-      // Clean vector tick function
       const drawTick = (cx, cy) => {
         doc.save();
-        doc.lineWidth(1.1).strokeColor('#16a34a'); // Green checkmark
+        doc.lineWidth(1.1).strokeColor('#16a34a');
         doc.moveTo(cx - 2.8, cy + 0.2)
            .lineTo(cx - 0.8, cy + 2.2)
            .lineTo(cx + 3.0, cy - 2.2)
@@ -1273,34 +1278,34 @@ const generateEightDPdf = async (req, res) => {
         doc.restore();
       };
 
-      const cellCenterY = qRowY + 4;
+      const cellCenterY = qRowY + 4.25;
       if (val === 'Y') drawTick(startX + 345 + 10, cellCenterY);
       if (val === 'N') drawTick(startX + 370 + 10, cellCenterY);
       if (val === 'N/A') drawTick(startX + 395 + 12.5, cellCenterY);
 
-      qRowY += 8;
+      qRowY += 8.5;
     });
 
     // Right: Lessons Learned
     const rightVerX = startX + qTableW + 12;
     const rightVerW = fullWidth - qTableW - 16;
-    doc.rect(rightVerX, verY + 13, rightVerW, 58).stroke();
+    doc.rect(rightVerX, verY + 13, rightVerW, 61).stroke();
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827').text("(7a) Lessons Learned:", rightVerX + 4, verY + 16);
     doc.font("Helvetica").fontSize(6).fillColor('#374151')
-      .text(r.LessonsLearned || vq.lessonsLearned || "None documented", rightVerX + 4, verY + 26, { width: rightVerW - 8, height: 40, ellipsis: true });
+      .text(r.LessonsLearned || vq.lessonsLearned || "None documented", rightVerX + 4, verY + 26, { width: rightVerW - 8, height: 44, ellipsis: true });
 
     // 5. ISSUE RESOLVED SATISFACTORILY BAR (Height: 14)
-    const resBarY = 395;
+    const resBarY = 412;
     doc.rect(startX, resBarY, fullWidth, 14).fillAndStroke('#f8fafc', '#1f2937');
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#111827')
       .text(`Issue Resolved satisfactorily?  ${r.IssueResolved || vq.issueResolved || '-'}     |     Date Closed: ${r.DateClosed ? new Date(r.DateClosed).toLocaleDateString('en-GB') : (vq.dateClosed || '-')}     |     Assigned to: ${r.AssignedTo || vq.assignedTo || '-'}     |     Tracking #: ${r.TrackingNo || vq.trackingNo || '-'}`, startX + 6, resBarY + 3.5);
 
-    // 6. (7b) EFFECTIVENESS MONITORING & (7c) HORIZONTAL DEPLOYMENT (Height: 48)
-    const sec7bcY = 412;
+    // 6. (7b) EFFECTIVENESS MONITORING & (7c) HORIZONTAL DEPLOYMENT (Height: 52)
+    const sec7bcY = 429;
     const half7W = (fullWidth - 8) / 2;
 
     // (7b) Effectiveness
-    doc.rect(startX, sec7bcY, half7W, 48).stroke();
+    doc.rect(startX, sec7bcY, half7W, 52).stroke();
     doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("(7b) Effectiveness Monitoring (up to 3 months):", startX + 6, sec7bcY + 3);
 
     let effList = [];
@@ -1314,84 +1319,57 @@ const generateEightDPdf = async (req, res) => {
     const m3 = effList[2] || {};
 
     const effTabY = sec7bcY + 13;
-    doc.rect(startX + 4, effTabY, half7W - 8, 8).fillAndStroke('#f3f4f6', '#9ca3af');
+    doc.rect(startX + 4, effTabY, half7W - 8, 9).fillAndStroke('#f3f4f6', '#9ca3af');
     doc.font("Helvetica-Bold").fontSize(5.5).fillColor('black');
-    doc.text("Metric", startX + 6, effTabY + 2, { width: 80 });
-    doc.text(m1.month || "Month 1", startX + 90, effTabY + 2, { width: 90, align: 'center' });
-    doc.text(m2.month || "Month 2", startX + 185, effTabY + 2, { width: 90, align: 'center' });
-    doc.text(m3.month || "Month 3", startX + 280, effTabY + 2, { width: 90, align: 'center' });
+    doc.text("Metric", startX + 6, effTabY + 2.5, { width: 80 });
+    doc.text(m1.month || "Month 1", startX + 90, effTabY + 2.5, { width: 90, align: 'center' });
+    doc.text(m2.month || "Month 2", startX + 185, effTabY + 2.5, { width: 90, align: 'center' });
+    doc.text(m3.month || "Month 3", startX + 280, effTabY + 2.5, { width: 90, align: 'center' });
 
     const drawEffRow = (ey, label, v1, v2, v3) => {
-      doc.rect(startX + 4, ey, half7W - 8, 8).stroke();
-      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(label, startX + 6, ey + 2);
+      doc.rect(startX + 4, ey, half7W - 8, 9).stroke();
+      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(label, startX + 6, ey + 2.5);
       doc.font("Helvetica").fontSize(5.5);
-      doc.text(String(v1 || '-'), startX + 90, ey + 2, { width: 90, align: 'center' });
-      doc.text(String(v2 || '-'), startX + 185, ey + 2, { width: 90, align: 'center' });
-      doc.text(String(v3 || '-'), startX + 280, ey + 2, { width: 90, align: 'center' });
+      doc.text(String(v1 || '-'), startX + 90, ey + 2.5, { width: 90, align: 'center' });
+      doc.text(String(v2 || '-'), startX + 185, ey + 2.5, { width: 90, align: 'center' });
+      doc.text(String(v3 || '-'), startX + 280, ey + 2.5, { width: 90, align: 'center' });
     };
-    drawEffRow(effTabY + 8, "Rej Qty", m1.rejQty, m2.rejQty, m3.rejQty);
-    drawEffRow(effTabY + 16, "Rej %", m1.rejPct, m2.rejPct, m3.rejPct);
+    drawEffRow(effTabY + 9, "Rej Qty", m1.rejQty, m2.rejQty, m3.rejQty);
+    drawEffRow(effTabY + 18, "Rej %", m1.rejPct, m2.rejPct, m3.rejPct);
 
     // (7c) Horizontal Deployment
-    doc.rect(startX + half7W + 8, sec7bcY, half7W, 48).stroke();
+    doc.rect(startX + half7W + 8, sec7bcY, half7W, 52).stroke();
     doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("(7c) Horizontal Deployment:", startX + half7W + 14, sec7bcY + 3);
     doc.font("Helvetica").fontSize(6).fillColor('#374151')
-      .text(r.HorizontalDeployment || vq.horizontalDeployment || "None documented", startX + half7W + 14, sec7bcY + 14, { width: half7W - 20, height: 30, ellipsis: true });
+      .text(r.HorizontalDeployment || vq.horizontalDeployment || "None documented", startX + half7W + 14, sec7bcY + 15, { width: half7W - 20, height: 32, ellipsis: true });
 
-    // 7. (8) CLOSURE SIGN-OFF SECTION (Height: 46)
-    const csoY = 462;
-    doc.rect(startX, csoY, fullWidth, 46).stroke();
-    doc.font("Helvetica-Bold").fontSize(7).fillColor('#111827').text("(8) Closure Sign-off:", startX + 6, csoY + 3);
-    doc.font("Helvetica-Bold").fontSize(6.5).fillColor('#4b5563').text("APPROVALS", startX + fullWidth - 80, csoY + 3);
+    // 7. (8) CLOSURE SIGN-OFF SECTION (Expanded Height: 78)
+    const csoY = 484;
+    doc.rect(startX, csoY, fullWidth, 78).stroke();
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#111827').text("(8) Closure Sign-off Matrix:", startX + 6, csoY + 3);
 
-    const csoHeadY = csoY + 12;
-    doc.rect(startX, csoHeadY, fullWidth, 9).fillAndStroke('#f3f4f6', '#1f2937');
-    doc.font("Helvetica-Bold").fontSize(5.5).fillColor('black');
-    doc.text("Shift", startX + 6, csoHeadY + 2, { width: 70 });
-    doc.text("Team Members Involved", startX + 80, csoHeadY + 2, { width: 380 });
-    doc.text("Team Leader / Group Leader", startX + 470, csoHeadY + 2, { width: 160, align: 'center' });
-    doc.text("Production / Quality Head", startX + 640, csoHeadY + 2, { width: 160, align: 'center' });
+    const csoHeadY = csoY + 14;
+    doc.rect(startX, csoHeadY, fullWidth, 12).fillAndStroke('#f3f4f6', '#1f2937');
+    doc.font("Helvetica-Bold").fontSize(6).fillColor('black');
+    doc.text("Team Members Involved", startX + 6, csoHeadY + 3, { width: 450 });
+    doc.text("Team Leader / Group Leader", startX + 470, csoHeadY + 3, { width: 160, align: 'center' });
+    doc.text("Production / Quality Head", startX + 640, csoHeadY + 3, { width: 160, align: 'center' });
 
     let csoList = vq.closureSignOff || [
-      { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-      { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-      { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+      { teamMembers: "", teamLeader: "", prodQualityHead: "" },
     ];
 
-    let csoRowY = csoHeadY + 9;
+    let csoRowY = csoHeadY + 12;
     csoList.slice(0, 3).forEach((cs) => {
-      doc.rect(startX, csoRowY, fullWidth, 8).stroke();
-      doc.font("Helvetica-Bold").fontSize(5.5).fillColor('#111827').text(cs.shift || '-', startX + 6, csoRowY + 2);
-      doc.font("Helvetica").fontSize(5.5);
-      doc.text(cs.teamMembers || '-', startX + 80, csoRowY + 2, { width: 380, ellipsis: true });
-      doc.text(cs.teamLeader || '-', startX + 470, csoRowY + 2, { width: 160, align: 'center' });
-      doc.text(cs.prodQualityHead || '-', startX + 640, csoRowY + 2, { width: 160, align: 'center' });
-      csoRowY += 8;
+      doc.rect(startX, csoRowY, fullWidth, 16).stroke();
+      doc.font("Helvetica").fontSize(6).fillColor('#111827');
+      doc.text(cs.teamMembers || '-', startX + 6, csoRowY + 5, { width: 450, ellipsis: true });
+      doc.text(cs.teamLeader || '-', startX + 470, csoRowY + 5, { width: 160, align: 'center' });
+      doc.text(cs.prodQualityHead || '-', startX + 640, csoRowY + 5, { width: 160, align: 'center' });
+      csoRowY += 16;
     });
-
-    // 8. SYSTEM DIGITAL VERIFICATION & APPROVAL (Height: 52)
-    const sigY = 510;
-    const sigW = fullWidth / 4;
-    const opSig = r.Sign_ShiftIncharge || r.Sign_TeamLeader;
-    const qcSig = r.Sign_QualityHead;
-    const peSig = r.Sign_ProductionHead;
-    const hofSig = r.Sign_HOFProduction;
-
-    const renderSigBox = (colIdx, title, sigVal) => {
-      const bx = startX + sigW * colIdx;
-      doc.rect(bx, sigY, sigW, 52).stroke();
-      doc.fillColor('#111827').font("Helvetica-Bold").fontSize(6.5).text(title, bx, sigY + 6, { width: sigW, align: 'center' });
-      if (sigVal && !String(sigVal).includes('Pending')) {
-        doc.fillColor('#16a34a').font('Helvetica-Bold').fontSize(7.5).text(`APPROVED (${String(sigVal).toUpperCase()})`, bx, sigY + 26, { width: sigW, align: 'center' });
-      } else {
-        doc.fillColor('#dc2626').font('Helvetica').fontSize(7).text("Pending", bx, sigY + 26, { width: sigW, align: 'center' });
-      }
-    };
-
-    renderSigBox(0, "SHIFT SUPERVISOR (PRODUCTION)", opSig);
-    renderSigBox(1, "SHIFT SUPERVISOR (QUALITY)", qcSig);
-    renderSigBox(2, "PRODUCTION ENGINEER", peSig);
-    renderSigBox(3, "HEAD OF PRODUCTION (HOF)", hofSig);
 
     // Page 2 Footer
     doc.font("Helvetica").fontSize(6.5).fillColor('#6b7280')

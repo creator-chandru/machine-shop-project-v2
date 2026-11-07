@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, FileDown, Plus, Trash2, CheckCircle2, AlertTriangle, Info, Clock, Check } from 'lucide-react';
+import { ArrowLeft, FileDown, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 import Header from '../components/Header';
 
 const formMeta = {
@@ -12,6 +12,29 @@ const formMeta = {
 };
 
 const SPECIAL_CHARS = ["Ø", "±", "°", "×", "≤", "≥", "⌀", "⊥", "∥", "√", "Ra", "~", "'", '"', "µm", "R", "C"];
+
+const FISHBONE_CATS = ["man", "machine", "method", "material"];
+
+// Process flow steps are stored as { text, highlight }. Older records stored plain strings,
+// so every read goes through this helper.
+const normalizeFlowStep = (s) =>
+  typeof s === "string"
+    ? { text: s, highlight: false }
+    : { text: (s && s.text) || "", highlight: Boolean(s && s.highlight) };
+
+const makeInitialFishbone = () => ({
+  man: [{ text: "", side: "left", id: "man-init" }],
+  machine: [{ text: "", side: "left", id: "machine-init" }],
+  method: [{ text: "", side: "left", id: "method-init" }],
+  material: [{ text: "", side: "left", id: "material-init" }],
+  problem: "",
+});
+
+const makeClosureRows = () => [
+  { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+  { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+  { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+];
 
 const getTodayISODate = () => {
   const today = new Date();
@@ -75,34 +98,16 @@ export default function EightDProblemSolvingReport() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
 
-  // Role extraction
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUsername = currentUser?.username || currentUser?.employeeId || "Unknown";
-  const currentUserRole = (currentUser?.role || "").toLowerCase();
-
-  const isShiftIncharge =
-    currentUserRole === "shiftincharge" ||
-    currentUserRole === "supervisor" ||
-    currentUserRole === "operator" ||
-    currentUserRole === "";
-  const isQC = currentUserRole === "qc" || currentUserRole === "qualitycontroller";
-  const isPE =
-    currentUserRole === "pe" ||
-    currentUserRole === "productengineer" ||
-    currentUserRole === "productionengineer";
-  const isHOF =
-    currentUserRole === "hof" ||
-    currentUserRole === "headfacility" ||
-    currentUserRole === "headofproduction";
-
-  const isReadOnlyApprover = isQC || isPE || isHOF;
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSavedRecord, setIsSavedRecord] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "" });
 
-  const isFormLocked = isSavedRecord || isReadOnlyApprover;
+  // Dynamically lock the form fields if an existing record is loaded
+  const isFormLocked = isSavedRecord;
 
   // Master Data Dropdowns
   const [partSets, setPartSets] = useState([]);
@@ -117,6 +122,9 @@ export default function EightDProblemSolvingReport() {
 
   const lookupSeqRef = useRef(0);
   const problemDescRef = useRef(null);
+  const causeIdRef = useRef(0);
+
+  const newCauseId = () => `cause-${Date.now()}-${++causeIdRef.current}`;
 
   const triggerToast = (message, type = "error") => {
     setToast({ message, type });
@@ -157,8 +165,8 @@ export default function EightDProblemSolvingReport() {
   // 2a. Problem Description
   const [problemDescription, setProblemDescription] = useState("");
 
-  // 2b. Process Flow
-  const [processFlow, setProcessFlow] = useState([""]);
+  // 2b. Process Flow (each step: { text, highlight })
+  const [processFlow, setProcessFlow] = useState([{ text: "", highlight: false }]);
 
   // 3. Interim Containment Actions
   const [interimActions, setInterimActions] = useState([
@@ -168,19 +176,10 @@ export default function EightDProblemSolvingReport() {
   ]);
 
   // 4. Fishbone Diagram
-  const [fishbone, setFishbone] = useState({
-    man: [{ text: "", side: "left" }],
-    machine: [{ text: "", side: "left" }],
-    method: [{ text: "", side: "left" }],
-    material: [{ text: "", side: "left" }],
-    problem: "",
-  });
+  const [fishbone, setFishbone] = useState(makeInitialFishbone());
 
   // 4a. Validation Rows
-  const [validationRows, setValidationRows] = useState([
-    { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
-    { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
-  ]);
+  const [validationRows, setValidationRows] = useState([]);
 
   // 4b. 5-Why
   const [fiveWhy, setFiveWhy] = useState({
@@ -228,14 +227,10 @@ export default function EightDProblemSolvingReport() {
       { month: "", rejQty: "", rejPct: "" },
     ],
     horizontalDeployment: "",
-    closureSignOff: [
-      { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-      { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-      { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-    ],
+    closureSignOff: makeClosureRows(),
   });
 
-  // 8. System Digital Approvals
+  // 8. Signatures state
   const [signatures, setSignatures] = useState({
     shiftSupervisorProduction: "",
     shiftSupervisorQuality: "",
@@ -350,6 +345,36 @@ export default function EightDProblemSolvingReport() {
     setQfValue(currentQf);
   }, [header.date, qfHistory]);
 
+  // (4a) Auto-fetch validation rows from fishbone causes (only if not locked)
+  useEffect(() => {
+    if (isFormLocked) return;
+    setValidationRows((prev) => {
+      const byKey = {};
+      prev.forEach((r) => {
+        if (r.causeKey) byKey[r.causeKey] = r;
+      });
+      const next = [];
+      FISHBONE_CATS.forEach((cat) => {
+        (fishbone[cat] || []).forEach((c, idx) => {
+          const text = (typeof c === "string" ? c : c?.text || "").trim();
+          if (!text) return;
+          const key = (typeof c === "object" && c?.id) || `${cat}-${idx}`;
+          const old = byKey[key] || {};
+          next.push({
+            causeKey: key,
+            category: cat,
+            testSimulation: old.testSimulation || "",
+            verification: text,
+            date: old.date || "",
+            significant: old.significant || "",
+            remarks: old.remarks || "",
+          });
+        });
+      });
+      return next;
+    });
+  }, [fishbone, isFormLocked]);
+
   const resetFormToBlank = (keepDate, keepShift, keepPartName, keepPartNo) => {
     setIsSavedRecord(false);
     setProblemScope("");
@@ -365,23 +390,14 @@ export default function EightDProblemSolvingReport() {
     });
     setProblemDescription("");
     setTeamMembers(["", "", "", "", "", ""]);
-    setProcessFlow([""]);
+    setProcessFlow([{ text: "", highlight: false }]);
     setInterimActions([
       { action: "", who: "", dueDate: "", breakPoint: "" },
       { action: "", who: "", dueDate: "", breakPoint: "" },
       { action: "", who: "", dueDate: "", breakPoint: "" },
     ]);
-    setFishbone({
-      man: [{ text: "", side: "left" }],
-      machine: [{ text: "", side: "left" }],
-      method: [{ text: "", side: "left" }],
-      material: [{ text: "", side: "left" }],
-      problem: "",
-    });
-    setValidationRows([
-      { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
-      { testSimulation: "", verification: "", date: "", significant: "", remarks: "" },
-    ]);
+    setFishbone(makeInitialFishbone());
+    setValidationRows([]);
     setFiveWhy({
       occurrence: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
       detection: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
@@ -407,11 +423,7 @@ export default function EightDProblemSolvingReport() {
         { month: "", rejQty: "", rejPct: "" },
       ],
       horizontalDeployment: "",
-      closureSignOff: [
-        { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-        { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-        { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-      ],
+      closureSignOff: makeClosureRows(),
     });
     setSignatures({
       shiftSupervisorProduction: "",
@@ -443,16 +455,19 @@ export default function EightDProblemSolvingReport() {
     if (record.problemScope) setProblemScope(record.problemScope);
     if (record.emergencyActions) setEmergencyActions(record.emergencyActions);
     if (record.problemDescription) setProblemDescription(record.problemDescription);
-    if (record.processFlow && record.processFlow.length > 0) setProcessFlow(record.processFlow);
+    if (record.processFlow && record.processFlow.length > 0) setProcessFlow(record.processFlow.map(normalizeFlowStep));
     if (record.interimActions) setInterimActions(record.interimActions);
     if (record.fishbone) {
-      const normalize = (list = []) =>
-        list.map((item, idx) => (typeof item === "string" ? { text: item, side: idx % 2 === 0 ? "left" : "right" } : item));
+      const normalize = (list = [], cat) =>
+        list.map((item, idx) => {
+          const base = typeof item === "string" ? { text: item, side: idx % 2 === 0 ? "left" : "right" } : item;
+          return { ...base, id: base.id || `${cat}-${idx}` };
+        });
       setFishbone({
-        man: normalize(record.fishbone.man),
-        machine: normalize(record.fishbone.machine),
-        method: normalize(record.fishbone.method),
-        material: normalize(record.fishbone.material),
+        man: normalize(record.fishbone.man, "man"),
+        machine: normalize(record.fishbone.machine, "machine"),
+        method: normalize(record.fishbone.method, "method"),
+        material: normalize(record.fishbone.material, "material"),
         problem: record.fishbone.problem || "",
       });
     }
@@ -472,12 +487,12 @@ export default function EightDProblemSolvingReport() {
               { month: "", rejQty: "", rejPct: "" },
             ],
         closureSignOff: record.verification.closureSignOff && record.verification.closureSignOff.length > 0
-          ? record.verification.closureSignOff
-          : [
-              { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-              { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-              { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-            ],
+          ? record.verification.closureSignOff.map((r) => ({
+              teamMembers: r.teamMembers || "",
+              teamLeader: r.teamLeader || "",
+              prodQualityHead: r.prodQualityHead || "",
+            }))
+          : makeClosureRows(),
       }));
     }
     if (record.signatures) {
@@ -509,7 +524,6 @@ export default function EightDProblemSolvingReport() {
 
         if (Array.isArray(data) && data.length > 0) {
           loadRecordData(data[0]);
-          triggerToast("Existing 8D record loaded (Form locked for editing).", "info");
         } else {
           setIsSavedRecord(false);
         }
@@ -579,7 +593,7 @@ export default function EightDProblemSolvingReport() {
   };
 
   const handlePartBlur = () => {
-    if (header.partNo && header.date && !isSavedRecord) {
+    if (header.partNo && header.date) {
       checkExistingRecord(header.partNo, header.date, header.shift, header.partName);
     }
   };
@@ -598,7 +612,7 @@ export default function EightDProblemSolvingReport() {
     if (isFormLocked) return;
     setFishbone((prev) => ({
       ...prev,
-      [category]: [...prev[category], { text: "", side }],
+      [category]: [...prev[category], { text: "", side, id: newCauseId() }],
     }));
   };
 
@@ -627,62 +641,6 @@ export default function EightDProblemSolvingReport() {
       const updated = prev[category].filter((_, i) => i !== index);
       return { ...prev, [category]: updated };
     });
-  };
-
-  const handleApproveSupervisorProduction = () => {
-    setSignatures((prev) => ({
-      ...prev,
-      shiftSupervisorProduction: currentUsername || "Approved",
-    }));
-    triggerToast("Production supervisor approved successfully.", "success");
-  };
-
-  const handleApproveQc = () => {
-    if (!isQC) {
-      triggerToast("Only QC can verify this record.", "error");
-      return;
-    }
-    if (header.assignedQc && header.assignedQc.toLowerCase() !== currentUsername.toLowerCase()) {
-      triggerToast(`Assigned to QC: ${header.assignedQc.toUpperCase()}`, "error");
-      return;
-    }
-    setSignatures((prev) => ({
-      ...prev,
-      shiftSupervisorQuality: currentUsername,
-    }));
-    triggerToast("QC Verification Approved!", "success");
-  };
-
-  const handleApprovePe = () => {
-    if (!isPE) {
-      triggerToast("Only Production Engineer can approve this record.", "error");
-      return;
-    }
-    if (header.assignedPe && header.assignedPe.toLowerCase() !== currentUsername.toLowerCase()) {
-      triggerToast(`Assigned to PE: ${header.assignedPe.toUpperCase()}`, "error");
-      return;
-    }
-    setSignatures((prev) => ({
-      ...prev,
-      productionEngineer: currentUsername,
-    }));
-    triggerToast("Production Engineer Approved!", "success");
-  };
-
-  const handleApproveHof = () => {
-    if (!isHOF) {
-      triggerToast("Only HOF can approve this record.", "error");
-      return;
-    }
-    if (header.assignedHof && header.assignedHof.toLowerCase() !== currentUsername.toLowerCase()) {
-      triggerToast(`Assigned to HOF: ${header.assignedHof.toUpperCase()}`, "error");
-      return;
-    }
-    setSignatures((prev) => ({
-      ...prev,
-      hofProduction: currentUsername,
-    }));
-    triggerToast("HOF Production Approved!", "success");
   };
 
   const handleDownloadPdf = async () => {
@@ -726,28 +684,10 @@ export default function EightDProblemSolvingReport() {
   };
 
   const handleSave = async () => {
+    if (isFormLocked) return;
     if (!header.partNo || !header.partName) {
       triggerToast("Please enter Part Name and Part No.", "error");
       return;
-    }
-
-    if (isShiftIncharge && !isSavedRecord) {
-      if (!signatures.shiftSupervisorProduction) {
-        triggerToast("Please click 'Approve' under SHIFT SUPERVISOR (PRODUCTION) before submitting.", "error");
-        return;
-      }
-      if (!header.assignedQc) {
-        triggerToast("Please select a QC in 'SHIFT SUPERVISOR (QUALITY)'.", "error");
-        return;
-      }
-      if (!header.assignedPe) {
-        triggerToast("Please select a PE in 'PRODUCTION ENGINEER'.", "error");
-        return;
-      }
-      if (!header.assignedHof) {
-        triggerToast("Please select a HOF in 'HOF - PRODUCTION'.", "error");
-        return;
-      }
     }
 
     const token = localStorage.getItem("token");
@@ -775,9 +715,9 @@ export default function EightDProblemSolvingReport() {
       verification,
       signatures: {
         shiftSupervisorProduction: signatures.shiftSupervisorProduction || currentUsername,
-        shiftSupervisorQuality: isQC ? currentUsername : signatures.shiftSupervisorQuality || "Pending",
-        productionEngineer: isPE ? currentUsername : signatures.productionEngineer || "Pending",
-        hofProduction: isHOF ? currentUsername : signatures.hofProduction || "Pending",
+        shiftSupervisorQuality: signatures.shiftSupervisorQuality || "Pending",
+        productionEngineer: signatures.productionEngineer || "Pending",
+        hofProduction: signatures.hofProduction || "Pending",
         teamLeader: signatures.shiftSupervisorProduction || currentUsername,
         productionHead: signatures.productionEngineer || "Pending",
         qualityHead: signatures.shiftSupervisorQuality || "Pending",
@@ -802,45 +742,13 @@ export default function EightDProblemSolvingReport() {
       triggerToast("8D Problem Solving Report saved successfully!", "success");
 
       setTimeout(() => {
-        navigate(
-          isQC
-            ? `/qc/${shopId || 3}`
-            : isPE
-            ? `/production-engineer/${shopId || 3}`
-            : isHOF
-            ? `/hof/${shopId || 3}`
-            : `/shift-incharge/${shopId || 3}`
-        );
+        navigate(-1);
       }, 1200);
     } catch (err) {
       setIsSaving(false);
       triggerToast(err.message || "Failed to save record", "error");
     }
   };
-
-  const isSupervisorProductionApproved = Boolean(
-    signatures.shiftSupervisorProduction &&
-      signatures.shiftSupervisorProduction !== "Pending" &&
-      signatures.shiftSupervisorProduction !== ""
-  );
-
-  const isQcApproved = Boolean(
-    signatures.shiftSupervisorQuality &&
-      signatures.shiftSupervisorQuality !== "Pending" &&
-      signatures.shiftSupervisorQuality !== ""
-  );
-
-  const isPeApproved = Boolean(
-    signatures.productionEngineer &&
-      signatures.productionEngineer !== "Pending" &&
-      signatures.productionEngineer !== ""
-  );
-
-  const isHofApproved = Boolean(
-    signatures.hofProduction &&
-      signatures.hofProduction !== "Pending" &&
-      signatures.hofProduction !== ""
-  );
 
   return (
     <div className="min-h-screen bg-[#2d2d2d] flex flex-col items-center justify-start p-3 sm:p-6 lg:p-8 font-sans antialiased">
@@ -855,15 +763,6 @@ export default function EightDProblemSolvingReport() {
               <>
                 <div className="w-12 h-12 border-4 border-gray-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-4"></div>
                 <h2 className="text-lg font-bold text-gray-900 tracking-wide">Saving 8D Report...</h2>
-                <p className="text-xs text-gray-500 mt-1 font-medium">
-                  {isShiftIncharge
-                    ? "Submitting for QC, PE & HOF Verification"
-                    : isQC
-                    ? "Completing QC Verification"
-                    : isPE
-                    ? "Completing PE Verification"
-                    : "Completing HOF Approval"}
-                </p>
               </>
             ) : (
               <>
@@ -871,7 +770,7 @@ export default function EightDProblemSolvingReport() {
                   <CheckCircle2 className="w-7 h-7" />
                 </div>
                 <h2 className="text-lg font-bold text-green-800 tracking-wide">Report Saved Successfully</h2>
-                <p className="text-xs text-gray-500 mt-1 font-medium">Redirecting to dashboard...</p>
+                <p className="text-xs text-gray-500 mt-1 font-medium">Redirecting...</p>
               </>
             )}
           </div>
@@ -899,7 +798,7 @@ export default function EightDProblemSolvingReport() {
                 </span>
                 {isSavedRecord && (
                   <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full uppercase border border-red-200">
-                    Locked Record
+                    Existing Record (Locked)
                   </span>
                 )}
               </div>
@@ -980,9 +879,8 @@ export default function EightDProblemSolvingReport() {
                   <input
                     type="text"
                     list="partNameList"
-                    disabled={isFormLocked}
                     placeholder="Type or select Part Name"
-                    className="w-full border border-gray-300 p-2 rounded-lg font-bold bg-white disabled:bg-gray-100 disabled:text-gray-700 text-xs focus:outline-none focus:border-orange-500 transition-all"
+                    className="w-full border border-gray-300 p-2 rounded-lg font-bold bg-white text-xs focus:outline-none focus:border-orange-500 transition-all"
                     value={header.partName}
                     onChange={(e) => handlePartManualChange("partName", e.target.value)}
                     onBlur={handlePartBlur}
@@ -995,8 +893,8 @@ export default function EightDProblemSolvingReport() {
                     ))}
                   </datalist>
                   <select
-                    disabled={isFormLocked || loadingPartSets}
-                    className="w-full border border-gray-300 p-1.5 rounded-lg font-medium bg-white text-xs cursor-pointer disabled:bg-gray-100 text-gray-700 focus:outline-none"
+                    disabled={loadingPartSets}
+                    className="w-full border border-gray-300 p-1.5 rounded-lg font-medium bg-white text-xs cursor-pointer text-gray-700 focus:outline-none"
                     value={partSets.some((p) => p.PartName === header.partName) ? header.partName : ""}
                     onChange={(e) => handlePartSelectChange("partName", e.target.value)}
                   >
@@ -1016,9 +914,8 @@ export default function EightDProblemSolvingReport() {
                   <input
                     type="text"
                     list="partNoList"
-                    disabled={isFormLocked}
                     placeholder="Type or select Part No"
-                    className="w-full border border-gray-300 p-2 rounded-lg font-bold bg-white disabled:bg-gray-100 disabled:text-gray-700 text-xs focus:outline-none focus:border-orange-500 transition-all"
+                    className="w-full border border-gray-300 p-2 rounded-lg font-bold bg-white text-xs focus:outline-none focus:border-orange-500 transition-all"
                     value={header.partNo}
                     onChange={(e) => handlePartManualChange("partNo", e.target.value)}
                     onBlur={handlePartBlur}
@@ -1031,8 +928,8 @@ export default function EightDProblemSolvingReport() {
                     ))}
                   </datalist>
                   <select
-                    disabled={isFormLocked || loadingPartSets}
-                    className="w-full border border-gray-300 p-1.5 rounded-lg font-medium bg-white text-xs cursor-pointer disabled:bg-gray-100 text-gray-700 focus:outline-none"
+                    disabled={loadingPartSets}
+                    className="w-full border border-gray-300 p-1.5 rounded-lg font-medium bg-white text-xs cursor-pointer text-gray-700 focus:outline-none"
                     value={partSets.some((p) => p.PartNo === header.partNo) ? header.partNo : ""}
                     onChange={(e) => handlePartSelectChange("partNo", e.target.value)}
                   >
@@ -1091,7 +988,7 @@ export default function EightDProblemSolvingReport() {
                     type="text"
                     disabled={isFormLocked}
                     placeholder="Specify who found problem..."
-                    className="mt-2 w-full border border-gray-300 p-2 rounded-lg font-semibold bg-white disabled:bg-gray-100 focus:outline-none focus:border-orange-500"
+                    className="mt-2 w-full border border-gray-300 p-2 rounded-lg font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-700 focus:outline-none focus:border-orange-500"
                     value={header.problemFoundByOther || ""}
                     onChange={(e) => setHeader({ ...header, problemFoundByOther: e.target.value })}
                   />
@@ -1164,9 +1061,9 @@ export default function EightDProblemSolvingReport() {
                   disabled={isFormLocked}
                   checked={emergencyActions.qualityAlert}
                   onChange={(e) => setEmergencyActions({ ...emergencyActions, qualityAlert: e.target.checked })}
-                  className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500 cursor-pointer"
+                  className="w-4 h-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500 cursor-pointer disabled:cursor-not-allowed"
                 />
-                <label htmlFor="qualityAlert" className="text-xs font-bold text-gray-800 cursor-pointer select-none">
+                <label htmlFor="qualityAlert" className={`text-xs font-bold text-gray-800 select-none ${isFormLocked ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
                   Quality Alert Issued
                 </label>
               </div>
@@ -1331,8 +1228,8 @@ export default function EightDProblemSolvingReport() {
                 {!isFormLocked && (
                   <button
                     type="button"
-                    onClick={() => setProcessFlow([...processFlow, ""])}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 hover:text-orange-700 bg-orange-50 px-2.5 py-1 rounded-lg border border-orange-200 transition-all"
+                    onClick={() => setProcessFlow([...processFlow.map(normalizeFlowStep), { text: "", highlight: false }])}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 hover:text-orange-700 bg-orange-50 px-2.5 py-1 rounded-lg border border-orange-200 transition-all cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" /> Add Step
                   </button>
@@ -1340,7 +1237,10 @@ export default function EightDProblemSolvingReport() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 p-3.5 bg-gray-50/60 border border-gray-200 rounded-xl min-h-[160px] max-w-full overflow-hidden">
-                {processFlow.map((step, sIdx) => {
+                {processFlow.map((rawStep, sIdx) => {
+                  const stepObj = normalizeFlowStep(rawStep);
+                  const step = stepObj.text;
+                  const isHighlighted = stepObj.highlight;
                   const charCount = (step || "").length;
                   const boxWidth = Math.min(220, Math.max(90, charCount * 8.5 + 24));
 
@@ -1348,7 +1248,7 @@ export default function EightDProblemSolvingReport() {
                     <React.Fragment key={`step-${sIdx}`}>
                       <div
                         style={{ width: `${boxWidth}px`, maxWidth: "100%" }}
-                        className="relative group border-2 border-gray-800 rounded-xl px-2.5 py-2 text-[11px] font-black text-center bg-white flex items-center justify-center transition-all shadow-sm box-border"
+                        className={`relative group border-2 border-gray-800 rounded-xl px-2.5 py-2 text-[11px] font-black text-center ${isHighlighted ? "bg-yellow-200" : "bg-white"} flex items-center justify-center transition-all shadow-sm box-border`}
                       >
                         <textarea
                           rows={1}
@@ -1356,8 +1256,8 @@ export default function EightDProblemSolvingReport() {
                           placeholder={`Step ${sIdx + 1}`}
                           value={step}
                           onChange={(e) => {
-                            const updated = [...processFlow];
-                            updated[sIdx] = e.target.value;
+                            const updated = processFlow.map(normalizeFlowStep);
+                            updated[sIdx] = { ...updated[sIdx], text: e.target.value };
                             setProcessFlow(updated);
                           }}
                           onInput={(e) => {
@@ -1372,6 +1272,20 @@ export default function EightDProblemSolvingReport() {
                           }}
                           className="w-full bg-transparent text-center outline-none text-[11px] font-bold uppercase disabled:text-gray-700 resize-none overflow-hidden leading-tight [overflow-wrap:anywhere] break-all px-0.5"
                         />
+                        {!isFormLocked && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = processFlow.map(normalizeFlowStep);
+                              updated[sIdx] = { ...updated[sIdx], highlight: !updated[sIdx].highlight };
+                              setProcessFlow(updated);
+                            }}
+                            title={isHighlighted ? "Remove highlight" : "Highlight this step"}
+                            className={`absolute -top-2 -left-2 ${isHighlighted ? "bg-yellow-400 text-gray-900" : "bg-gray-800 text-white"} rounded-full w-4 h-4 text-[9px] font-black hidden group-hover:flex group-focus-within:flex items-center justify-center shadow z-10 cursor-pointer`}
+                          >
+                            H
+                          </button>
+                        )}
                         {!isFormLocked && processFlow.length > 1 && (
                           <button
                             type="button"
@@ -1391,7 +1305,7 @@ export default function EightDProblemSolvingReport() {
               </div>
             </div>
             <span className="text-[11px] text-gray-500 italic mt-2">
-              * Process step sequence. Arrows indicate flow direction.
+              * Process step sequence. Arrows indicate flow direction. Hover a step and click H to highlight it.
             </span>
           </div>
         </div>
@@ -1760,22 +1674,16 @@ export default function EightDProblemSolvingReport() {
 
         {/* (4a) VALIDATION OF POTENTIAL CAUSES */}
         <div className="bg-white rounded-xl border border-gray-300 p-5 space-y-4 shadow-sm">
-          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-gray-200 pb-2">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
               <span className="font-extrabold text-gray-900 text-xs sm:text-sm uppercase tracking-wide">
                 (4a) Validation of Potential Causes
               </span>
             </div>
-            {!isFormLocked && (
-              <button
-                type="button"
-                onClick={() => setValidationRows([...validationRows, { testSimulation: "", verification: "", date: "", significant: "", remarks: "" }])}
-                className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Row
-              </button>
-            )}
+            <span className="text-xs text-gray-500 italic">
+              * Potential causes are fetched automatically from the Cause & Effect Diagram above.
+            </span>
           </div>
 
           <div className="overflow-x-auto border border-gray-200 rounded-lg">
@@ -1790,8 +1698,15 @@ export default function EightDProblemSolvingReport() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
+                {validationRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-4 text-gray-500 italic font-medium">
+                      No causes entered yet. Add causes in the Cause & Effect Diagram above and they will appear here.
+                    </td>
+                  </tr>
+                )}
                 {validationRows.map((row, idx) => (
-                  <tr key={`val-${idx}`} className="hover:bg-gray-50/50">
+                  <tr key={`val-${row.causeKey || idx}`} className="hover:bg-gray-50/50">
                     <td className="p-2 text-left">
                       <input
                         type="text"
@@ -1807,18 +1722,16 @@ export default function EightDProblemSolvingReport() {
                       />
                     </td>
                     <td className="p-2 text-left border-l border-gray-200">
-                      <input
-                        type="text"
-                        disabled={isFormLocked}
-                        placeholder="Outcome of verification"
-                        className="w-full font-medium text-xs outline-none p-1 bg-transparent focus:bg-white rounded disabled:bg-gray-100 disabled:text-gray-700"
-                        value={row.verification}
-                        onChange={(e) => {
-                          const updated = [...validationRows];
-                          updated[idx].verification = e.target.value;
-                          setValidationRows(updated);
-                        }}
-                      />
+                      <div className="flex items-center gap-2">
+                        {row.category && (
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider bg-orange-50 text-orange-800 border border-orange-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                            {row.category}
+                          </span>
+                        )}
+                        <span className="font-medium text-xs text-gray-900 [overflow-wrap:anywhere]">
+                          {row.verification || "-"}
+                        </span>
+                      </div>
                     </td>
                     <td className="p-1 border-l border-gray-200">
                       <input
@@ -2189,7 +2102,7 @@ export default function EightDProblemSolvingReport() {
                               name={q.key}
                               checked={verification[q.key] === opt}
                               onChange={() => setVerification({ ...verification, [q.key]: opt })}
-                              className="w-3.5 h-3.5 text-orange-600 focus:ring-orange-500 cursor-pointer"
+                              className="w-3.5 h-3.5 text-orange-600 focus:ring-orange-500 cursor-pointer disabled:cursor-not-allowed"
                             />
                           </td>
                         ))}
@@ -2395,41 +2308,39 @@ export default function EightDProblemSolvingReport() {
                   (8) Closure Sign-off Matrix
                 </span>
               </div>
-              <span className="font-bold text-gray-500 uppercase tracking-wider text-[11px]">Shift-wise Approvals</span>
+              {!isFormLocked && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVerification({
+                      ...verification,
+                      closureSignOff: [
+                        ...(verification.closureSignOff || []),
+                        { teamMembers: "", teamLeader: "", prodQualityHead: "" },
+                      ],
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Row
+                </button>
+              )}
             </div>
 
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <table className="w-full text-center text-xs min-w-[700px]">
                 <thead className="bg-gray-100 font-extrabold text-gray-800 uppercase tracking-wider text-[11px] border-b border-gray-200">
                   <tr>
-                    <th className="p-3 w-[15%]">Shift</th>
-                    <th className="p-3 w-[45%] text-left border-l border-gray-200">Team Members Involved</th>
-                    <th className="p-3 w-[20%] border-l border-gray-200">Team / Group Leader</th>
-                    <th className="p-3 w-[20%] border-l border-gray-200">Production / Quality Head</th>
+                    <th className="p-3 w-[50%] text-left">Team Members Involved</th>
+                    <th className="p-3 w-[22%] border-l border-gray-200">Team / Group Leader</th>
+                    <th className="p-3 w-[22%] border-l border-gray-200">Production / Quality Head</th>
+                    {!isFormLocked && <th className="p-3 w-[6%] border-l border-gray-200">Del</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {(verification.closureSignOff || [
-                    { shift: "1ST", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-                    { shift: "2ND", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-                    { shift: "3RD", teamMembers: "", teamLeader: "", prodQualityHead: "" },
-                  ]).map((row, sIdx) => (
+                  {(verification.closureSignOff || makeClosureRows()).map((row, sIdx) => (
                     <tr key={`closure-${sIdx}`} className="hover:bg-gray-50/50">
-                      <td className="p-2 font-bold bg-gray-50 text-gray-800">
-                        <input
-                          type="text"
-                          disabled={isFormLocked}
-                          className="w-full text-center outline-none text-xs font-bold bg-transparent disabled:bg-gray-100 disabled:text-gray-700"
-                          value={row.shift || ""}
-                          placeholder={`Shift ${sIdx + 1}`}
-                          onChange={(e) => {
-                            const cso = [...(verification.closureSignOff || [])];
-                            cso[sIdx] = { ...cso[sIdx], shift: e.target.value };
-                            setVerification({ ...verification, closureSignOff: cso });
-                          }}
-                        />
-                      </td>
-                      <td className="p-1 text-left border-l border-gray-200">
+                      <td className="p-1 text-left">
                         <input
                           type="text"
                           disabled={isFormLocked}
@@ -2471,240 +2382,27 @@ export default function EightDProblemSolvingReport() {
                           }}
                         />
                       </td>
+                      {!isFormLocked && (
+                        <td className="p-1 border-l border-gray-200">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVerification({
+                                ...verification,
+                                closureSignOff: (verification.closureSignOff || []).filter((_, i) => i !== sIdx),
+                              })
+                            }
+                            className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mx-auto" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-
-        {/* SYSTEM DIGITAL SIGNATURES & VERIFICATION WORKFLOW */}
-        <div className="bg-white rounded-xl border border-gray-300 p-5 space-y-4 shadow-sm">
-          <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
-            <span className="font-extrabold text-gray-900 text-xs sm:text-sm uppercase tracking-wide">
-              Authorization & Multi-Role Verification Matrix
-            </span>
-          </div>
-
-          <div className="overflow-x-auto border border-gray-200 rounded-lg">
-            <table className="w-full text-xs text-center min-w-[800px]">
-              <thead>
-                <tr className="bg-gray-100 font-extrabold text-gray-800 uppercase tracking-wider text-[11px] border-b border-gray-200">
-                  <th className="p-3 w-1/4">SHIFT SUPERVISOR (PRODUCTION)</th>
-                  <th className="p-3 w-1/4 border-l border-gray-200">SHIFT SUPERVISOR (QUALITY)</th>
-                  <th className="p-3 w-1/4 border-l border-gray-200">PRODUCTION ENGINEER</th>
-                  <th className="p-3 w-1/4 border-l border-gray-200">HOF - PRODUCTION</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="h-20">
-                  {/* 1. Shift Supervisor (Production) */}
-                  <td className="p-3 text-center align-middle bg-gray-50/30">
-                    {isSupervisorProductionApproved ? (
-                      <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider">
-                          Approved By ✓
-                        </span>
-                        <span className="text-xs font-black text-gray-900 uppercase mt-0.5">
-                          {signatures.shiftSupervisorProduction}
-                        </span>
-                      </div>
-                    ) : isShiftIncharge ? (
-                      <button
-                        type="button"
-                        onClick={handleApproveSupervisorProduction}
-                        className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-5 py-2 rounded-lg shadow hover:shadow-md transition-all uppercase tracking-wider cursor-pointer"
-                      >
-                        Approve
-                      </button>
-                    ) : (
-                      <span className="text-gray-400 text-xs italic font-medium">
-                        Pending Shift Incharge
-                      </span>
-                    )}
-                  </td>
-
-                  {/* 2. Shift Supervisor (Quality) */}
-                  <td className="p-3 text-center align-middle bg-gray-50/30 border-l border-gray-200">
-                    {isQcApproved ? (
-                      <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider">
-                          Approved By ✓
-                        </span>
-                        <span className="text-xs font-black text-gray-900 uppercase mt-0.5">
-                          approved by {signatures.shiftSupervisorQuality}
-                        </span>
-                      </div>
-                    ) : isQC ? (
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={handleApproveQc}
-                          className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-5 py-2 rounded-lg shadow uppercase tracking-wider cursor-pointer transition-all"
-                        >
-                          Approve QC
-                        </button>
-                        {header.assignedQc && (
-                          <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                            (Assigned: {header.assignedQc})
-                          </span>
-                        )}
-                      </div>
-                    ) : isSavedRecord ? (
-                      <div className="flex flex-col items-center justify-center">
-                        <span className="text-red-600 text-xs font-bold uppercase tracking-wider">
-                          pending
-                        </span>
-                        {header.assignedQc && (
-                          <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
-                            (Assigned: {header.assignedQc})
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1 w-full max-w-xs mx-auto">
-                        <select
-                          className="w-full bg-white border border-gray-300 p-2 rounded-lg font-bold text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-center disabled:bg-gray-100 cursor-pointer transition-all"
-                          value={header.assignedQc || ""}
-                          onChange={(e) => setHeader({ ...header, assignedQc: e.target.value })}
-                          disabled={isSavedRecord}
-                        >
-                          <option value="">-- Select QC Incharge --</option>
-                          {qcUsers.map((qc, qIdx) => {
-                            const uname = qc.username || qc.employeeId || qc.name;
-                            return (
-                              <option key={`${uname}-${qIdx}`} value={uname}>
-                                {uname.toUpperCase()}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    )}
-                  </td>
-
-                  {/* 3. Production Engineer */}
-                  <td className="p-3 text-center align-middle bg-gray-50/30 border-l border-gray-200">
-                    {isPeApproved ? (
-                      <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider">
-                          Approved By ✓
-                        </span>
-                        <span className="text-xs font-black text-gray-900 uppercase mt-0.5">
-                          approved by {signatures.productionEngineer}
-                        </span>
-                      </div>
-                    ) : isPE ? (
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={handleApprovePe}
-                          className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-5 py-2 rounded-lg shadow uppercase tracking-wider cursor-pointer transition-all"
-                        >
-                          Approve PE
-                        </button>
-                        {header.assignedPe && (
-                          <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                            (Assigned: {header.assignedPe})
-                          </span>
-                        )}
-                      </div>
-                    ) : isSavedRecord ? (
-                      <div className="flex flex-col items-center justify-center">
-                        <span className="text-red-600 text-xs font-bold uppercase tracking-wider">
-                          pending
-                        </span>
-                        {header.assignedPe && (
-                          <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
-                            (Assigned: {header.assignedPe})
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1 w-full max-w-xs mx-auto">
-                        <select
-                          className="w-full bg-white border border-gray-300 p-2 rounded-lg font-bold text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-center disabled:bg-gray-100 cursor-pointer transition-all"
-                          value={header.assignedPe || ""}
-                          onChange={(e) => setHeader({ ...header, assignedPe: e.target.value })}
-                          disabled={isSavedRecord}
-                        >
-                          <option value="">-- Select PE Incharge --</option>
-                          {peUsers.map((pe, pIdx) => {
-                            const uname = pe.username || pe.employeeId || pe.name;
-                            return (
-                              <option key={`${uname}-${pIdx}`} value={uname}>
-                                {uname.toUpperCase()}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    )}
-                  </td>
-
-                  {/* 4. HOF - Production */}
-                  <td className="p-3 text-center align-middle bg-gray-50/30 border-l border-gray-200">
-                    {isHofApproved ? (
-                      <div className="flex flex-col items-center justify-center animate-in fade-in duration-200">
-                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider">
-                          Approved By ✓
-                        </span>
-                        <span className="text-xs font-black text-gray-900 uppercase mt-0.5">
-                          approved by {signatures.hofProduction}
-                        </span>
-                      </div>
-                    ) : isHOF ? (
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={handleApproveHof}
-                          className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-5 py-2 rounded-lg shadow uppercase tracking-wider cursor-pointer transition-all"
-                        >
-                          Approve HOF
-                        </button>
-                        {header.assignedHof && (
-                          <span className="text-[10px] text-gray-500 font-semibold uppercase">
-                            (Assigned: {header.assignedHof})
-                          </span>
-                        )}
-                      </div>
-                    ) : isSavedRecord ? (
-                      <div className="flex flex-col items-center justify-center">
-                        <span className="text-red-600 text-xs font-bold uppercase tracking-wider">
-                          pending
-                        </span>
-                        {header.assignedHof && (
-                          <span className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">
-                            (Assigned: {header.assignedHof})
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1 w-full max-w-xs mx-auto">
-                        <select
-                          className="w-full bg-white border border-gray-300 p-2 rounded-lg font-bold text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-center disabled:bg-gray-100 cursor-pointer transition-all"
-                          value={header.assignedHof || ""}
-                          onChange={(e) => setHeader({ ...header, assignedHof: e.target.value })}
-                          disabled={isSavedRecord}
-                        >
-                          <option value="">-- Select HOF Incharge --</option>
-                          {hofUsers.map((h, hIdx) => {
-                            const uname = h.username || h.employeeId || h.name;
-                            return (
-                              <option key={`${uname}-${hIdx}`} value={uname}>
-                                {uname.toUpperCase()}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
 
@@ -2714,22 +2412,20 @@ export default function EightDProblemSolvingReport() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving || saveSuccess || (isSavedRecord && isShiftIncharge)}
-            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white px-9 py-3.5 rounded-xl font-black shadow-lg hover:shadow-orange-500/25 flex items-center justify-center gap-2 uppercase tracking-wider text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
+            disabled={isSaving || saveSuccess || isSavedRecord}
+            className={`w-full sm:w-auto px-9 py-3.5 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 uppercase tracking-wider text-xs sm:text-sm transition-all ${
+              isSavedRecord
+                ? "bg-gray-400 text-gray-100 cursor-not-allowed shadow-none"
+                : "bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white hover:shadow-orange-500/25 cursor-pointer active:scale-95"
+            }`}
           >
             {isSaving
               ? "SAVING..."
               : saveSuccess
               ? "SAVED ✓"
-              : isQC
-              ? "Submit QC Approval"
-              : isPE
-              ? "Submit PE Approval"
-              : isHOF
-              ? "Submit HOF Approval"
               : isSavedRecord
-              ? "Record Already Submitted"
-              : "Submit for Verification"}
+              ? "RECORD ALREADY SUBMITTED (LOCKED)"
+              : "Save Report"}
           </button>
         </div>
       </div>

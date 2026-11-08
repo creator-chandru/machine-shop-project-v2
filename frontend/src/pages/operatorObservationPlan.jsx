@@ -61,6 +61,13 @@ const actualColor = (v) =>
     ? "bg-red-600 text-white font-bold"
     : "bg-white text-gray-800";
 
+const planBoxColor = (p) =>
+  !p.planDateTime
+    ? ""
+    : p.actualStatus === "COMPLETED"
+    ? "bg-green-600 text-white font-bold"
+    : "bg-red-600 text-white font-bold";
+
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
   const bgColor = type === "error" ? "bg-red-600" : type === "success" ? "bg-green-600" : "bg-orange-600";
@@ -538,12 +545,19 @@ export default function OperatorObservationPlan() {
 
     return (
       <React.Fragment key={`plan-${rIdx}-${pIdx}`}>
-        <td className={`border border-gray-800 p-0 ${p.isSaved ? "bg-gray-50" : ""}`}>
+        <td
+            className={`border border-gray-800 p-0 ${
+              p.planDateTime ? planBoxColor(p) : p.isSaved ? "bg-gray-50" : ""
+            }`}
+        >
           <div className="flex items-center">
             <input
               type="datetime-local"
               disabled={planLocked}
-              className="w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px] disabled:text-gray-700"
+              style={p.planDateTime ? { colorScheme: "dark" } : undefined}
+              className={`w-full h-full text-center outline-none bg-transparent py-1 px-0.5 font-medium text-[11px] ${
+                p.planDateTime ? "text-white disabled:text-white" : "disabled:text-gray-700"
+              }`}
               value={p.planDateTime}
               onChange={(e) => handlePlanChange(rIdx, pIdx, e.target.value)}
             />
@@ -552,7 +566,7 @@ export default function OperatorObservationPlan() {
                 type="button"
                 title="Clear this plan"
                 onClick={() => handlePlanChange(rIdx, pIdx, "")}
-                className="px-1 text-gray-400 hover:text-red-600 cursor-pointer"
+                className="px-1 text-white/70 hover:text-white cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>

@@ -40,15 +40,34 @@ const cleanImage = (v) => {
   return /^data:image\/(png|jpe?g|webp);base64,/i.test(s) && s.length <= MAX_IMAGE_CHARS ? s : "";
 };
 
+const toPageNo = (v) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+};
+
+// Sort by page (stable) and restart Sl.No on every page
+const reindexByPage = (list) => {
+  const counters = {};
+  return list
+    .map((s, i) => ({ s, i, p: toPageNo(s.pageNo) }))
+    .sort((a, b) => a.p - b.p || a.i - b.i)
+    .map(({ s, p }) => {
+      counters[p] = (counters[p] || 0) + 1;
+      return { ...s, pageNo: p, slNo: counters[p] };
+    });
+};
+
 const cleanSpecs = (specs) =>
-  (Array.isArray(specs) ? specs : [])
-    .map((s) => ({
-      controlName: String(s?.controlName || "").trim(),
-      specification: String(s?.specification || "").trim(),
-      image: cleanImage(s?.image),
-    }))
-    .filter((s) => s.controlName || s.specification || s.image)
-    .map((s, i) => ({ slNo: i + 1, ...s }));
+  reindexByPage(
+    (Array.isArray(specs) ? specs : [])
+      .map((s) => ({
+        pageNo: toPageNo(s?.pageNo),
+        controlName: String(s?.controlName || "").trim(),
+        specification: String(s?.specification || "").trim(),
+        image: cleanImage(s?.image),
+      }))
+      .filter((s) => s.controlName || s.specification || s.image)
+  );
 
 const getControlSpecifications = async (req, res) => {
   const { partName, operationNo } = req.query;
@@ -316,16 +335,22 @@ const saveJobSetupVerification = async (req, res) => {
         cleanedIncoming.forEach((inc) => {
           const exists = merged.some(
             (m) =>
+              toPageNo(m.pageNo) === inc.pageNo &&
               norm(m.controlName) === norm(inc.controlName) &&
               norm(m.specification) === norm(inc.specification) &&
               String(m.image || "") === String(inc.image || "")
           );
           if (!exists) {
-            merged.push({ controlName: inc.controlName, specification: inc.specification, image: inc.image || "" });
+            merged.push({
+              pageNo: inc.pageNo,
+              controlName: inc.controlName,
+              specification: inc.specification,
+              image: inc.image || "",
+            });
           }
         });
 
-        const reindexed = merged.map((m, i) => ({ ...m, slNo: i + 1 }));
+        const reindexed = reindexByPage(merged);
 
         const updateMasterReq = transaction.request();
         updateMasterReq.input("id", sql.Int, masterCheckRes.recordset[0].Id);
@@ -672,36 +697,44 @@ const generatePdfReport = async (req, res) => {
     const totalWidth = doc.page.width - 40;
     const startX = 20;
 
-    doc.lineWidth(1).strokeColor("black");
-    doc.rect(startX, 20, 100, 35).stroke();
+    // Title block - drawn at the top of every operation page
+    const drawTopHeader = (pageNo, pageTotal) => {
+      doc.lineWidth(1).strokeColor("black");
+      doc.rect(startX, 20, 100, 35).stroke();
 
-    const logoPath = path.join(__dirname, "logo.jpg");
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, startX + 10, 25, { width: 80, height: 25 });
-    } else {
-      doc.font("Helvetica-Bold").fontSize(11).fillColor("black").text("SAKTHI\nAUTO", startX, 28, { width: 100, align: "center" });
-    }
+      const logoPath = path.join(__dirname, "logo.jpg");
+      if (fs.existsSync(logoPath)) {
+        doc.image(logoPath, startX + 10, 25, { width: 80, height: 25 });
+      } else {
+        doc.font("Helvetica-Bold").fontSize(11).fillColor("black").text("SAKTHI\nAUTO", startX, 28, { width: 100, align: "center" });
+      }
 
-    doc.rect(startX + 100, 20, totalWidth - 240, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(13).text("RECORD OF JOB SETUP VERIFICATION", startX + 100, 32, { width: totalWidth - 240, align: "center" });
+      doc.rect(startX + 100, 20, totalWidth - 240, 35).stroke();
+      doc.font("Helvetica-Bold").fontSize(13).text("RECORD OF JOB SETUP VERIFICATION", startX + 100, 32, { width: totalWidth - 240, align: "center" });
 
-    doc.rect(startX + totalWidth - 140, 20, 140, 35).stroke();
-    doc.font("Helvetica-Bold").fontSize(8).text(`Date: ${displayDate} | Shift: ${record.Shift || "1st"}`, startX + totalWidth - 140, 26, { width: 140, align: "center" });
-    doc.font("Helvetica").fontSize(7).text(effectiveQf, startX + totalWidth - 140, 40, { width: 140, align: "center" });
+      doc.rect(startX + totalWidth - 140, 20, 140, 35).stroke();
+      doc.font("Helvetica-Bold").fontSize(8).text(`Date: ${displayDate} | Shift: ${record.Shift || "1st"}`, startX + totalWidth - 140, 26, { width: 140, align: "center" });
+      doc.font("Helvetica").fontSize(7).text(effectiveQf, startX + totalWidth - 140, 40, { width: 140, align: "center" });
+      if (pageTotal > 1) {
+        doc.font("Helvetica").fontSize(6.5).text(`Page ${pageNo} of ${pageTotal}`, startX + totalWidth - 140, 48, { width: 140, align: "center" });
+      }
 
-    doc.rect(startX, 58, totalWidth, 40).stroke();
-    doc.font("Helvetica-Bold").fontSize(7.5).fillColor("black");
-    doc.text(`Part Name: ${record.PartName || "-"}`, startX + 5, 63);
-    doc.text(`Operation No: ${record.OperationNo || "-"}`, startX + 5, 74);
-    doc.text(`Description: ${record.OperationDescription || "-"}`, startX + 5, 85, { width: 450 });
+      doc.rect(startX, 58, totalWidth, 40).stroke();
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("black");
+      doc.text(`Part Name: ${record.PartName || "-"}`, startX + 5, 63);
+      doc.text(`Operation No: ${record.OperationNo || "-"}`, startX + 5, 74);
+      doc.text(`Description: ${record.OperationDescription || "-"}`, startX + 5, 85, { width: 450 });
 
-    doc.text(`Setter Name: ${record.SetterName || "-"}`, startX + 500, 63);
-    doc.text(`Setting Time: ${record.SettingTime || "-"}`, startX + 500, 74);
-    doc.text(`Total Time: ${record.TotalTime || "-"}`, startX + 500, 85);
+      doc.text(`Setter Name: ${record.SetterName || "-"}`, startX + 500, 63);
+      doc.text(`Setting Time: ${record.SettingTime || "-"}`, startX + 500, 74);
+      doc.text(`Total Time: ${record.TotalTime || "-"}`, startX + 500, 85);
 
-    let tableY = 104;
-    const colWidths = [30, 160, 200, 40, 40, 40, 40, 40, 40, 50, totalWidth - 680];
-    const headers = ["Sl.No", "Control", "Specification", "LH 1", "RH 1", "LH 2", "RH 2", "LH 3", "RH 3", "Status", "Remarks"];
+      return 104;
+    };
+
+    // Control & Specification are now ONE column
+    const colWidths = [30, 360, 40, 40, 40, 40, 40, 40, 50, totalWidth - 680];
+    const headers = ["Sl.No", "Control & Specification (Refer W.I)", "LH 1", "RH 1", "LH 2", "RH 2", "LH 3", "RH 3", "Status", "Remarks"];
 
     const drawHeader = (y) => {
       doc.rect(startX, y, totalWidth, 18).fillAndStroke("#f0f0f0", "black");
@@ -714,57 +747,86 @@ const generatePdfReport = async (req, res) => {
       return y + 18;
     };
 
-    tableY = drawHeader(tableY);
-
+    // Group the saved rows by operation page
     const actualRows = safeParse(record.ActualInspectionData, []);
-    const specX = startX + colWidths[0] + colWidths[1];
-    const IMG_MAX_W = colWidths[2] - 8;
+    const pageMap = new Map();
+    actualRows.forEach((r) => {
+      const p = toPageNo(r.pageNo);
+      if (!pageMap.has(p)) pageMap.set(p, []);
+      pageMap.get(p).push(r);
+    });
+    let pageKeys = [...pageMap.keys()].sort((a, b) => a - b);
+    if (pageKeys.length === 0) pageKeys = [1];
+
+    const textX = startX + colWidths[0] + 2;
+    const textW = colWidths[1] - 4;
+    const IMG_MAX_W = colWidths[1] - 8;
     const IMG_MAX_H = 70;
+    let tableY = 104;
 
-    actualRows.forEach((r, idx) => {
-      let imgBuf = null, imgW = 0, imgH = 0;
-      if (typeof r.image === "string" && r.image.startsWith("data:image/")) {
-        try {
-          imgBuf = Buffer.from(r.image.split(",")[1], "base64");
-          const o = doc.openImage(imgBuf);
-          const scale = Math.min(IMG_MAX_W / o.width, IMG_MAX_H / o.height, 1);
-          imgW = o.width * scale;
-          imgH = o.height * scale;
-        } catch (e) {
-          imgBuf = null;
+    pageKeys.forEach((pk, gi) => {
+      if (gi > 0) doc.addPage();
+      tableY = drawHeader(drawTopHeader(gi + 1, pageKeys.length));
+
+      (pageMap.get(pk) || []).forEach((r, idx) => {
+        let imgBuf = null, imgW = 0, imgH = 0;
+        if (typeof r.image === "string" && r.image.startsWith("data:image/")) {
+          try {
+            imgBuf = Buffer.from(r.image.split(",")[1], "base64");
+            const o = doc.openImage(imgBuf);
+            const scale = Math.min(IMG_MAX_W / o.width, IMG_MAX_H / o.height, 1);
+            imgW = o.width * scale;
+            imgH = o.height * scale;
+          } catch (e) {
+            imgBuf = null;
+          }
         }
-      }
-      const rowH = imgBuf ? 16 + imgH + 4 : 16;
 
-      if (tableY + rowH > doc.page.height - 70) {
-        doc.addPage();
-        tableY = drawHeader(20);
-      }
+        const ctrlTxt = r.controlName || "-";
+        const specTxt = r.specification || "";
+        doc.font("Helvetica-Bold").fontSize(6.5);
+        const ctrlH = doc.heightOfString(ctrlTxt, { width: textW });
+        doc.font("Helvetica").fontSize(6.5);
+        const specH = specTxt ? doc.heightOfString(specTxt, { width: textW }) : 0;
+        const textBlockH = ctrlH + (specH ? specH + 2 : 0);
+        const rowH = Math.max(16, textBlockH + 8) + (imgBuf ? imgH + 4 : 0);
 
-      doc.lineWidth(0.5).strokeColor("black");
-      doc.rect(startX, tableY, totalWidth, rowH).stroke();
-      let x = startX;
-      doc.fillColor("black").font("Helvetica").fontSize(6.5);
+        if (tableY + rowH > doc.page.height - 70) {
+          doc.addPage();
+          tableY = drawHeader(20);
+        }
 
-      const values = [
-        String(r.slNo || idx + 1),
-        r.controlName || "-",
-        r.specification || (imgBuf ? "" : "-"),
-        r.LH1 || "-", r.RH1 || "-", r.LH2 || "-", r.RH2 || "-", r.LH3 || "-", r.RH3 || "-",
-        r.status || "OK",
-        r.remarks || "-",
-      ];
+        doc.lineWidth(0.5).strokeColor("black");
+        doc.rect(startX, tableY, totalWidth, rowH).stroke();
+        let x = startX;
+        doc.fillColor("black").font("Helvetica").fontSize(6.5);
 
-      values.forEach((v, i) => {
-        doc.text(v, x + 2, tableY + 4, { width: colWidths[i] - 4, height: 10, lineBreak: false, ellipsis: true, align: i === 1 || i === 2 ? "left" : "center" });
-        x += colWidths[i];
+        const values = [
+          String(r.slNo || idx + 1),
+          null, // Control & Specification drawn separately below
+          r.LH1 || "-", r.RH1 || "-", r.LH2 || "-", r.RH2 || "-", r.LH3 || "-", r.RH3 || "-",
+          r.status || "OK",
+          r.remarks || "-",
+        ];
+
+        values.forEach((v, i) => {
+          if (v !== null) {
+            doc.font("Helvetica").fontSize(6.5).text(v, x + 2, tableY + 4, { width: colWidths[i] - 4, height: 10, lineBreak: false, ellipsis: true, align: "center" });
+          }
+          x += colWidths[i];
+        });
+
+        // Combined Control + Specification cell
+        doc.font("Helvetica-Bold").fontSize(6.5).text(ctrlTxt, textX, tableY + 4, { width: textW, align: "left" });
+        if (specTxt) {
+          doc.font("Helvetica").fontSize(6.5).text(specTxt, textX, tableY + 4 + ctrlH + 2, { width: textW, align: "left" });
+        }
+        if (imgBuf) {
+          try { doc.image(imgBuf, textX + 2, tableY + 4 + textBlockH + 2, { width: imgW, height: imgH }); } catch (e) {}
+        }
+
+        tableY += rowH;
       });
-
-      if (imgBuf) {
-        try { doc.image(imgBuf, specX + 4, tableY + 14, { width: imgW, height: imgH }); } catch (e) {}
-      }
-
-      tableY += rowH;
     });
 
     let sigY = Math.max(tableY + 10, doc.page.height - 50);

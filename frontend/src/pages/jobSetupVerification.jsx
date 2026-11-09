@@ -39,11 +39,32 @@ const lockedTextCls =
 
 const emptySignatures = { inspector: "", shiftIncharge: "", hofInspection: "", hofProduction: "" };
 
-const createEmptyInspectionRow = (slNo = 1) => ({
-  slNo, controlName: "", specification: "", image: "",
+const createEmptyInspectionRow = (slNo = 1, pageNo = 1) => ({
+  slNo, pageNo, controlName: "", specification: "", image: "",
   LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
   status: "", remarks: "", isExisting: false,
 });
+
+// Serial numbers restart on every page
+const renumberRows = (list) => {
+  const counters = {};
+  return list.map((r) => {
+    const p = r.pageNo || 1;
+    counters[p] = (counters[p] || 0) + 1;
+    return { ...r, pageNo: p, slNo: counters[p] };
+  });
+};
+
+// Sorts by page, closes gaps in page numbers (1,2,3...) and renumbers Sl.No
+const compactPages = (list) => {
+  const pages = [...new Set(list.map((r) => r.pageNo || 1))].sort((a, b) => a - b);
+  const map = new Map(pages.map((p, i) => [p, i + 1]));
+  const sorted = list
+    .map((r, i) => ({ r, i, p: r.pageNo || 1 }))
+    .sort((a, b) => a.p - b.p || a.i - b.i)
+    .map(({ r }) => ({ ...r, pageNo: map.get(r.pageNo || 1) }));
+  return renumberRows(sorted);
+};
 
 const Toast = ({ message, type, onClose }) => {
   if (!message) return null;
@@ -146,11 +167,16 @@ export default function JobSetupVerification() {
 
   const [form, setForm] = useState(() => buildFreshForm());
   const [rows, setRows] = useState([]);
+  const [activePage, setActivePage] = useState(1);
   const [signatures, setSignatures] = useState(emptySignatures);
 
   useEffect(() => {
     isSavedRef.current = isSavedRecord;
   }, [isSavedRecord]);
+
+  useEffect(() => {
+  setActivePage(1);
+  }, [form.partName, form.operationNo, form.date, form.shift]);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -343,7 +369,7 @@ export default function JobSetupVerification() {
             ? JSON.parse(record.ActualInspectionData)
             : record.ActualInspectionData;
         if (Array.isArray(parsed)) {
-          setRows(parsed.map((r, i) => ({ ...r, slNo: i + 1, isExisting: true })));
+          setRows(renumberRows(parsed.map((r) => ({ ...r, pageNo: r.pageNo || 1, isExisting: true }))));
         }
       } catch (e) {}
     }
@@ -374,16 +400,19 @@ export default function JobSetupVerification() {
         const specs = Array.isArray(data.specifications) ? data.specifications : [];
         if (specs.length > 0) {
           setRows(
-            specs.map((spec, idx) => ({
-              slNo: idx + 1,
-              controlName: spec.controlName || "",
-              specification: spec.specification || "",
-              image: spec.image || "",
-              LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
-              status: "",
-              remarks: "",
-              isExisting: true,
-            }))
+            renumberRows(
+              specs.map((spec) => ({
+                slNo: 0,
+                pageNo: spec.pageNo || 1,
+                controlName: spec.controlName || "",
+                specification: spec.specification || "",
+                image: spec.image || "",
+                LH1: "", RH1: "", LH2: "", RH2: "", LH3: "", RH3: "",
+                status: "",
+                remarks: "",
+                isExisting: true,
+              }))
+            )
           );
           setSpecsMissing(false);
           triggerToast(`Loaded ${specs.length} Control Specifications.`, "success");
@@ -558,9 +587,25 @@ export default function JobSetupVerification() {
     }, 0);
   };
 
+
+  const pageNumbers = rows.length
+    ? [...new Set(rows.map((r) => r.pageNo || 1))].sort((a, b) => a - b)
+    : [1];
+  const currentPage = pageNumbers.includes(activePage) ? activePage : pageNumbers[0];
+
+  const handleAddPage = () => {
+    if (isSavedRecord) return;
+    if (rows.length === 0) return handleAddRow();
+    const newPage = Math.max(...pageNumbers) + 1;
+    activeFieldRef.current = { idx: null, field: null, element: null };
+    setRows((prev) => renumberRows([...prev, createEmptyInspectionRow(0, newPage)]));
+    setActivePage(newPage);
+  };
+
   const handleAddRow = () => {
     if (isSavedRecord) return;
-    setRows((prev) => [...prev, createEmptyInspectionRow(prev.length + 1)]);
+    activeFieldRef.current = { idx: null, field: null, element: null };
+    setRows((prev) => compactPages([...prev, createEmptyInspectionRow(0, currentPage)]));
   };
 
   const attachImage = async (idx, blob) => {
@@ -592,10 +637,8 @@ export default function JobSetupVerification() {
 
   const handleDeleteRow = (idx) => {
     if (isSavedRecord) return;
-    setRows((prev) => {
-      const updated = prev.filter((_, i) => i !== idx);
-      return updated.map((r, i) => ({ ...r, slNo: i + 1 }));
-    });
+    activeFieldRef.current = { idx: null, field: null, element: null };
+    setRows((prev) => compactPages(prev.filter((_, i) => i !== idx)));
   };
 
   const handleDownloadPdf = async () => {
@@ -718,14 +761,17 @@ export default function JobSetupVerification() {
     setIsSaving(true);
     setSaveSuccess(false);
 
+    const finalRows = compactPages(validRows);
+
     const payload = {
       ...form,
       username: currentUsername,
       machineShop: shopId || "3",
       reasonForSetup: form.selectedReasons.join(","),
-      actualInspectionData: validRows.map((r, i) => ({ ...r, slNo: i + 1 })),
-      controlSpecifications: validRows.map((r, i) => ({
-        slNo: i + 1,
+      actualInspectionData: finalRows,
+      controlSpecifications: finalRows.map((r) => ({
+        slNo: r.slNo,
+        pageNo: r.pageNo,
         controlName: r.controlName.trim(),
         specification: r.specification.trim(),
         image: r.image || "",
@@ -761,7 +807,7 @@ export default function JobSetupVerification() {
       setIsSaving(false);
       setSaveSuccess(true);
       setIsSavedRecord(true);
-      setRows(validRows.map((r, i) => ({ ...r, slNo: i + 1, isExisting: true })));
+      setRows(finalRows.map((r) => ({ ...r, isExisting: true })));
       setSignatures((prev) => ({
         ...prev,
         inspector: "Pending",
@@ -1259,13 +1305,22 @@ export default function JobSetupVerification() {
 
             <div className="flex items-center gap-2 self-end sm:self-auto">
               {!isSavedRecord && form.partName && (
-                <button
-                  type="button"
-                  onClick={handleAddRow}
-                  className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow hover:shadow-md cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Control Row
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleAddRow}
+                    className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow hover:shadow-md cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Control Row
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddPage}
+                    className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow hover:shadow-md cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Page
+                  </button>
+                </>
               )}
               {isSavedRecord && (
                 <span className="text-[11px] font-bold text-green-700 bg-green-100 border border-green-200 px-2.5 py-1 rounded-full uppercase tracking-wider">
@@ -1275,14 +1330,37 @@ export default function JobSetupVerification() {
             </div>
           </div>
 
+          {(pageNumbers.length > 1 || !isSavedRecord) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {pageNumbers.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setActivePage(p)}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                    p === currentPage
+                      ? "bg-orange-500 text-white border-orange-500 shadow"
+                      : "bg-white text-gray-700 border-gray-300 hover:border-orange-400"
+                  }`}
+                >
+                  Page {p}
+                </button>
+              ))}
+              <span className="text-[11px] font-semibold text-gray-500">
+                Page {currentPage} of {pageNumbers.length}
+              </span>
+            </div>
+          )}
+
           <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[600px]">
             <fieldset disabled={isSavedRecord} className="min-w-0">
               <table className="w-full border-collapse text-xs text-center min-w-[1300px]">
                 <thead className="sticky top-0 z-20 bg-gray-100 border-b border-gray-300 font-extrabold text-gray-800 uppercase tracking-wider text-[11px]">
                   <tr>
                     <th rowSpan={2} className="p-2.5 w-[4%]">Sl.No</th>
-                    <th rowSpan={2} className="p-2.5 w-[18%] border-l border-gray-200 text-left px-3">Control</th>
-                    <th rowSpan={2} className="p-2.5 w-[22%] border-l border-gray-200 text-left px-3">Specification (Refer W.I)</th>
+                    <th rowSpan={2} className="p-2.5 w-[40%] border-l border-gray-200 text-left px-3">
+                      Control &amp; Specification (Refer W.I)
+                    </th>
                     <th colSpan={2} className="p-1.5 w-[13%] border-l border-gray-200 bg-gray-200/50">First Piece</th>
                     <th colSpan={2} className="p-1.5 w-[13%] border-l border-gray-200 bg-gray-200/50">Second Piece</th>
                     <th colSpan={2} className="p-1.5 w-[13%] border-l border-gray-200 bg-gray-200/50">Third Piece</th>
@@ -1302,19 +1380,23 @@ export default function JobSetupVerification() {
                 <tbody className="divide-y divide-gray-200">
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={isSavedRecord ? 11 : 12} className="p-8 text-gray-500 italic font-semibold text-center">
+                      <td colSpan={isSavedRecord ? 10 : 11} className="p-8 text-gray-500 italic font-semibold text-center">
                         {!form.partName ? "Select a Part Name to continue." : !form.operationNo ? "Select an Operation No to load its control specifications." : "No rows yet. Click 'Add Control Row' above to begin."}
                       </td>
                     </tr>
                   )}
                   {rows.map((r, idx) => {
+                    if ((r.pageNo || 1) !== currentPage) return null;
                     const isControlLocked = isSavedRecord || r.isExisting;
 
                     return (
                       <tr key={`row-${idx}`} className="hover:bg-orange-50/20 transition-colors">
                         <td className="p-2 font-bold bg-gray-50/60 text-gray-600">{r.slNo || idx + 1}</td>
 
-                        <td className={`p-1 text-left px-2 font-bold uppercase border-l border-gray-200 ${isControlLocked ? "bg-gray-50/40" : "bg-white"}`}>
+                        <td
+                          className={`p-1 text-left px-2 border-l border-gray-200 ${isControlLocked ? "bg-gray-50/40" : "bg-white"}`}
+                          onPaste={(e) => handleCellPaste(e, idx)}
+                        >
                           <input
                             type="text"
                             readOnly={isControlLocked}
@@ -1326,17 +1408,11 @@ export default function JobSetupVerification() {
                             }}
                             onChange={(e) => updateRow(idx, "controlName", e.target.value)}
                           />
-                        </td>
-
-                        <td
-                          className={`p-1 text-left px-2 font-bold text-gray-900 border-l border-gray-200 ${isControlLocked ? "bg-gray-50/40" : "bg-white"}`}
-                          onPaste={(e) => handleCellPaste(e, idx)}
-                        >
                           <input
                             type="text"
                             readOnly={isControlLocked}
                             placeholder="Enter Specification"
-                            className={`w-full font-semibold outline-none text-gray-900 p-1.5 rounded ${isControlLocked ? "bg-transparent cursor-not-allowed text-gray-800" : "border border-orange-200 focus:bg-white"}`}
+                            className={`w-full mt-1 font-semibold outline-none text-gray-900 p-1.5 rounded ${isControlLocked ? "bg-transparent cursor-not-allowed text-gray-800" : "border border-orange-200 focus:bg-white"}`}
                             value={r.specification}
                             onFocus={(e) => {
                               activeFieldRef.current = { idx, field: "specification", element: e.target };
@@ -1374,6 +1450,7 @@ export default function JobSetupVerification() {
                             </button>
                           )}
                         </td>
+
 
                         {["LH1", "RH1", "LH2", "RH2", "LH3", "RH3"].map((f) => (
                           <td key={f} className="p-0 border-l border-gray-200">

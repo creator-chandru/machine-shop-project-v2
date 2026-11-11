@@ -40,7 +40,13 @@ const REASON_ENABLED_FORMS = [
   "breakdown-intimation-report",
   "operator-observation-sheet",
   "competency-evaluation-form",
-  "corrective-action-register"
+  "corrective-action-register",
+  "eight-d-report",
+  "job-setup-verification",
+  "operator-allotment",
+  "operator-observation-plan",
+  "tool-change-record",
+  "lpa-bottom"
 ];
 
 const Hod = () => {

@@ -41,7 +41,13 @@ const REASON_ENABLED_FORMS = [
   "breakdown-intimation-report",
   "operator-observation-sheet",
   "competency-evaluation-form",
-  "corrective-action-register"
+  "corrective-action-register",
+  "eight-d-report",
+  "job-setup-verification",
+  "operator-allotment",
+  "operator-observation-plan",
+  "tool-change-record",
+  "lpa-bottom"
 ];
 
 const Hof = () => {
@@ -1014,20 +1020,20 @@ const Hof = () => {
                               <td className="py-4 px-4">
                                 <div className="flex flex-wrap gap-1.5">
                                   {report.verifiedByQcSignature && report.verifiedByQcSignature !== "Pending" ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
                                       ✓ QC
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
                                       Pending QC
                                     </span>
                                   )}
                                   {report.hofInspectionSignature && report.hofInspectionSignature !== "Pending" ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700 border border-green-300">
                                       ✓ HOF-INSPN
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
                                       Pending HOF-INSPN
                                     </span>
                                   )}

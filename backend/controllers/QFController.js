@@ -35,7 +35,13 @@ const REASON_ENABLED_FORMS = [
   "breakdown-intimation-report",
   "operator-observation-sheet",
   "competency-evaluation-form",
-  "corrective-action-register"
+  "corrective-action-register",
+  "eight-d-report",
+  "job-setup-verification",
+  "operator-allotment",
+  "operator-observation-plan",
+  "tool-change-record",
+  "lpa-bottom"
 ];
 
 // Helper to extract date (e.g. "31.01.2025") from qfValue and convert to "YYYY-MM-DD"
@@ -77,7 +83,7 @@ const getFormSettings = async (req, res) => {
             date: null,
             reason: ""
           });
-        }
+        } 
       } catch (tableErr) {
         results.push({
           id: null,

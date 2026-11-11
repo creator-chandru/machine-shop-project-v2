@@ -19,12 +19,29 @@ import {
   Building2,
   SlidersHorizontal,
   FileCheck,
-  Plus
+  Plus,
+  History
 } from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 const API_URL = process.env.REACT_APP_API_URL || "";
+
+// Forms configured to extract date from QF value, require a reason, and show history
+const REASON_ENABLED_FORMS = [
+  "pre-operation-checklist",
+  "error-proofing-checksheet",
+  "air-gap-sensor",
+  "level1-maintenance-checklist",
+  "four-m-change-monitoring",
+  "significant-event-record",
+  "daily-production-report",
+  "daily-production-idle-time",
+  "breakdown-intimation-report",
+  "operator-observation-sheet",
+  "competency-evaluation-form",
+  "corrective-action-register"
+];
 
 const Hod = () => {
   const { shopId } = useParams();
@@ -47,6 +64,12 @@ const Hod = () => {
   const [isQfManagerOpen, setIsQfManagerOpen] = useState(false);
   const [qfSettings, setQfSettings] = useState([]);
   const [savingId, setSavingId] = useState(null);
+
+  // QF History Modal States
+  const [isQfHistoryOpen, setIsQfHistoryOpen] = useState(false);
+  const [qfHistoryList, setQfHistoryList] = useState([]);
+  const [qfHistoryFormName, setQfHistoryFormName] = useState("");
+  const [isQfHistoryLoading, setIsQfHistoryLoading] = useState(false);
 
   // Competency Exam Manager States
   const [isCompetencyManagerOpen, setIsCompetencyManagerOpen] = useState(false);
@@ -113,7 +136,7 @@ const Hod = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        setQfSettings(data);
+        setQfSettings(data.map((item) => ({ ...item, reason: "" })));
       }
     } catch (error) {
       toast.error("Failed to load QF values.");
@@ -122,6 +145,18 @@ const Hod = () => {
 
   // Update specific QF Setting
   const handleSaveSingleQfSetting = async (setting) => {
+    if (REASON_ENABLED_FORMS.includes(setting.formName)) {
+      if (!setting.reason || !setting.reason.trim()) {
+        toast.error("Please enter a reason for updating the QF value.");
+        return;
+      }
+      const dateMatch = setting.qfValue?.match(/(\d{2})[.\-/](\d{2})[.\-/](\d{4})/);
+      if (!dateMatch) {
+        toast.error("QF Code must contain a valid date (e.g., 31.01.2025).");
+        return;
+      }
+    }
+
     setSavingId(setting.formName);
     try {
       const token = localStorage.getItem("token");
@@ -134,15 +169,40 @@ const Hod = () => {
         body: JSON.stringify({ setting })
       });
       if (res.ok) {
-        toast.success(`${setting.formName.replace("-", " ")} QF updated!`);
+        toast.success(`${setting.formName.replace(/-/g, " ")} QF updated!`);
         fetchQfSettings();
       } else {
-        toast.error("Failed to save QF value.");
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.error || "Failed to save QF value.");
       }
     } catch (error) {
       toast.error("Failed to save QF value.");
     }
     setSavingId(null);
+  };
+
+  // Fetch QF History for a specific form
+  const handleOpenQfHistory = async (formName) => {
+    setQfHistoryFormName(formName);
+    setIsQfHistoryOpen(true);
+    setIsQfHistoryLoading(true);
+    setQfHistoryList([]);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_URL}/api/qf-values/history/${formName}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setQfHistoryList(Array.isArray(data) ? data : []);
+      } else {
+        toast.error("Failed to load QF history.");
+      }
+    } catch (err) {
+      toast.error("Failed to load QF history.");
+    } finally {
+      setIsQfHistoryLoading(false);
+    }
   };
 
   // Fetch Competency Exam Questions
@@ -687,7 +747,7 @@ const Hod = () => {
             </div>
           </div>
 
-          {/* Component 2: Part Set Registration Card (Cohesive White Enterprise Theme) */}
+          {/* Component 2: Part Set Registration Card */}
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden text-gray-800">
             <div className="px-6 py-5 bg-gray-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -892,47 +952,158 @@ const Hod = () => {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {qfSettings.map((setting) => (
-                    <div key={setting.formName} className="bg-[#2c2c2c] p-5 rounded-2xl border border-[#404040] flex flex-col md:flex-row gap-4 items-end">
-                      <div className="flex-1 w-full">
-                        <label className="block text-[11px] font-black uppercase tracking-wider text-[#ff9100] mb-2">
-                          {setting.formName.replace(/-/g, " ")} - QF Code
-                        </label>
-                        <input
-                          type="text"
-                          value={setting.qfValue}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setQfSettings((prev) =>
-                              prev.map((s) => (s.formName === setting.formName ? { ...s, qfValue: val } : s))
-                            );
-                          }}
-                          className="w-full bg-[#1b1b1b] border border-[#444] p-3 rounded-xl text-gray-200 font-mono text-sm focus:outline-none focus:border-[#ff9100] shadow-inner"
-                        />
+                  {qfSettings.map((setting) => {
+                    const isReasonEnabled = REASON_ENABLED_FORMS.includes(setting.formName);
+
+                    return (
+                      <div key={setting.formName} className="bg-[#2c2c2c] p-5 rounded-2xl border border-[#404040] flex flex-col md:flex-row gap-4 items-end">
+                        <div className="flex-1 w-full">
+                          <label className="block text-[11px] font-black uppercase tracking-wider text-[#ff9100] mb-2">
+                            {setting.formName.replace(/-/g, " ")} - QF Code
+                          </label>
+                          <input
+                            type="text"
+                            value={setting.qfValue}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setQfSettings((prev) =>
+                                prev.map((s) => (s.formName === setting.formName ? { ...s, qfValue: val } : s))
+                              );
+                            }}
+                            className="w-full bg-[#1b1b1b] border border-[#444] p-3 rounded-xl text-gray-200 font-mono text-sm focus:outline-none focus:border-[#ff9100] shadow-inner"
+                          />
+                        </div>
+
+                        {isReasonEnabled ? (
+                          <div className="w-full md:w-1/3">
+                            <label className="block text-[11px] font-black uppercase tracking-wider text-[#ff9100] mb-2">
+                              Reason for Change
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Enter reason for change..."
+                              value={setting.reason || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setQfSettings((prev) =>
+                                  prev.map((s) => (s.formName === setting.formName ? { ...s, reason: val } : s))
+                                );
+                              }}
+                              className="w-full bg-[#1b1b1b] border border-[#444] p-3 rounded-xl text-gray-200 text-sm focus:outline-none focus:border-[#ff9100] shadow-inner"
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-full md:w-1/4">
+                            <label className="block text-[11px] font-black uppercase tracking-wider text-[#ff9100] mb-2">
+                              Effective Date
+                            </label>
+                            <input
+                              type="date"
+                              value={setting.date ? setting.date.split("T")[0] : ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setQfSettings((prev) =>
+                                  prev.map((s) => (s.formName === setting.formName ? { ...s, date: val } : s))
+                                );
+                              }}
+                              className="w-full bg-[#1b1b1b] border border-[#444] p-3 rounded-xl text-gray-200 font-mono text-sm focus:outline-none focus:border-[#ff9100] shadow-inner [color-scheme:dark]"
+                            />
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleSaveSingleQfSetting(setting)}
+                            disabled={savingId === setting.formName}
+                            className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider px-6 py-3 rounded-xl transition-all shadow-md flex justify-center items-center gap-2 disabled:opacity-50 cursor-pointer shrink-0"
+                          >
+                            {savingId === setting.formName ? <Loader className="w-4 h-4 animate-spin" /> : "Update"}
+                          </button>
+
+                          {isReasonEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenQfHistory(setting.formName)}
+                              className="bg-[#3a3a3a] hover:bg-[#4a4a4a] active:scale-95 text-gray-200 border border-[#555] font-black text-xs uppercase tracking-wider px-4 py-3 rounded-xl transition-all shadow-md flex justify-center items-center gap-1.5 cursor-pointer shrink-0"
+                            >
+                              <History className="w-4 h-4 text-[#ff9100]" />
+                              History
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div className="w-full md:w-1/4">
-                        <label className="block text-[11px] font-black uppercase tracking-wider text-[#ff9100] mb-2">
-                          Effective Date
-                        </label>
-                        <input
-                          type="date"
-                          value={setting.date ? setting.date.split("T")[0] : ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setQfSettings((prev) =>
-                              prev.map((s) => (s.formName === setting.formName ? { ...s, date: val } : s))
-                            );
-                          }}
-                          className="w-full bg-[#1b1b1b] border border-[#444] p-3 rounded-xl text-gray-200 font-mono text-sm focus:outline-none focus:border-[#ff9100] shadow-inner [color-scheme:dark]"
-                        />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QF HISTORY MODAL */}
+      {isQfHistoryOpen && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-[#2a2a2a] border border-[#444] w-full max-w-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-[#ff9100] px-6 py-4 flex items-center justify-between shrink-0 shadow-md">
+              <div className="flex items-center gap-3">
+                <div className="bg-black/25 p-2 rounded-lg shadow-inner">
+                  <History size={20} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-white uppercase tracking-wider leading-tight">
+                    QF Revision History
+                  </h2>
+                  <p className="text-[11px] text-white/80 font-medium uppercase">
+                    {qfHistoryFormName.replace(/-/g, " ")}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsQfHistoryOpen(false)}
+                className="text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-xl transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto bg-[#222] flex-1">
+              {isQfHistoryLoading ? (
+                <div className="flex justify-center items-center py-12">
+                  <Loader className="w-8 h-8 animate-spin text-[#ff9100]" />
+                </div>
+              ) : qfHistoryList.length === 0 ? (
+                <div className="text-center text-gray-500 py-12 font-bold uppercase tracking-wider text-sm">
+                  No QF History Found.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {qfHistoryList.map((item, index) => (
+                    <div
+                      key={item.id || index}
+                      className="bg-[#2c2c2c] p-4 rounded-xl border border-[#404040] flex flex-col gap-2"
+                    >
+                      <div className="flex items-center justify-between border-b border-[#3a3a3a] pb-2">
+                        <span className="font-mono text-sm font-bold text-white">
+                          {item.qfValue}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {index === 0 && (
+                            <span className="px-2 py-0.5 text-[10px] font-black uppercase rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Current
+                            </span>
+                          )}
+                          {item.date && (
+                            <span className="text-xs font-mono text-gray-400">
+                              {String(item.date).split("T")[0]}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleSaveSingleQfSetting(setting)}
-                        disabled={savingId === setting.formName}
-                        className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider px-6 py-3 rounded-xl transition-all shadow-md flex justify-center items-center gap-2 disabled:opacity-50 cursor-pointer shrink-0"
-                      >
-                        {savingId === setting.formName ? <Loader className="w-4 h-4 animate-spin" /> : "Update"}
-                      </button>
+                      <div className="text-xs text-gray-300">
+                        <span className="font-bold text-[#ff9100] uppercase mr-2">Reason:</span>
+                        {item.reason ? item.reason : <span className="italic text-gray-500">Initial / No reason recorded</span>}
+                      </div>
                     </div>
                   ))}
                 </div>

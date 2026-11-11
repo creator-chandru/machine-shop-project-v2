@@ -1,6 +1,6 @@
 const sql = require("../db");
 
-// Map each form name to its dedicated SQL table[cite: 1]
+// Map each form name to its dedicated SQL table
 const FORM_QF_TABLES = {
   "pre-operation-checklist": "PreOperationQFvalues",
   "error-proofing-checksheet": "ErrorProofingQFvalues",
@@ -11,7 +11,7 @@ const FORM_QF_TABLES = {
   "daily-production-report": "DailyProductionReportQFvalues",
   "daily-production-idle-time": "DailyProductionIdleTimeQFvalues",
   "breakdown-intimation-report": "BreakdownIntimationQFvalues",
-  "operator-observation-sheet": "OperatorObservationSheetQFvalues",
+  "operator-observation-sheet": "OperatorObservationQFvalues",
   "competency-evaluation-form": "CompetencyEvaluationQFvalues",
   "corrective-action-register": "CorrectiveActionQFvalues",
   "eight-d-report": "EightDReportQFvalues",
@@ -22,28 +22,60 @@ const FORM_QF_TABLES = {
   "lpa-bottom": "LPAQFvalues" // Unified Table Name
 };
 
-// GET /api/qf-values: Returns the latest QF setting for each configured form[cite: 1]
+// Forms that extract date from qfValue and store a reason + history
+const REASON_ENABLED_FORMS = [
+  "pre-operation-checklist",
+  "error-proofing-checksheet",
+  "air-gap-sensor",
+  "level1-maintenance-checklist",
+  "four-m-change-monitoring",
+  "significant-event-record",
+  "daily-production-report",
+  "daily-production-idle-time",
+  "breakdown-intimation-report",
+  "operator-observation-sheet",
+  "competency-evaluation-form",
+  "corrective-action-register"
+];
+
+// Helper to extract date (e.g. "31.01.2025") from qfValue and convert to "YYYY-MM-DD"
+const extractDateFromQfValue = (qfValue) => {
+  if (!qfValue) return null;
+  // Matches DD.MM.YYYY, DD-MM-YYYY, or DD/MM/YYYY
+  const match = qfValue.match(/(\d{2})[.\-/](\d{2})[.\-/](\d{4})/);
+  if (match) {
+    const [, day, month, year] = match;
+    return `${year}-${month}-${day}`;
+  }
+  return null;
+};
+
+// GET /api/qf-values: Returns the latest QF setting for each configured form
 const getFormSettings = async (req, res) => {
   try {
     const results = [];
 
     for (const [formName, tableName] of Object.entries(FORM_QF_TABLES)) {
       try {
-        const query = `
-          SELECT TOP 1 id, '${formName}' as formName, qfValue, date 
-          FROM ${tableName} 
-          ORDER BY date DESC, id DESC
-        `;
+        const isReasonEnabled = REASON_ENABLED_FORMS.includes(formName);
+        const query = isReasonEnabled
+          ? `SELECT TOP 1 id, '${formName}' as formName, qfValue, date, reason FROM ${tableName} ORDER BY date DESC, id DESC`
+          : `SELECT TOP 1 id, '${formName}' as formName, qfValue, date FROM ${tableName} ORDER BY date DESC, id DESC`;
+
         const result = await sql.query(query);
 
         if (result.recordset.length > 0) {
-          results.push(result.recordset[0]);
+          results.push({
+            ...result.recordset[0],
+            reason: "" // Keep input field blank in UI for entering a new reason on next update
+          });
         } else {
           results.push({
             id: null,
             formName,
             qfValue: "Not Set",
-            date: null
+            date: null,
+            reason: ""
           });
         }
       } catch (tableErr) {
@@ -51,7 +83,8 @@ const getFormSettings = async (req, res) => {
           id: null,
           formName,
           qfValue: "Not Set",
-          date: null
+          date: null,
+          reason: ""
         });
       }
     }
@@ -63,7 +96,7 @@ const getFormSettings = async (req, res) => {
   }
 };
 
-// PUT /api/qf-values: Inserts new QF version record into the respective table[cite: 1]
+// PUT /api/qf-values: Inserts new QF version record into the respective table
 const updateFormSettings = async (req, res) => {
   const { setting } = req.body;
 
@@ -76,7 +109,20 @@ const updateFormSettings = async (req, res) => {
     return res.status(400).json({ error: `Unknown form name: ${setting.formName}` });
   }
 
-  const safeDate = setting.date && setting.date.trim() !== "" ? setting.date : null;
+  const isReasonEnabled = REASON_ENABLED_FORMS.includes(setting.formName);
+
+  // If reason-enabled form, extract the date directly from qfValue
+  let safeDate = null;
+  if (isReasonEnabled) {
+    safeDate = extractDateFromQfValue(setting.qfValue);
+    if (!safeDate) {
+      return res.status(400).json({
+        error: "Could not extract a valid date (DD.MM.YYYY) from the QF Value."
+      });
+    }
+  } else {
+    safeDate = setting.date && setting.date.trim() !== "" ? setting.date : null;
+  }
 
   try {
     const request = new sql.Request();
@@ -84,10 +130,18 @@ const updateFormSettings = async (req, res) => {
     request.input("qfValue", sql.NVarChar, setting.qfValue);
     request.input("safeDate", sql.Date, safeDate);
 
-    await request.query(`
-      INSERT INTO ${tableName} (formName, qfValue, date)
-      VALUES (@formName, @qfValue, @safeDate)
-    `);
+    if (isReasonEnabled) {
+      request.input("reason", sql.NVarChar, setting.reason || "");
+      await request.query(`
+        INSERT INTO ${tableName} (formName, qfValue, date, reason)
+        VALUES (@formName, @qfValue, @safeDate, @reason)
+      `);
+    } else {
+      await request.query(`
+        INSERT INTO ${tableName} (formName, qfValue, date)
+        VALUES (@formName, @qfValue, @safeDate)
+      `);
+    }
 
     res.json({ message: `New QF value record for ${setting.formName} created successfully` });
   } catch (err) {
@@ -96,7 +150,7 @@ const updateFormSettings = async (req, res) => {
   }
 };
 
-// GET /api/qf-values/history/:formName[cite: 1]
+// GET /api/qf-values/history/:formName
 const getFormQfHistory = async (req, res) => {
   const { formName } = req.params;
   const tableName = FORM_QF_TABLES[formName];
@@ -105,12 +159,13 @@ const getFormQfHistory = async (req, res) => {
     return res.status(400).json({ error: `Unknown form name: ${formName}` });
   }
 
+  const isReasonEnabled = REASON_ENABLED_FORMS.includes(formName);
+
   try {
-    const query = `
-      SELECT id, formName, qfValue, date 
-      FROM ${tableName} 
-      ORDER BY date DESC, id DESC
-    `;
+    const query = isReasonEnabled
+      ? `SELECT id, formName, qfValue, date, reason FROM ${tableName} ORDER BY date DESC, id DESC`
+      : `SELECT id, formName, qfValue, date FROM ${tableName} ORDER BY date DESC, id DESC`;
+
     const result = await sql.query(query);
     res.json(result.recordset);
   } catch (err) {

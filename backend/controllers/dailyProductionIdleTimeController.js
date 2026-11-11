@@ -28,12 +28,28 @@ const LOSS_REASONS = [
 // ============================================================
 const cleanDateStr = (date) => {
   if (!date) return null;
-  let d = String(date);
+  if (date instanceof Date && !isNaN(date.getTime())) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  let d = String(date).trim();
   if (d.includes('/')) {
     const p = d.split('/');
     if (p.length === 3) d = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
   } else if (d.includes('T')) {
     d = d.split('T')[0];
+  } else if (/^\d{4}-\d{2}-\d{2}/.test(d)) {
+    d = d.substring(0, 10);
+  } else {
+    const parsed = new Date(d);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
   }
   return d;
 };
@@ -66,8 +82,6 @@ const toFloat = (v) => {
   return isNaN(n) ? null : n;
 };
 
-const num = (v) => parseFloat(v) || 0;
-
 const validShopId = (shopId) => {
   const n = parseInt(shopId, 10);
   return !isNaN(n) && n >= 1 && n <= 5 ? n : null;
@@ -82,41 +96,26 @@ const httpError = (status, message) => {
 };
 
 // ============================================================
-// DYNAMIC QF HELPERS
+// DYNAMIC QF RESOLVER (Timezone-safe & robust fallback)
 // ============================================================
-const fetchQfHistory = async () => {
-  try {
-    const res = await sql.query(`
-      SELECT id, formName, qfValue, date 
-      FROM DailyProductionIdleTimeQFvalues 
-      ORDER BY date DESC, id DESC
-    `);
-    return res.recordset || [];
-  } catch (e) {
-    console.error("Warning: Could not fetch DailyProductionIdleTimeQFvalues:", e.message);
-    return [];
-  }
-};
+const resolveEffectiveQf = (qfHistory, targetDateVal) => {
+  const defaultFallback = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021";
+  if (!qfHistory || qfHistory.length === 0) return defaultFallback;
 
-const getEffectiveQfValue = (qfHistory, recordDateStr) => {
-  const fallback = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021";
-  if (!qfHistory || qfHistory.length === 0) return fallback;
+  const targetStr = cleanDateStr(targetDateVal);
 
-  if (recordDateStr) {
-    const targetDate = new Date(recordDateStr);
-    targetDate.setHours(0, 0, 0, 0);
-
-    for (let qf of qfHistory) {
-      if (!qf.date) continue;
-      const qfDate = new Date(qf.date);
-      qfDate.setHours(0, 0, 0, 0);
-
-      if (qfDate <= targetDate) {
-        return qf.qfValue;
+  if (targetStr) {
+    for (const q of qfHistory) {
+      if (!q.date) continue;
+      const qDateStr = cleanDateStr(q.date);
+      if (qDateStr && qDateStr <= targetStr) {
+        return q.qfValue;
       }
     }
   }
-  return qfHistory[0]?.qfValue || fallback;
+
+  // If no date-matched row, use the latest configured revision from database
+  return qfHistory[0]?.qfValue || defaultFallback;
 };
 
 // ============================================================
@@ -583,7 +582,7 @@ const generateIdleTimeReport = async (req, res) => {
   try {
     const { shopId, fromDate, toDate, lineCode, date } = req.query;
     
-    // Fix: Allow EITHER date OR (fromDate + toDate)
+    // Allow EITHER date OR (fromDate + toDate)
     const queryFrom = fromDate || date;
     const queryTo = toDate || date;
 
@@ -593,6 +592,19 @@ const generateIdleTimeReport = async (req, res) => {
 
     const cleanFrom = cleanDateStr(queryFrom);
     const cleanTo = cleanDateStr(queryTo);
+
+    // 🔥 1. FETCH FULL QF VALUE HISTORY DIRECTLY FROM DEDICATED TABLE
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT qfValue, date 
+        FROM DailyProductionIdleTimeQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (e) {
+      console.error("DailyProductionIdleTimeQFvalues table error or not found:", e.message);
+    }
 
     const request = new sql.Request();
     request.input('fromDate', sql.NVarChar(50), cleanFrom);
@@ -621,9 +633,6 @@ const generateIdleTimeReport = async (req, res) => {
     if (records.length === 0) {
       return res.status(404).send('No records found for the selected date range.');
     }
-
-    // Fetch dynamic QF values for Idle Time Report
-    const qfHistory = await fetchQfHistory();
 
     // Group records by ReportDate
     const groupedMap = new Map();
@@ -666,7 +675,6 @@ const generateIdleTimeReport = async (req, res) => {
         .text(String(text != null ? text : '-'), x + 2, y + 2.5, { width: w - 4, align });
     };
 
-    // Auto-fit Part Name text nicely without overlapping borders
     const drawPartNameCell = (x, y, w, h, text) => {
       doc.rect(x, y, w, h).stroke();
       const str = String(text != null ? text : '-');
@@ -687,14 +695,15 @@ const generateIdleTimeReport = async (req, res) => {
     };
 
     const computeGroupHeight = () => {
-      // Header 32pt + Table Headers (3 rows + 1 partRow) + Data Rows (18 rows) + Signatures (5 rows) + Notes (20pt) + QF Value (15pt)
       return 32 + (3 * rowH + 14) + (18 * rowH) + (5 * rowH) + 35;
     };
 
     const renderDateGroup = (dateKey, dateRecords, groupY) => {
       const displayDate = formatDisplayDate(dateKey);
       const first = dateRecords[0];
-      const effectiveQf = getEffectiveQfValue(qfHistory, dateKey);
+
+      // 🔥 2. RESOLVE EFFECTIVE QF VALUE FOR THIS SPECIFIC PAGE DATE
+      const currentPageQfValue = resolveEffectiveQf(qfHistory, dateKey);
 
       // Header Box (32pt)
       doc.lineWidth(0.8).strokeColor('black');
@@ -873,7 +882,7 @@ const generateIdleTimeReport = async (req, res) => {
       
       curY += 20;
       doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
-        .text(effectiveQf, startX, curY + 4, { align: 'left' });
+        .text(currentPageQfValue, startX, curY + 4, { align: 'left' });
 
       return curY + 16;
     };
@@ -930,6 +939,23 @@ const generateIdleTimeDayReport = async (req, res) => {
     }
 
     const cleanDate = cleanDateStr(date);
+
+    // 🔥 1. FETCH FULL QF VALUE HISTORY DIRECTLY FROM DEDICATED TABLE
+    let qfHistory = [];
+    try {
+      const qfRes = await sql.query(`
+        SELECT qfValue, date 
+        FROM DailyProductionIdleTimeQFvalues 
+        ORDER BY date DESC, id DESC
+      `);
+      qfHistory = qfRes.recordset || [];
+    } catch (e) {
+      console.error("DailyProductionIdleTimeQFvalues table error or not found:", e.message);
+    }
+
+    // 🔥 2. RESOLVE EFFECTIVE QF VALUE FOR THIS SPECIFIC REPORT DATE
+    const currentPageQfValue = resolveEffectiveQf(qfHistory, cleanDate);
+
     const request = new sql.Request();
     request.input('reportDate', sql.NVarChar(50), cleanDate);
 
@@ -955,10 +981,6 @@ const generateIdleTimeDayReport = async (req, res) => {
     if (records.length === 0) {
       return res.status(404).json({ error: 'No records found for the selected date.' });
     }
-
-    // Fetch dynamic QF values for Idle Time Report
-    const qfHistory = await fetchQfHistory();
-    const effectiveQf = getEffectiveQfValue(qfHistory, cleanDate);
 
     const doc = new PDFDocument({
       margin: 20,
@@ -1191,7 +1213,7 @@ const generateIdleTimeDayReport = async (req, res) => {
     
     curY += 20;
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
-      .text(effectiveQf, startX, curY + 4, { align: 'left' });
+      .text(currentPageQfValue, startX, curY + 4, { align: 'left' });
 
     doc.end();
   } catch (err) {
@@ -1201,6 +1223,23 @@ const generateIdleTimeDayReport = async (req, res) => {
     } else {
       res.end();
     }
+  }
+};
+
+// ============================================================
+// 11. GET QF HISTORY FOR DYNAMIC FRONTEND DISPLAY
+// ============================================================
+const getDailyProductionIdleTimeQfHistory = async (req, res) => {
+  try {
+    const qfRes = await sql.query(`
+      SELECT qfValue, date 
+      FROM DailyProductionIdleTimeQFvalues 
+      ORDER BY date DESC, id DESC
+    `);
+    res.status(200).json(qfRes.recordset || []);
+  } catch (err) {
+    console.error("Error fetching QF history:", err);
+    res.status(500).json({ error: "Failed to fetch QF history" });
   }
 };
 
@@ -1217,5 +1256,6 @@ module.exports = {
   getPendingPEIdleTimeData,
   signPEApproval,
   generateIdleTimeReport,
-  generateIdleTimeDayReport
+  generateIdleTimeDayReport,
+  getDailyProductionIdleTimeQfHistory
 };

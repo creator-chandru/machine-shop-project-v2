@@ -33,6 +33,16 @@ const getTodayISODate = () => {
   return `${year}-${month}-${day}`;
 };
 
+const cleanDateString = (date) => {
+  if (!date) return "";
+  let d = String(date).split("T")[0].trim();
+  if (d.includes("/")) {
+    const p = d.split("/");
+    if (p.length === 3) d = `${p[2]}-${p[1].padStart(2, "0")}-${p[0].padStart(2, "0")}`;
+  }
+  return d;
+};
+
 const getCurrentUser = () => {
   try {
     const u = JSON.parse(localStorage.getItem("user") || "{}");
@@ -148,6 +158,7 @@ export default function DailyProductionIdleTimeReport() {
   const [loadingMaster, setLoadingMaster] = useState(true);
 
   const [reportDate, setReportDate] = useState(getTodayISODate());
+  const [qfValue, setQfValue] = useState("QF/07/MPD-10, Rev.No: 00 dt 01.07.2021");
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -177,6 +188,49 @@ export default function DailyProductionIdleTimeReport() {
   useEffect(() => { lineMappingsRef.current = lineMappings; }, [lineMappings]);
   useEffect(() => { machineShopDetailsRef.current = machineShopDetails; }, [machineShopDetails]);
   useEffect(() => { reportDateRef.current = reportDate; }, [reportDate]);
+
+  // 🔥 Dynamic QF History Fetcher & Resolver
+  useEffect(() => {
+    const fetchQf = async () => {
+      try {
+        let res = await fetch(`${API}/api/qf-values/history/daily-production-idle-time`, {
+          headers: authHeaders()
+        });
+
+        if (!res.ok) {
+          res = await fetch(`${API}/api/daily-production-idle-time/qf-history`, {
+            headers: authHeaders()
+          });
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            const currentTargetStr = cleanDateString(reportDate);
+            let effective = "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021";
+
+            for (let q of data) {
+              const qfDateStr = cleanDateString(q.date);
+              if (qfDateStr && qfDateStr <= currentTargetStr) {
+                effective = q.qfValue;
+                break;
+              }
+            }
+
+            if (effective === "QF/07/MPD-10, Rev.No: 00 dt 01.07.2021" && data[0]?.qfValue) {
+              effective = data[0].qfValue;
+            }
+
+            setQfValue(effective);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading dynamic QF history:", err);
+      }
+    };
+
+    fetchQf();
+  }, [reportDate]);
 
   useEffect(() => {
     if (!shopId) return;
@@ -295,7 +349,6 @@ export default function DailyProductionIdleTimeReport() {
         const data = await res.json();
         if (data.exists && data.lineColumns?.[0]) {
           saved = data.lineColumns[0];
-          // Ensure structure handles missing shift level assignedPe / peSign from old records
           if (!saved.assignedPe || typeof saved.assignedPe === 'string') saved.assignedPe = emptyShifts();
           if (!saved.peSign || typeof saved.peSign === 'string') saved.peSign = emptyShifts();
         }
@@ -383,7 +436,6 @@ export default function DailyProductionIdleTimeReport() {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
 
-    // Validation: Block values below 0 or above specific shift's Capacity Limit
     if (val !== "") {
       const numVal = parseFloat(val);
       const capLimit = parseFloat(col.capacity[shift]) || 0;
@@ -429,7 +481,6 @@ export default function DailyProductionIdleTimeReport() {
     const col = lineColumns[colIdx];
     if (!col || !isEditableShift(col, shift)) return;
 
-    // Validation: Block values below 0 or above specific shift's Capacity Limit
     if (val !== "") {
       const numVal = parseFloat(val);
       const capLimit = parseFloat(col.capacity[shift]) || 0;
@@ -484,18 +535,6 @@ export default function DailyProductionIdleTimeReport() {
       next[colIdx] = {
         ...next[colIdx],
         signatures: { ...next[colIdx].signatures, [shift]: currentUser },
-      };
-      return next;
-    });
-  };
-
-  const handleRevokeShift = (colIdx, shift) => {
-    setLineColumns((prev) => {
-      if (prev[colIdx]?.locked) return prev;
-      const next = [...prev];
-      next[colIdx] = {
-        ...next[colIdx],
-        signatures: { ...next[colIdx].signatures, [shift]: "" },
       };
       return next;
     });
@@ -775,6 +814,7 @@ export default function DailyProductionIdleTimeReport() {
       )}
 
       <div className="bg-white w-full max-w-[99rem] rounded-xl p-3 sm:p-6 lg:p-8 shadow-2xl border-4 border-gray-100 space-y-5">
+        
         {/* Title + Download PDF button at top */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-4 gap-4">
           <div>
@@ -785,6 +825,11 @@ export default function DailyProductionIdleTimeReport() {
               <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
                 OUTPUT ONLY
               </span>
+            </div>
+
+            {/* 🔥 QF Code placed right before the title */}
+            <div className="text-xs font-bold text-gray-600 font-mono tracking-wider mb-1">
+              {qfValue}
             </div>
 
             <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">

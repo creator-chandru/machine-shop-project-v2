@@ -27,7 +27,7 @@ const formatDateDisplay = (dateVal) => {
     return str;
 };
 
-// Helper to extract clean YYYY-MM-DD for grouping
+// Helper to extract clean YYYY-MM-DD for reliable comparison
 const getDateISO = (dateVal) => {
     if (!dateVal) return '';
     if (dateVal instanceof Date) {
@@ -52,11 +52,12 @@ const getDateISO = (dateVal) => {
 // Helper to resolve dynamic QF value based on record date
 const fetchQfHistory = async () => {
     try {
-        const res = await sql.query(`
-            SELECT id, formName, qfValue, date 
+        const res = await sql.query`
+            SELECT id, formName, qfValue, date, reason 
             FROM RobotControlsQFvalues 
+            WHERE formName = 'robot-controls' 
             ORDER BY date DESC, id DESC
-        `);
+        `;
         return res.recordset || [];
     } catch (e) {
         console.error("Warning: Could not fetch RobotControlsQFvalues:", e.message);
@@ -64,25 +65,28 @@ const fetchQfHistory = async () => {
     }
 };
 
-const getEffectiveQfValue = (qfHistory, recordDateStr) => {
-    const fallback = "QF / 07 / MPD – 46, Rev.No: 00, dt: 01.03.2025";
-    if (!qfHistory || qfHistory.length === 0) return fallback;
+// Reliable string-based date comparison (YYYY-MM-DD) to prevent timezone drift
+const getEffectiveQfValue = (qfHistory, recordDateVal) => {
+    let currentPageQfValue = "QF / 07 / MPD – 46, Rev.No: 00, dt: 01.03.2025"; // Fallback
+    if (!qfHistory || qfHistory.length === 0) return currentPageQfValue;
 
-    if (recordDateStr) {
-        const targetDate = new Date(recordDateStr);
-        targetDate.setHours(0, 0, 0, 0);
+    const targetDateISO = getDateISO(recordDateVal);
 
+    if (targetDateISO) {
         for (let qf of qfHistory) {
             if (!qf.date) continue;
-            const qfDate = new Date(qf.date);
-            qfDate.setHours(0, 0, 0, 0);
-
-            if (qfDate <= targetDate) {
-                return qf.qfValue;
+            const qfDateISO = getDateISO(qf.date);
+            // qfHistory is ordered DESC by date, so the first one that is <= targetDate is the effective revision
+            if (qfDateISO && qfDateISO <= targetDateISO) {
+                currentPageQfValue = qf.qfValue;
+                break;
             }
         }
+    } else if (qfHistory.length > 0) {
+        currentPageQfValue = qfHistory[0].qfValue;
     }
-    return qfHistory[0]?.qfValue || fallback;
+
+    return currentPageQfValue;
 };
 
 // ============================================================
@@ -443,7 +447,8 @@ const generateReport = async (req, res) => {
 
             // Title Box
             doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerH).stroke();
-            doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("ROBOT CONTROLS VERIFICATION CHECK LIST", startX + logoBoxWidth, entryY + 26, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("ROBOT CONTROLS VERIFICATION CHECK LIST", startX + logoBoxWidth, entryY + 20, { width: titleBoxWidth, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, entryY + 38, { width: titleBoxWidth, align: "center" });
 
             // Metadata Box
             const metaX = startX + logoBoxWidth + titleBoxWidth;
@@ -573,7 +578,7 @@ const generateReport = async (req, res) => {
 
             currY += noteBoxHeight;
 
-            // 7. Dynamic QF Value Footer
+            // 7. Dynamic QF Value Footer (Shown cleanly at bottom-left, same as Pre-Operation)
             doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
                 .text(effectiveQf, startX, currY + 4, { align: 'left' });
 
@@ -707,8 +712,8 @@ const generateDayReport = async (req, res) => {
         }
 
         doc.rect(startX + logoBoxWidth, currY, titleBoxWidth, headerH).stroke();
-        doc.font("Helvetica-Bold").fontSize(13).fillColor('black').text("ROBOT CONTROLS VERIFICATION CHECK LIST", startX + logoBoxWidth, currY + 18, { width: titleBoxWidth, align: "center" });
-        doc.font("Helvetica-Bold").fontSize(8).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, currY + 36, { width: titleBoxWidth, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(12).fillColor('black').text("ROBOT CONTROLS VERIFICATION CHECK LIST", startX + logoBoxWidth, currY + 20, { width: titleBoxWidth, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, currY + 38, { width: titleBoxWidth, align: "center" });
 
         const metaX = startX + logoBoxWidth + titleBoxWidth;
         doc.rect(metaX, currY, metaBoxWidth, headerH).stroke();
@@ -829,11 +834,34 @@ const generateDayReport = async (req, res) => {
         doc.text("2) '✓' WORKING IN GOOD CONDITION. 'X' NOT WORKING (INFORM TO HOF-PRODUCTION).", startX + 6, currY + 25);
         doc.text("3) IF VERIFICATION GETS FAILED, DURING CHECKING INFORM TO HOF PRODUCTION & MAINTENANCE.", startX + 6, currY + 34);
 
+        // Dynamic QF Value Footer for Single Day PDF
+        currY += noteBoxHeight;
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+            .text(effectiveQf, startX, currY + 4, { align: 'left' });
+
         doc.end();
     } catch (err) {
         console.error("Robot Controls day PDF generation error:", err);
         if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
         else res.end();
+    }
+};
+
+// ============================================================
+// 8. GET QF HISTORY FOR DYNAMIC FRONTEND DISPLAY
+// ============================================================
+const getRobotControlsQfHistory = async (req, res) => {
+    try {
+        const qfRes = await sql.query`
+            SELECT id, formName, qfValue, date, reason 
+            FROM RobotControlsQFvalues 
+            WHERE formName = 'robot-controls' 
+            ORDER BY date DESC, id DESC
+        `;
+        res.status(200).json(qfRes.recordset);
+    } catch (err) {
+        console.error("Error fetching Robot Controls QF history:", err);
+        res.status(500).json({ error: "Failed to fetch QF history" });
     }
 };
 
@@ -844,5 +872,6 @@ module.exports = {
     signHOFApproval,
     getRobotControls,
     generateReport,
-    generateDayReport
+    generateDayReport,
+    getRobotControlsQfHistory
 };

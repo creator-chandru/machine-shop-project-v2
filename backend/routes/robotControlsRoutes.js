@@ -8,7 +8,8 @@ const {
     signHOFApproval,
     getRobotControls,
     generateReport,
-    generateDayReport
+    generateDayReport,
+    getRobotControlsQfHistory
 } = require('../controllers/robotControlsController.js');
 
 // 1. Get HOF Users for Dropdown
@@ -27,12 +28,13 @@ router.post('/robot-controls/hof/sign', signHOFApproval);
 router.get('/robot-controls', getRobotControls);
 
 // 6. Report PDF
-//    - Form page     -> fromDate + toDate -> range PDF
-//    - HOF dashboard -> lineCode + date   -> single-day PDF
 router.get('/robot-controls/report', (req, res) =>
     (req.query.fromDate && req.query.toDate)
         ? generateReport(req, res)
         : generateDayReport(req, res)
 );
+
+// 7. QF History Endpoint (same as pre-operation)
+router.get('/robot-controls/qf-history', getRobotControlsQfHistory);
 
 module.exports = router;

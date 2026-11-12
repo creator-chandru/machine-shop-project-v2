@@ -1,7 +1,6 @@
 const sql = require("../db");
 
 // Map each form name to its dedicated SQL table
-// Map each form name to its dedicated SQL table
 const FORM_QF_TABLES = {
   "pre-operation-checklist": "PreOperationQFvalues",
   "error-proofing-checksheet": "ErrorProofingQFvalues",
@@ -21,10 +20,10 @@ const FORM_QF_TABLES = {
   "operator-observation-plan": "OperatorObservationQFvalues",
   "tool-change-record": "ToolChangeRecordQFvalues",
   "lpa-bottom": "LPAQFvalues",
-  "robot-controls": "RobotControlsQFvalues" // <--- ADDED
+  "robot-controls": "RobotControlsQFvalues"
 };
 
-// Forms that extract date from qfValue and store a reason + history
+// Forms that extract date from qfValue and store a reason + history (ALL FORMS ENABLED)
 const REASON_ENABLED_FORMS = [
   "pre-operation-checklist",
   "error-proofing-checksheet",
@@ -44,8 +43,9 @@ const REASON_ENABLED_FORMS = [
   "operator-observation-plan",
   "tool-change-record",
   "lpa-bottom",
-  "robot-controls" // <--- ADDED
+  "robot-controls"
 ];
+
 // Helper to extract date (e.g. "31.01.2025") from qfValue and convert to "YYYY-MM-DD"
 const extractDateFromQfValue = (qfValue) => {
   if (!qfValue) return null;
@@ -85,7 +85,7 @@ const getFormSettings = async (req, res) => {
             date: null,
             reason: ""
           });
-        } 
+        }
       } catch (tableErr) {
         results.push({
           id: null,

@@ -8,7 +8,8 @@ const {
     signApproval,
     getRobotManualTransition,
     generateReport,
-    generateDayReport
+    generateDayReport,
+    getRobotManualQfHistory
 } = require('../controllers/robotManualTransitionController.js');
 
 // 1. Get Approver Users for Dropdown
@@ -34,5 +35,8 @@ router.get('/robot-manual/report', (req, res) =>
         ? generateReport(req, res)
         : generateDayReport(req, res)
 );
+
+// 7. Dynamic QF History endpoint (matching Pre-operation & Robot Controls pattern)
+router.get('/robot-manual/qf-history', getRobotManualQfHistory);
 
 module.exports = router;

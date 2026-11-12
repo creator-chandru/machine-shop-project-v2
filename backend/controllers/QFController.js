@@ -20,7 +20,8 @@ const FORM_QF_TABLES = {
   "operator-observation-plan": "OperatorObservationQFvalues",
   "tool-change-record": "ToolChangeRecordQFvalues",
   "lpa-bottom": "LPAQFvalues",
-  "robot-controls": "RobotControlsQFvalues"
+  "robot-controls": "RobotControlsQFvalues",
+  "robot-manual": "RobotManualQFvalues" 
 };
 
 // Forms that extract date from qfValue and store a reason + history (ALL FORMS ENABLED)
@@ -43,7 +44,8 @@ const REASON_ENABLED_FORMS = [
   "operator-observation-plan",
   "tool-change-record",
   "lpa-bottom",
-  "robot-controls"
+  "robot-controls",
+  "robot-manual"
 ];
 
 // Helper to extract date (e.g. "31.01.2025") from qfValue and convert to "YYYY-MM-DD"

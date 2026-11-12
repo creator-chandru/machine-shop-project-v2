@@ -27,7 +27,7 @@ const formatDateDisplay = (dateVal) => {
     return str;
 };
 
-// Helper to extract clean YYYY-MM-DD for grouping
+// Helper to extract clean YYYY-MM-DD for grouping and reliable comparison
 const getDateISO = (dateVal) => {
     if (!dateVal) return '';
     if (dateVal instanceof Date) {
@@ -52,11 +52,12 @@ const getDateISO = (dateVal) => {
 // Helper to resolve dynamic QF value based on record date
 const fetchQfHistory = async () => {
     try {
-        const res = await sql.query(`
-            SELECT id, formName, qfValue, date 
+        const res = await sql.query`
+            SELECT id, formName, qfValue, date, reason 
             FROM RobotManualQFvalues 
+            WHERE formName = 'robot-manual'
             ORDER BY date DESC, id DESC
-        `);
+        `;
         return res.recordset || [];
     } catch (e) {
         console.error("Warning: Could not fetch RobotManualQFvalues:", e.message);
@@ -64,20 +65,17 @@ const fetchQfHistory = async () => {
     }
 };
 
-const getEffectiveQfValue = (qfHistory, recordDateStr) => {
-    const fallback = "QF/07/MPD-48, Rev.No: 00 dt 24.09.2025";
+const getEffectiveQfValue = (qfHistory, recordDateVal) => {
+    let fallback = "QF/07/MPD-48, Rev.No: 00 dt 24.09.2025";
     if (!qfHistory || qfHistory.length === 0) return fallback;
 
-    if (recordDateStr) {
-        const targetDate = new Date(recordDateStr);
-        targetDate.setHours(0, 0, 0, 0);
+    const targetDateISO = getDateISO(recordDateVal);
 
+    if (targetDateISO) {
         for (let qf of qfHistory) {
             if (!qf.date) continue;
-            const qfDate = new Date(qf.date);
-            qfDate.setHours(0, 0, 0, 0);
-
-            if (qfDate <= targetDate) {
+            const qfDateISO = getDateISO(qf.date);
+            if (qfDateISO && qfDateISO <= targetDateISO) {
                 return qf.qfValue;
             }
         }
@@ -411,7 +409,7 @@ const generateReport = async (req, res) => {
             const headerH = 65;
             const tableHeaderH = 20;
             const sectionH = 18 * 2;
-            const rowsH = 12 * 22; // 6 points for section 1 + 6 points for section 2
+            const rowsH = 12 * 22;
             const signH = 26;
             const notesH = 46;
             const qfH = 20;
@@ -442,7 +440,7 @@ const generateReport = async (req, res) => {
 
             // Title Box
             doc.rect(startX + logoBoxWidth, entryY, titleBoxWidth, headerH).stroke();
-            doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("CHECK LIST FOR ROBOT TO MANUAL AND MANUAL TO ROBOT CNC OPERATION", startX + logoBoxWidth + 5, entryY + 20, { width: titleBoxWidth - 10, align: "center" });
+            doc.font("Helvetica-Bold").fontSize(10.5).fillColor('black').text("CHECK LIST FOR ROBOT TO MANUAL AND MANUAL TO ROBOT CNC OPERATION", startX + logoBoxWidth + 5, entryY + 20, { width: titleBoxWidth - 10, align: "center" });
 
             // Metadata Box
             const metaX = startX + logoBoxWidth + titleBoxWidth;
@@ -550,7 +548,7 @@ const generateReport = async (req, res) => {
 
             currY += noteBoxHeight;
 
-            // 6. Dynamic QF Value Footer
+            // 6. Dynamic QF Value Footer (Always visible cleanly at bottom-left)
             doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
                 .text(effectiveQf, startX, currY + 4, { align: 'left' });
 
@@ -681,8 +679,8 @@ const generateDayReport = async (req, res) => {
         }
 
         doc.rect(startX + logoBoxWidth, currY, titleBoxWidth, headerH).stroke();
-        doc.font("Helvetica-Bold").fontSize(11).fillColor('black').text("CHECK LIST FOR ROBOT TO MANUAL AND MANUAL TO ROBOT CNC OPERATION", startX + logoBoxWidth + 5, entryY => currY + 16, { width: titleBoxWidth - 10, align: "center" });
-        doc.font("Helvetica-Bold").fontSize(8).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, currY + 45, { width: titleBoxWidth, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(10.5).fillColor('black').text("CHECK LIST FOR ROBOT TO MANUAL AND MANUAL TO ROBOT CNC OPERATION", startX + logoBoxWidth + 5, currY + 16, { width: titleBoxWidth - 10, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor('#374151').text(effectiveQf, startX + logoBoxWidth, currY + 45, { width: titleBoxWidth, align: "center" });
 
         const metaX = startX + logoBoxWidth + titleBoxWidth;
         doc.rect(metaX, currY, metaBoxWidth, headerH).stroke();
@@ -694,7 +692,7 @@ const generateDayReport = async (req, res) => {
         doc.font("Helvetica").fontSize(7.5).text(`:   ${first.partName || ''}`, metaX + 65, currY + 19, { width: metaBoxWidth - 70, height: 12, ellipsis: true });
 
         doc.font("Helvetica-Bold").fontSize(8);
-        doc.text("DATE", metaX + 5, currY + 35); doc.text(`:   ${displayDate}`, metaX + 65, entryY => currY + 35);
+        doc.text("DATE", metaX + 5, currY + 35); doc.text(`:   ${displayDate}`, metaX + 65, currY + 35);
         doc.text("SHIFT", metaX + 5, currY + 51); doc.text(`:   ${first.shift || ''}`, metaX + 65, currY + 51);
 
         currY += headerH + 4;
@@ -786,11 +784,34 @@ const generateDayReport = async (req, res) => {
         doc.text("1.  ✓  - good", startX + 6, currY + 18);
         doc.text("2. Verification should be carried out before the start of the first part trail.", startX + 6, currY + 30);
 
+        // Dynamic QF Value Footer for Single Day PDF
+        currY += noteBoxHeight;
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#374151')
+            .text(effectiveQf, startX, currY + 4, { align: 'left' });
+
         doc.end();
     } catch (err) {
         console.error("Robot Manual day PDF generation error:", err);
         if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
         else res.end();
+    }
+};
+
+// ============================================================
+// 8. GET QF HISTORY FOR DYNAMIC FRONTEND DISPLAY
+// ============================================================
+const getRobotManualQfHistory = async (req, res) => {
+    try {
+        const qfRes = await sql.query`
+            SELECT id, formName, qfValue, date, reason 
+            FROM RobotManualQFvalues 
+            WHERE formName = 'robot-manual' 
+            ORDER BY date DESC, id DESC
+        `;
+        res.status(200).json(qfRes.recordset);
+    } catch (err) {
+        console.error("Error fetching Robot Manual QF history:", err);
+        res.status(500).json({ error: "Failed to fetch QF history" });
     }
 };
 
@@ -801,5 +822,6 @@ module.exports = {
     signApproval,
     getRobotManualTransition,
     generateReport,
-    generateDayReport
+    generateDayReport,
+    getRobotManualQfHistory
 };

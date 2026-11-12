@@ -99,15 +99,30 @@ export default function RobotManualTransitionCheckSheet() {
     setTimeout(() => setToast({ message: '', type: '' }), 4000);
   };
 
+ // ✅ FETCH QF HISTORY ON MOUNT
   useEffect(() => {
     const fetchQf = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/qf-values/history/robot-manual-transition`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) setQfHistory(await res.json());
-      } catch (err) {}
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const baseUrl = process.env.REACT_APP_API_URL || "";
+
+        // Direct call to the global QF history endpoint matching FORM_QF_TABLES key "robot-manual"
+        let res = await fetch(`${baseUrl}/api/qf-values/history/robot-manual`, { headers });
+        
+        if (!res.ok) {
+          res = await fetch(`${baseUrl}/api/robot-manual/qf-history`, { headers });
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setQfHistory(data);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load Robot Manual QF history:", err);
+      }
     };
     fetchQf();
   }, []);

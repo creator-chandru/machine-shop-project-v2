@@ -47,7 +47,8 @@ const REASON_ENABLED_FORMS = [
   "operator-observation-plan",
   "tool-change-record",
   "lpa-bottom",
-  "robot-controls"
+  "robot-controls",
+  "robot-manual"
 ];
 
 const Hod = () => {
